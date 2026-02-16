@@ -1,6 +1,7 @@
-# Tatar OCR Dataset Tool (Discovery V1)
+# OCR Benchmark Pipeline (Discovery + Layout Review V1)
 
-Minimal FastAPI + SQLite app for image discovery and duplicate tracking.
+FastAPI + SQLite app for OCR benchmark dataset preparation.
+Current implemented slices are image discovery and first layout-review workflow.
 
 ## Defaults
 
@@ -36,7 +37,7 @@ uvicorn app.main:app --reload
 
 Open `http://127.0.0.1:8000`.
 
-## Notes
+## Implemented So Far
 
 - Deep recursive scan is enabled.
 - One canonical file is indexed per unique file hash.
@@ -44,3 +45,14 @@ Open `http://127.0.0.1:8000`.
 - On backend startup, scan runs automatically.
 - On dashboard load, a scan also runs automatically.
 - Manual scan is available via dashboard button.
+- Dashboard rows link to a layout review screen (`/static/layouts.html?page_id=<id>`).
+- Layout review API supports listing, manual create/edit/delete, detect (placeholder), and review completion.
+
+## Important Note About Detection
+
+`POST /api/pages/{page_id}/layouts/detect` currently uses a placeholder detector that creates one full-page layout block.
+This is temporary scaffolding until `hantian/yolo-doclaynet` integration is added.
+
+## Project Context
+
+Persistent context is tracked in `PROJECT_CONTEXT.md` and should be updated as implementation evolves.

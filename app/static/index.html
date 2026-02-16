@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tatar OCR Dataset Dashboard</title>
+    <style>
+      :root {
+        --bg: #f3f1eb;
+        --surface: #fffdf7;
+        --ink: #1e1f1c;
+        --muted: #63635f;
+        --accent: #0b7a75;
+        --danger: #a52222;
+        --border: #e0dccf;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 100% 0, #d6ebe7 0, transparent 30%),
+          radial-gradient(circle at 0 100%, #f7e3cf 0, transparent 32%),
+          var(--bg);
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
+      h1 {
+        margin: 0;
+        font-weight: 700;
+        font-size: 28px;
+      }
+
+      .subline {
+        color: var(--muted);
+        margin-top: 6px;
+      }
+
+      button {
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: white;
+        font-weight: 600;
+        border-radius: 10px;
+        padding: 10px 16px;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stat {
+        background: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+      }
+
+      .stat .label {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .stat .value {
+        margin-top: 8px;
+        font-size: 26px;
+        font-weight: 700;
+      }
+
+      .danger {
+        border-color: #efcece;
+        background: #fff5f5;
+      }
+
+      .danger strong {
+        color: var(--danger);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .status {
+        border-radius: 999px;
+        display: inline-block;
+        padding: 4px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        background: #ecf0ef;
+      }
+
+      .status.missing {
+        color: var(--danger);
+        background: #fcebec;
+      }
+
+      #last-scan {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 800px) {
+        .header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .stats {
+          grid-template-columns: 1fr;
+        }
+
+        table,
+        thead,
+        tbody,
+        tr,
+        th,
+        td {
+          display: block;
+        }
+
+        thead {
+          display: none;
+        }
+
+        tr {
+          border-bottom: 1px solid var(--border);
+          padding: 10px 0;
+        }
+
+        td {
+          border: 0;
+          padding: 4px 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="header">
+        <div>
+          <h1>OCR Benchmark Pipeline</h1>
+          <div id="source-dir" class="subline"></div>
+        </div>
+        <button id="scan-btn" type="button">Scan Input Folder</button>
+      </section>
+
+      <section class="panel">
+        <div class="stats">
+          <article class="stat">
+            <div class="label">Total Indexed Pages</div>
+            <div id="stat-total" class="value">0</div>
+          </article>
+          <article class="stat">
+            <div class="label">Missing Pages</div>
+            <div id="stat-missing" class="value">0</div>
+          </article>
+          <article class="stat">
+            <div class="label">Active Duplicate Files</div>
+            <div id="stat-duplicates" class="value">0</div>
+          </article>
+        </div>
+        <p id="last-scan"></p>
+      </section>
+
+      <section id="duplicate-panel" class="panel danger" hidden>
+        <strong>Duplicate files were skipped.</strong>
+        <p>
+          This warning stays visible on each app start until duplicate files are removed from
+          the input folder.
+        </p>
+        <div id="duplicate-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Indexed Pages</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Relative Path</th>
+              <th>Status</th>
+              <th>Last Seen</th>
+              <th>Layout Review</th>
+            </tr>
+          </thead>
+          <tbody id="pages-body"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const scanBtn = document.getElementById("scan-btn");
+      const sourceDirEl = document.getElementById("source-dir");
+      const statTotal = document.getElementById("stat-total");
+      const statMissing = document.getElementById("stat-missing");
+      const statDuplicates = document.getElementById("stat-duplicates");
+      const pagesBody = document.getElementById("pages-body");
+      const duplicatePanel = document.getElementById("duplicate-panel");
+      const duplicateList = document.getElementById("duplicate-list");
+      const lastScan = document.getElementById("last-scan");
+
+      async function fetchJson(url, options) {
+        const response = await fetch(url, options);
+        if (!response.ok) {
+          throw new Error(`Request failed: ${response.status}`);
+        }
+        return response.json();
+      }
+
+      function renderPages(pages) {
+        pagesBody.innerHTML = "";
+        for (const page of pages) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${page.id}</td>
+            <td>${page.rel_path}</td>
+            <td>
+              <span class="status ${page.is_missing ? "missing" : ""}">
+                ${page.is_missing ? "missing" : page.status}
+              </span>
+            </td>
+            <td>${new Date(page.last_seen_at).toLocaleString()}</td>
+            <td>
+              ${
+                page.is_missing
+                  ? "<span class=\"subline\">Unavailable</span>"
+                  : `<a href="/static/layouts.html?page_id=${page.id}">Open</a>`
+              }
+            </td>
+          `;
+          pagesBody.appendChild(tr);
+        }
+      }
+
+      function renderDuplicates(duplicates) {
+        statDuplicates.textContent = duplicates.length;
+
+        if (duplicates.length === 0) {
+          duplicatePanel.hidden = true;
+          duplicateList.innerHTML = "";
+          return;
+        }
+
+        duplicatePanel.hidden = false;
+
+        const ul = document.createElement("ul");
+        for (const duplicate of duplicates) {
+          const li = document.createElement("li");
+          li.textContent = `${duplicate.duplicate_rel_path} (kept: ${duplicate.canonical_rel_path})`;
+          ul.appendChild(li);
+        }
+
+        duplicateList.innerHTML = "";
+        duplicateList.appendChild(ul);
+      }
+
+      async function reloadDashboard() {
+        const [pagesPayload, duplicatesPayload, statsPayload] = await Promise.all([
+          fetchJson("/api/pages"),
+          fetchJson("/api/duplicates"),
+          fetchJson("/api/stats"),
+        ]);
+
+        sourceDirEl.textContent =
+          `Source folder: ${pagesPayload.source_dir} | Formats: ${pagesPayload.allowed_extensions.join(", ")}`;
+        statTotal.textContent = statsPayload.total_pages;
+        statMissing.textContent = statsPayload.missing_pages;
+
+        renderPages(pagesPayload.pages);
+        renderDuplicates(duplicatesPayload.duplicates);
+      }
+
+      async function runScan({ silent = false } = {}) {
+        scanBtn.disabled = true;
+        if (!silent) {
+          lastScan.textContent = "Scanning source folder...";
+        }
+        try {
+          const scan = await fetchJson("/api/discovery/scan", { method: "POST" });
+          lastScan.textContent =
+            `Scan finished. Scanned: ${scan.scanned_files}, new: ${scan.new_pages}, updated: ${scan.updated_pages}, ` +
+            `missing marked: ${scan.missing_marked}, duplicates: ${scan.duplicate_files}`;
+          await reloadDashboard();
+        } catch (error) {
+          lastScan.textContent = `Scan failed: ${error.message}`;
+        } finally {
+          scanBtn.disabled = false;
+        }
+      }
+
+      scanBtn.addEventListener("click", runScan);
+
+      runScan({ silent: true }).catch((error) => {
+        lastScan.textContent = `Failed to scan dashboard on startup: ${error.message}`;
+      });
+    </script>
+  </body>
+</html>

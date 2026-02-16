@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Layout Review</title>
+    <style>
+      :root {
+        --bg: #f3f1eb;
+        --surface: #fffdf7;
+        --ink: #1e1f1c;
+        --muted: #63635f;
+        --accent: #0b7a75;
+        --danger: #a52222;
+        --border: #e0dccf;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 100% 0, #d6ebe7 0, transparent 30%),
+          radial-gradient(circle at 0 100%, #f7e3cf 0, transparent 32%),
+          var(--bg);
+      }
+
+      main {
+        max-width: 1320px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 26px;
+      }
+
+      .subline {
+        color: var(--muted);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button,
+      a.button-link {
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      button.secondary {
+        background: #fff;
+        color: var(--accent);
+      }
+
+      a.button-link.secondary {
+        background: #fff;
+        color: var(--accent);
+      }
+
+      button.danger {
+        border-color: var(--danger);
+        background: var(--danger);
+      }
+
+      .grid {
+        margin-top: 16px;
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+        gap: 16px;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .image-wrap {
+        position: relative;
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        background: #f7f5ef;
+      }
+
+      #page-image {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+
+      #overlay {
+        position: absolute;
+        inset: 0;
+      }
+
+      .box {
+        position: absolute;
+        border: 2px solid #0b7a75;
+        background: rgba(11, 122, 117, 0.12);
+        border-radius: 4px;
+      }
+
+      .box-label {
+        position: absolute;
+        top: -20px;
+        left: 0;
+        font-size: 12px;
+        background: #0b7a75;
+        color: #fff;
+        border-radius: 6px;
+        padding: 2px 6px;
+        white-space: nowrap;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        padding: 8px 6px;
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      input {
+        width: 100%;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+      }
+
+      .status-line {
+        margin-top: 8px;
+        color: var(--muted);
+      }
+
+      .error {
+        color: var(--danger);
+      }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="header">
+        <div>
+          <h1>Layout Review</h1>
+          <div id="page-meta" class="subline"></div>
+        </div>
+        <div class="actions">
+          <a class="button-link secondary" href="/">Back to Dashboard</a>
+          <button id="detect-btn" type="button">Redetect Layouts</button>
+          <button id="add-btn" class="secondary" type="button">Add Box</button>
+          <button id="review-btn" type="button">Mark Reviewed</button>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="image-wrap">
+            <img id="page-image" alt="Page for layout review" />
+            <div id="overlay"></div>
+          </div>
+          <div id="status-line" class="status-line"></div>
+        </article>
+
+        <article class="panel">
+          <h2>Layouts</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Class</th>
+                <th>Order</th>
+                <th>BBox (0-1)</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="layouts-body"></tbody>
+          </table>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const pageId = Number(params.get("page_id"));
+
+      const pageMeta = document.getElementById("page-meta");
+      const pageImage = document.getElementById("page-image");
+      const overlay = document.getElementById("overlay");
+      const statusLine = document.getElementById("status-line");
+      const layoutsBody = document.getElementById("layouts-body");
+
+      const detectBtn = document.getElementById("detect-btn");
+      const addBtn = document.getElementById("add-btn");
+      const reviewBtn = document.getElementById("review-btn");
+
+      const state = {
+        page: null,
+        layouts: [],
+      };
+
+      function setStatus(message, { isError = false } = {}) {
+        statusLine.textContent = message;
+        statusLine.classList.toggle("error", isError);
+      }
+
+      async function fetchJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = payload && payload.detail ? payload.detail : `Request failed: ${response.status}`;
+          throw new Error(detail);
+        }
+        return payload;
+      }
+
+      function toFixed(value) {
+        return Number(value).toFixed(4);
+      }
+
+      function boxStyle(layout) {
+        const { x1, y1, x2, y2 } = layout.bbox;
+        return {
+          left: `${x1 * 100}%`,
+          top: `${y1 * 100}%`,
+          width: `${(x2 - x1) * 100}%`,
+          height: `${(y2 - y1) * 100}%`,
+        };
+      }
+
+      function renderOverlay() {
+        overlay.innerHTML = "";
+        for (const layout of state.layouts) {
+          const box = document.createElement("div");
+          box.className = "box";
+          const style = boxStyle(layout);
+          box.style.left = style.left;
+          box.style.top = style.top;
+          box.style.width = style.width;
+          box.style.height = style.height;
+
+          const label = document.createElement("div");
+          label.className = "box-label";
+          label.textContent = `${layout.reading_order}. ${layout.class_name}`;
+          box.appendChild(label);
+          overlay.appendChild(box);
+        }
+      }
+
+      function layoutRow(layout) {
+        const tr = document.createElement("tr");
+
+        const idTd = document.createElement("td");
+        idTd.textContent = String(layout.id);
+        tr.appendChild(idTd);
+
+        const classTd = document.createElement("td");
+        const classInput = document.createElement("input");
+        classInput.value = layout.class_name;
+        classTd.appendChild(classInput);
+        tr.appendChild(classTd);
+
+        const orderTd = document.createElement("td");
+        const orderInput = document.createElement("input");
+        orderInput.type = "number";
+        orderInput.min = "1";
+        orderInput.step = "1";
+        orderInput.value = String(layout.reading_order);
+        orderTd.appendChild(orderInput);
+        tr.appendChild(orderTd);
+
+        const bboxTd = document.createElement("td");
+        const bboxFields = ["x1", "y1", "x2", "y2"].map((key) => {
+          const input = document.createElement("input");
+          input.type = "number";
+          input.min = "0";
+          input.max = "1";
+          input.step = "0.0001";
+          input.value = toFixed(layout.bbox[key]);
+          return [key, input];
+        });
+        for (const [, input] of bboxFields) {
+          bboxTd.appendChild(input);
+        }
+        tr.appendChild(bboxTd);
+
+        const actionsTd = document.createElement("td");
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "secondary";
+        saveBtn.type = "button";
+        saveBtn.textContent = "Save";
+        saveBtn.addEventListener("click", async () => {
+          try {
+            await fetchJson(`/api/layouts/${layout.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                class_name: classInput.value.trim(),
+                reading_order: Number(orderInput.value),
+                bbox: {
+                  x1: Number(bboxFields[0][1].value),
+                  y1: Number(bboxFields[1][1].value),
+                  x2: Number(bboxFields[2][1].value),
+                  y2: Number(bboxFields[3][1].value),
+                },
+              }),
+            });
+            setStatus(`Layout ${layout.id} updated.`);
+            await loadLayouts();
+          } catch (error) {
+            setStatus(`Update failed: ${error.message}`, { isError: true });
+          }
+        });
+        actionsTd.appendChild(saveBtn);
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.className = "danger";
+        deleteBtn.type = "button";
+        deleteBtn.textContent = "Delete";
+        deleteBtn.addEventListener("click", async () => {
+          try {
+            await fetchJson(`/api/layouts/${layout.id}`, { method: "DELETE" });
+            setStatus(`Layout ${layout.id} deleted.`);
+            await loadLayouts();
+          } catch (error) {
+            setStatus(`Delete failed: ${error.message}`, { isError: true });
+          }
+        });
+        actionsTd.appendChild(deleteBtn);
+
+        tr.appendChild(actionsTd);
+        return tr;
+      }
+
+      function renderLayouts() {
+        layoutsBody.innerHTML = "";
+        for (const layout of state.layouts) {
+          layoutsBody.appendChild(layoutRow(layout));
+        }
+        renderOverlay();
+      }
+
+      async function loadPage() {
+        const payload = await fetchJson(`/api/pages/${pageId}`);
+        state.page = payload.page;
+        pageMeta.textContent = `Page #${state.page.id} | ${state.page.rel_path} | status: ${state.page.status}`;
+        pageImage.src = payload.image_url;
+      }
+
+      async function loadLayouts() {
+        const payload = await fetchJson(`/api/pages/${pageId}/layouts`);
+        state.layouts = payload.layouts;
+        renderLayouts();
+      }
+
+      async function detectLayouts() {
+        detectBtn.disabled = true;
+        try {
+          const payload = await fetchJson(`/api/pages/${pageId}/layouts/detect`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ replace_existing: true }),
+          });
+          setStatus(`Redetect finished. ${payload.note}`);
+          await loadPage();
+          await loadLayouts();
+        } catch (error) {
+          setStatus(`Redetect failed: ${error.message}`, { isError: true });
+        } finally {
+          detectBtn.disabled = false;
+        }
+      }
+
+      async function addLayout() {
+        addBtn.disabled = true;
+        try {
+          await fetchJson(`/api/pages/${pageId}/layouts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              class_name: "text_block",
+              reading_order: null,
+              bbox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.2 },
+            }),
+          });
+          setStatus("Manual layout added.");
+          await loadPage();
+          await loadLayouts();
+        } catch (error) {
+          setStatus(`Add failed: ${error.message}`, { isError: true });
+        } finally {
+          addBtn.disabled = false;
+        }
+      }
+
+      async function markReviewed() {
+        reviewBtn.disabled = true;
+        try {
+          const payload = await fetchJson(`/api/pages/${pageId}/layouts/review-complete`, {
+            method: "POST",
+          });
+          setStatus(`Page marked reviewed with ${payload.layout_count} layouts.`);
+          await loadPage();
+          await loadLayouts();
+        } catch (error) {
+          setStatus(`Mark reviewed failed: ${error.message}`, { isError: true });
+        } finally {
+          reviewBtn.disabled = false;
+        }
+      }
+
+      detectBtn.addEventListener("click", detectLayouts);
+      addBtn.addEventListener("click", addLayout);
+      reviewBtn.addEventListener("click", markReviewed);
+
+      async function init() {
+        if (!Number.isInteger(pageId) || pageId <= 0) {
+          setStatus("Missing or invalid page_id query parameter.", { isError: true });
+          return;
+        }
+        try {
+          await loadPage();
+          await loadLayouts();
+          setStatus("Ready.");
+        } catch (error) {
+          setStatus(`Load failed: ${error.message}`, { isError: true });
+        }
+      }
+
+      init();
+    </script>
+  </body>
+</html>
