@@ -76,6 +76,11 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - mark-layout-review-complete endpoint
   - `layouts.html` page to view/edit layouts
   - redetect thresholds (confidence/IoU) editable in UI
+  - layout row edits are stored as local drafts (persisted across refresh)
+  - local drafts are applied to backend only when reviewer clicks `Mark Reviewed`
+  - per-row restore button (`↺`) reverts class/order/bbox to backend baseline
+  - per-row delete uses trash icon button
+  - layout ID column hidden in review table UI
   - page-level `Review` button to jump to the next pending review page
   - stage sidebar removed from layout review page for a consistent no-bar UX
 
@@ -122,6 +127,36 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-19:
+  - Layout review bbox spinner step adjusted to `0.001` (arrow up/down increments by thousandths).
+  - Layout review draft workflow updated:
+    - class/order/bbox edits now persist in browser local storage per page
+    - backend updates are deferred until `Mark Reviewed` (PATCH/DELETE batch before review-complete)
+    - restore icon updated to conventional `↺` and now reliably reverts class/order/bbox to server baseline
+  - Tightened spacing between bbox coordinate labels and inputs for denser row layout.
+  - Layout review `Class` column width aligned to longest expected class label (`Section Header`) for stable table sizing.
+  - Layout review actions column updated:
+    - restore/delete icon buttons are stacked vertically
+    - each action button is square-sized to match the `Actions` column width
+  - BBox editor precision constrained to 4 decimal places, with narrower bbox input width for compact editing.
+  - Layout review bbox editor UI updated:
+    - renamed table column from `BBox (0-1)` to `BBox`
+    - bbox controls are now stacked vertically with coordinate labels (`x1`, `y1`, `x2`, `y2`)
+  - Layout review `Order` column width tightened to header-sized width for compact numeric editing.
+  - Removed class color legend block from layout review panel UI.
+    - bbox overlays remain color-coded by class
+  - Refined layout-review table column sizing:
+    - compact fixed-width `Order` input column
+    - compact 2x2 grid sizing for bbox inputs
+    - right panel now tracks actual control widths more tightly
+  - Layout review split-panel sizing updated:
+    - right `Layouts` panel now uses fit-content sizing and no longer stretches excessively wide
+    - mobile fallback remains single-column
+  - Dashboard and layout review pages now use full-width viewport layout (removed fixed max-width container).
+  - Layout review table UX updated:
+    - removed layout `ID` column from UI
+    - removed `Save` button in favor of local drafts
+    - added restore button (`↺`)
+    - delete action kept and switched to trash icon button
   - `Discovery scan finished` log messages now include full scan counters and totals:
     - scanned/new/updated/missing-marked/duplicates
     - total indexed/missing/active-duplicates

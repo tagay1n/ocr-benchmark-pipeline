@@ -13,6 +13,8 @@
         --accent: #0b7a75;
         --danger: #a52222;
         --border: #e0dccf;
+        --actions-col-size: 7ch;
+        --class-col-size: 16ch;
       }
 
       * {
@@ -30,9 +32,7 @@
       }
 
       main {
-        max-width: 1360px;
         width: 100%;
-        margin: 0 auto;
         padding: 24px;
       }
 
@@ -104,11 +104,32 @@
         background: var(--danger);
       }
 
+      .row-actions {
+        display: inline-flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+        width: 100%;
+      }
+
+      .icon-btn {
+        width: 100%;
+        min-width: 0;
+        height: var(--actions-col-size);
+        padding: 0;
+        line-height: 1;
+        font-size: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
       .grid {
         margin-top: 16px;
         display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+        grid-template-columns: minmax(0, 1fr) fit-content(100%);
         gap: 16px;
+        align-items: start;
       }
 
       .panel {
@@ -116,6 +137,67 @@
         border: 1px solid var(--border);
         border-radius: 14px;
         padding: 14px;
+      }
+
+      .layouts-panel {
+        width: fit-content;
+        max-width: 100%;
+      }
+
+      .layouts-panel table {
+        width: auto;
+      }
+
+      .layouts-panel th,
+      .layouts-panel td {
+        white-space: nowrap;
+      }
+
+      .layout-class-select {
+        width: 100%;
+      }
+
+      .layout-class-col {
+        width: var(--class-col-size);
+        min-width: var(--class-col-size);
+      }
+
+      .layout-order-col {
+        width: 5ch;
+      }
+
+      .layout-actions-col {
+        width: var(--actions-col-size);
+        min-width: var(--actions-col-size);
+      }
+
+      .layout-order-input {
+        width: 100%;
+        min-width: 0;
+        padding: 4px;
+        text-align: right;
+      }
+
+      .layout-bbox-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .bbox-field {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+
+      .bbox-label {
+        min-width: 18px;
+      }
+
+      .layout-bbox-input {
+        width: 76px;
       }
 
       .image-wrap {
@@ -196,48 +278,6 @@
         color: var(--muted);
       }
 
-      .legend {
-        margin-bottom: 12px;
-        padding: 10px;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        background: #fff;
-      }
-
-      .legend-title {
-        margin: 0 0 8px;
-        font-size: 13px;
-        color: var(--muted);
-        font-weight: 700;
-      }
-
-      .legend-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 6px 10px;
-      }
-
-      .legend-item {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        font-size: 12px;
-      }
-
-      .legend-swatch {
-        width: 14px;
-        height: 14px;
-        border-radius: 3px;
-        border: 1px solid rgba(0, 0, 0, 0.25);
-        flex: 0 0 auto;
-      }
-
-      .legend-note {
-        margin: 8px 0 0;
-        color: var(--muted);
-        font-size: 11px;
-      }
-
       .error {
         color: var(--danger);
       }
@@ -284,23 +324,17 @@
           <div id="status-line" class="status-line"></div>
         </article>
 
-        <article class="panel">
+        <article class="panel layouts-panel">
           <h2>Layouts</h2>
-          <div id="legend" class="legend">
-            <p class="legend-title">Class Colors</p>
-            <div id="legend-grid" class="legend-grid"></div>
-            <p class="legend-note">Unknown classes are assigned deterministic fallback colors.</p>
-          </div>
           <table>
             <thead>
-              <tr>
-                <th>ID</th>
-                <th>Class</th>
-                <th>Order</th>
-                <th>BBox (0-1)</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
+                <tr>
+                  <th class="layout-class-col">Class</th>
+                  <th class="layout-order-col">Order</th>
+                  <th>BBox</th>
+                  <th class="layout-actions-col">Actions</th>
+                </tr>
+              </thead>
             <tbody id="layouts-body"></tbody>
           </table>
         </article>
@@ -313,6 +347,7 @@
       const STORAGE_KEYS = {
         detectConf: "layout.detect_conf",
         detectIou: "layout.detect_iou",
+        layoutDraftPrefix: "layout.draft.page",
       };
 
       function readStorage(key) {
@@ -331,12 +366,19 @@
         }
       }
 
+      function removeStorage(key) {
+        try {
+          window.localStorage.removeItem(key);
+        } catch {
+          // Ignore storage errors (private mode / quota / disabled storage).
+        }
+      }
+
       const pageMeta = document.getElementById("page-meta");
       const pageImage = document.getElementById("page-image");
       const overlay = document.getElementById("overlay");
       const statusLine = document.getElementById("status-line");
       const layoutsBody = document.getElementById("layouts-body");
-      const legendGrid = document.getElementById("legend-grid");
 
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
@@ -348,6 +390,9 @@
       const state = {
         page: null,
         layouts: [],
+        serverLayoutsById: {},
+        localEditsById: {},
+        deletedLayoutIds: new Set(),
       };
 
       function applyStoredDetectThresholds() {
@@ -366,6 +411,133 @@
             detectIouInput.value = storedIou;
           }
         }
+      }
+
+      function draftStorageKey() {
+        return `${STORAGE_KEYS.layoutDraftPrefix}:${pageId}`;
+      }
+
+      function toDraftShape(layout) {
+        return {
+          class_name: normalizeClassName(layout.class_name) || "text",
+          reading_order: layout.reading_order === null ? null : Number(layout.reading_order),
+          bbox: {
+            x1: roundTo4(layout.bbox.x1),
+            y1: roundTo4(layout.bbox.y1),
+            x2: roundTo4(layout.bbox.x2),
+            y2: roundTo4(layout.bbox.y2),
+          },
+        };
+      }
+
+      function sameDraft(a, b) {
+        return (
+          a.class_name === b.class_name &&
+          a.reading_order === b.reading_order &&
+          a.bbox.x1 === b.bbox.x1 &&
+          a.bbox.y1 === b.bbox.y1 &&
+          a.bbox.x2 === b.bbox.x2 &&
+          a.bbox.y2 === b.bbox.y2
+        );
+      }
+
+      function parseStoredDraft(rawDraft) {
+        if (!rawDraft || typeof rawDraft !== "object") {
+          return null;
+        }
+
+        const className = normalizeClassName(rawDraft.class_name);
+        if (!className) {
+          return null;
+        }
+
+        const readingOrderRaw = rawDraft.reading_order;
+        let readingOrder = null;
+        if (readingOrderRaw !== null) {
+          const parsed = Number(readingOrderRaw);
+          if (!Number.isInteger(parsed) || parsed < 1) {
+            return null;
+          }
+          readingOrder = parsed;
+        }
+
+        const bbox = rawDraft.bbox;
+        if (!bbox || typeof bbox !== "object") {
+          return null;
+        }
+
+        const x1 = roundTo4(bbox.x1);
+        const y1 = roundTo4(bbox.y1);
+        const x2 = roundTo4(bbox.x2);
+        const y2 = roundTo4(bbox.y2);
+        if ([x1, y1, x2, y2].some((value) => Number.isNaN(value) || value < 0 || value > 1)) {
+          return null;
+        }
+
+        return {
+          class_name: className,
+          reading_order: readingOrder,
+          bbox: { x1, y1, x2, y2 },
+        };
+      }
+
+      function loadLayoutDraftState() {
+        state.localEditsById = {};
+        state.deletedLayoutIds = new Set();
+
+        const raw = readStorage(draftStorageKey());
+        if (!raw) {
+          return;
+        }
+
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (!parsed || typeof parsed !== "object") {
+          return;
+        }
+
+        const edits = parsed.edits;
+        if (edits && typeof edits === "object") {
+          for (const [key, value] of Object.entries(edits)) {
+            const id = Number(key);
+            if (!Number.isInteger(id) || id <= 0) {
+              continue;
+            }
+            const draft = parseStoredDraft(value);
+            if (!draft) {
+              continue;
+            }
+            state.localEditsById[String(id)] = draft;
+          }
+        }
+
+        if (Array.isArray(parsed.deleted_ids)) {
+          for (const rawId of parsed.deleted_ids) {
+            const id = Number(rawId);
+            if (Number.isInteger(id) && id > 0) {
+              state.deletedLayoutIds.add(id);
+              delete state.localEditsById[String(id)];
+            }
+          }
+        }
+      }
+
+      function persistLayoutDraftState() {
+        const payload = {
+          edits: state.localEditsById,
+          deleted_ids: Array.from(state.deletedLayoutIds).sort((a, b) => a - b),
+        };
+        writeStorage(draftStorageKey(), JSON.stringify(payload));
+      }
+
+      function clearLayoutDraftState() {
+        state.localEditsById = {};
+        state.deletedLayoutIds = new Set();
+        removeStorage(draftStorageKey());
       }
 
       const CLASS_COLORS = {
@@ -445,6 +617,10 @@
         return Number(value).toFixed(4);
       }
 
+      function roundTo4(value) {
+        return Math.round(Number(value) * 10000) / 10000;
+      }
+
       function boxStyle(layout) {
         const { x1, y1, x2, y2 } = layout.bbox;
         return {
@@ -517,125 +693,198 @@
         select.style.color = color;
       }
 
-      function renderLegend() {
-        const seen = new Set(Object.keys(CLASS_COLORS));
-        for (const layout of state.layouts) {
-          const normalized = String(layout.class_name || "")
-            .trim()
-            .toLowerCase()
-            .replace(/[-/\s]+/g, "_");
-          if (normalized) {
-            seen.add(normalized);
-          }
-        }
-
-        const classes = Array.from(seen).sort();
-        legendGrid.innerHTML = "";
-
-        for (const className of classes) {
-          const color = colorForClass(className);
-          const item = document.createElement("div");
-          item.className = "legend-item";
-
-          const swatch = document.createElement("span");
-          swatch.className = "legend-swatch";
-          swatch.style.background = hexToRgba(color, 0.22);
-          swatch.style.borderColor = hexToRgba(color, 0.7);
-
-          const label = document.createElement("span");
-          label.textContent = formatClassLabel(className);
-          label.style.color = color;
-
-          item.appendChild(swatch);
-          item.appendChild(label);
-          legendGrid.appendChild(item);
-        }
-      }
-
       function layoutRow(layout) {
         const tr = document.createElement("tr");
-
-        const idTd = document.createElement("td");
-        idTd.textContent = String(layout.id);
-        tr.appendChild(idTd);
+        const layoutId = Number(layout.id);
+        const serverLayout = state.serverLayoutsById[String(layoutId)];
+        const serverBaseline = serverLayout ? toDraftShape(serverLayout) : toDraftShape(layout);
 
         const classTd = document.createElement("td");
+        classTd.className = "layout-class-col";
         const classInput = buildClassSelect(layout.class_name);
+        classInput.classList.add("layout-class-select");
         applyClassColorToSelect(classInput, layout.class_name);
-        classInput.addEventListener("change", () => {
-          applyClassColorToSelect(classInput, classInput.value);
-        });
         classTd.appendChild(classInput);
         tr.appendChild(classTd);
 
         const orderTd = document.createElement("td");
+        orderTd.className = "layout-order-col";
         const orderInput = document.createElement("input");
         orderInput.type = "number";
         orderInput.min = "1";
         orderInput.step = "1";
-        orderInput.value = String(layout.reading_order);
+        orderInput.className = "layout-order-input";
+        orderInput.value = layout.reading_order === null ? "" : String(layout.reading_order);
         orderTd.appendChild(orderInput);
         tr.appendChild(orderTd);
 
         const bboxTd = document.createElement("td");
-        const bboxFields = ["x1", "y1", "x2", "y2"].map((key) => {
+        bboxTd.className = "layout-bbox-cell";
+        const bboxSpec = [
+          ["x1", "x1"],
+          ["y1", "y1"],
+          ["x2", "x2"],
+          ["y2", "y2"],
+        ];
+        const bboxFields = bboxSpec.map(([key, labelText]) => {
           const input = document.createElement("input");
           input.type = "number";
           input.min = "0";
           input.max = "1";
-          input.step = "0.0001";
+          input.step = "0.001";
+          input.className = "layout-bbox-input";
           input.value = toFixed(layout.bbox[key]);
-          return [key, input];
+          const field = document.createElement("label");
+          field.className = "bbox-field";
+          const label = document.createElement("span");
+          label.className = "bbox-label";
+          label.textContent = labelText;
+          field.appendChild(label);
+          field.appendChild(input);
+          return [key, input, field];
         });
-        for (const [, input] of bboxFields) {
-          bboxTd.appendChild(input);
+        for (const [, , field] of bboxFields) {
+          bboxTd.appendChild(field);
         }
         tr.appendChild(bboxTd);
 
-        const actionsTd = document.createElement("td");
-        const saveBtn = document.createElement("button");
-        saveBtn.className = "secondary";
-        saveBtn.type = "button";
-        saveBtn.textContent = "Save";
-        saveBtn.addEventListener("click", async () => {
-          try {
-            await fetchJson(`/api/layouts/${layout.id}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                class_name: classInput.value,
-                reading_order: Number(orderInput.value),
-                bbox: {
-                  x1: Number(bboxFields[0][1].value),
-                  y1: Number(bboxFields[1][1].value),
-                  x2: Number(bboxFields[2][1].value),
-                  y2: Number(bboxFields[3][1].value),
-                },
-              }),
-            });
-            setStatus(`Layout ${layout.id} updated.`);
-            await loadLayouts();
-          } catch (error) {
-            setStatus(`Update failed: ${error.message}`, { isError: true });
+        function applyDraftToInputs(draft) {
+          classInput.value = draft.class_name;
+          applyClassColorToSelect(classInput, draft.class_name);
+          orderInput.value = draft.reading_order === null ? "" : String(draft.reading_order);
+          bboxFields[0][1].value = toFixed(draft.bbox.x1);
+          bboxFields[1][1].value = toFixed(draft.bbox.y1);
+          bboxFields[2][1].value = toFixed(draft.bbox.x2);
+          bboxFields[3][1].value = toFixed(draft.bbox.y2);
+        }
+
+        function parseReadingOrder(rawValue) {
+          const raw = String(rawValue).trim();
+          if (raw === "") {
+            return null;
           }
+          const value = Number(raw);
+          if (!Number.isInteger(value) || value < 1) {
+            throw new Error("Reading order must be an integer >= 1.");
+          }
+          return value;
+        }
+
+        function parseBoundedNumber(rawValue) {
+          const value = roundTo4(rawValue);
+          if (Number.isNaN(value) || value < 0 || value > 1) {
+            throw new Error("BBox values must be between 0 and 1.");
+          }
+          return value;
+        }
+
+        function payloadFromInputs() {
+          const className = normalizeClassName(classInput.value) || "text";
+          return {
+            class_name: className,
+            reading_order: parseReadingOrder(orderInput.value),
+            bbox: {
+              x1: parseBoundedNumber(bboxFields[0][1].value),
+              y1: parseBoundedNumber(bboxFields[1][1].value),
+              x2: parseBoundedNumber(bboxFields[2][1].value),
+              y2: parseBoundedNumber(bboxFields[3][1].value),
+            },
+          };
+        }
+
+        function replaceLayoutInState(updatedLayout) {
+          const idx = state.layouts.findIndex((row) => row.id === updatedLayout.id);
+          if (idx >= 0) {
+            state.layouts[idx] = updatedLayout;
+            renderOverlay();
+          }
+        }
+
+        function applyDraftToState(draft) {
+          replaceLayoutInState({
+            ...layout,
+            id: layoutId,
+            class_name: draft.class_name,
+            reading_order: draft.reading_order,
+            bbox: { ...draft.bbox },
+          });
+        }
+
+        function saveLocalDraft() {
+          let draft;
+          try {
+            draft = payloadFromInputs();
+          } catch (error) {
+            setStatus(`Draft not saved: ${error.message}`, { isError: true });
+            return;
+          }
+
+          applyDraftToState(draft);
+          if (sameDraft(draft, serverBaseline)) {
+            delete state.localEditsById[String(layoutId)];
+            state.deletedLayoutIds.delete(layoutId);
+            setStatus("Draft cleared (matches original).");
+          } else {
+            state.localEditsById[String(layoutId)] = draft;
+            state.deletedLayoutIds.delete(layoutId);
+            setStatus("Draft saved locally.");
+          }
+          persistLayoutDraftState();
+        }
+
+        classInput.addEventListener("change", () => {
+          applyClassColorToSelect(classInput, classInput.value);
+          saveLocalDraft();
         });
-        actionsTd.appendChild(saveBtn);
+        orderInput.addEventListener("change", saveLocalDraft);
+        for (const [, input] of bboxFields) {
+          input.addEventListener("change", () => {
+            const parsed = Number(input.value);
+            if (!Number.isNaN(parsed)) {
+              input.value = toFixed(roundTo4(parsed));
+            }
+            saveLocalDraft();
+          });
+        }
+
+        const actionsTd = document.createElement("td");
+        actionsTd.className = "layout-actions-col";
+        const actionsWrap = document.createElement("div");
+        actionsWrap.className = "row-actions";
+
+        const restoreBtn = document.createElement("button");
+        restoreBtn.className = "secondary icon-btn";
+        restoreBtn.type = "button";
+        restoreBtn.title = "Restore values";
+        restoreBtn.setAttribute("aria-label", "Restore values");
+        restoreBtn.textContent = "↺";
+        restoreBtn.addEventListener("click", () => {
+          applyDraftToInputs(serverBaseline);
+          applyDraftToState(serverBaseline);
+          delete state.localEditsById[String(layoutId)];
+          state.deletedLayoutIds.delete(layoutId);
+          persistLayoutDraftState();
+          setStatus("Layout values restored.");
+        });
+        actionsWrap.appendChild(restoreBtn);
 
         const deleteBtn = document.createElement("button");
-        deleteBtn.className = "danger";
+        deleteBtn.className = "danger icon-btn";
         deleteBtn.type = "button";
-        deleteBtn.textContent = "Delete";
-        deleteBtn.addEventListener("click", async () => {
-          try {
-            await fetchJson(`/api/layouts/${layout.id}`, { method: "DELETE" });
-            setStatus(`Layout ${layout.id} deleted.`);
-            await loadLayouts();
-          } catch (error) {
-            setStatus(`Delete failed: ${error.message}`, { isError: true });
-          }
+        deleteBtn.title = "Delete layout";
+        deleteBtn.setAttribute("aria-label", "Delete layout");
+        deleteBtn.textContent = "🗑";
+        deleteBtn.addEventListener("click", () => {
+          state.deletedLayoutIds.add(layoutId);
+          delete state.localEditsById[String(layoutId)];
+          persistLayoutDraftState();
+          state.layouts = state.layouts.filter((row) => Number(row.id) !== layoutId);
+          renderLayouts();
+          setStatus("Layout marked for deletion. It will be deleted after review.");
         });
-        actionsTd.appendChild(deleteBtn);
+        actionsWrap.appendChild(deleteBtn);
 
+        actionsTd.appendChild(actionsWrap);
         tr.appendChild(actionsTd);
         return tr;
       }
@@ -646,7 +895,6 @@
           layoutsBody.appendChild(layoutRow(layout));
         }
         renderOverlay();
-        renderLegend();
       }
 
       async function loadPage() {
@@ -658,7 +906,44 @@
 
       async function loadLayouts() {
         const payload = await fetchJson(`/api/pages/${pageId}/layouts`);
-        state.layouts = payload.layouts;
+        state.serverLayoutsById = {};
+        for (const layout of payload.layouts) {
+          state.serverLayoutsById[String(layout.id)] = layout;
+        }
+
+        const mergedLayouts = [];
+        for (const layout of payload.layouts) {
+          const layoutId = Number(layout.id);
+          if (state.deletedLayoutIds.has(layoutId)) {
+            continue;
+          }
+
+          const draft = state.localEditsById[String(layoutId)];
+          if (!draft) {
+            mergedLayouts.push(layout);
+            continue;
+          }
+          mergedLayouts.push({
+            ...layout,
+            class_name: draft.class_name,
+            reading_order: draft.reading_order,
+            bbox: { ...draft.bbox },
+          });
+        }
+
+        for (const key of Object.keys(state.localEditsById)) {
+          if (!(key in state.serverLayoutsById)) {
+            delete state.localEditsById[key];
+          }
+        }
+        for (const layoutId of Array.from(state.deletedLayoutIds)) {
+          if (!(String(layoutId) in state.serverLayoutsById)) {
+            state.deletedLayoutIds.delete(layoutId);
+          }
+        }
+
+        state.layouts = mergedLayouts;
+        persistLayoutDraftState();
         renderLayouts();
       }
 
@@ -702,6 +987,7 @@
               iou_threshold: iou,
             }),
           });
+          clearLayoutDraftState();
           setStatus(
             `Redetect finished. Created ${payload.created} layouts. Conf=${payload.thresholds.confidence_threshold}, IoU=${payload.thresholds.iou_threshold}.`,
           );
@@ -741,10 +1027,33 @@
       async function markReviewed() {
         reviewBtn.disabled = true;
         try {
+          const deletedIds = Array.from(state.deletedLayoutIds).sort((a, b) => a - b);
+          const editedEntries = Object.entries(state.localEditsById).sort(
+            ([a], [b]) => Number(a) - Number(b),
+          );
+
+          for (const layoutId of deletedIds) {
+            await fetchJson(`/api/layouts/${layoutId}`, { method: "DELETE" });
+          }
+
+          for (const [layoutId, draft] of editedEntries) {
+            if (state.deletedLayoutIds.has(Number(layoutId))) {
+              continue;
+            }
+            await fetchJson(`/api/layouts/${layoutId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(draft),
+            });
+          }
+
           const payload = await fetchJson(`/api/pages/${pageId}/layouts/review-complete`, {
             method: "POST",
           });
-          setStatus(`Page marked reviewed with ${payload.layout_count} layouts.`);
+          clearLayoutDraftState();
+          setStatus(
+            `Page marked reviewed with ${payload.layout_count} layouts. Applied drafts: ${editedEntries.length}, deletions: ${deletedIds.length}.`,
+          );
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();
@@ -777,6 +1086,7 @@
           return;
         }
         try {
+          loadLayoutDraftState();
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();
