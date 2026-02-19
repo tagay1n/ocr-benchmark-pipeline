@@ -83,10 +83,12 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - layout ID column hidden in review table UI
   - page-level `Review` button to jump to the next pending review page
   - stage sidebar removed from layout review page for a consistent no-bar UX
+  - bbox can be adjusted directly on canvas by dragging box corners/edges
+  - `Layouts` panel stays visible while scrolling image content (desktop sticky panel)
+  - selecting a bbox on canvas highlights its row in `Layouts`, and selecting a row highlights its bbox on canvas
 
 ### Not Completed Yet
 
-- Drag-and-resize bbox handles in UI (current editing is coordinate-input based).
 - OCR extraction stage (Gemini) and post-processing.
 - OCR review page with markdown raw/rendered dual mode.
 - Job queue for long-running tasks.
@@ -127,6 +129,15 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-19:
+  - Layout review selection is now synchronized both ways:
+    - interacting with/clicking a bbox highlights the matching `Layouts` row
+    - interacting with/clicking a `Layouts` row highlights the matching bbox on canvas
+  - Layout review right-side `Layouts` panel made sticky on desktop so it remains visible while scrolling the page image.
+  - Mobile layout keeps non-sticky behavior for single-column usability.
+  - Disabled dragging whole bbox body on canvas; only edge/corner handles can be dragged for adjustment.
+  - Layout overlay now supports direct bbox manipulation on canvas:
+    - drag corners/edges to resize region
+    - updates are stored in local drafts and applied on `Mark Reviewed`
   - Layout review `Order` edits now swap positions when target order is already occupied:
     - setting layout A to layout B's order moves layout B to layout A's previous order
   - Layout review table now reorders rows immediately when `Order` is changed (ascending reading order).

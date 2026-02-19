@@ -142,6 +142,10 @@
       .layouts-panel {
         width: fit-content;
         max-width: 100%;
+        position: sticky;
+        top: 16px;
+        max-height: calc(100vh - 32px);
+        overflow: auto;
       }
 
       .layouts-panel table {
@@ -225,6 +229,8 @@
         border: 2px solid #0b7a75;
         background: rgba(11, 122, 117, 0.12);
         border-radius: 4px;
+        cursor: default;
+        touch-action: none;
       }
 
       .box-label {
@@ -238,6 +244,73 @@
         border-radius: 6px;
         padding: 2px 6px;
         white-space: nowrap;
+        pointer-events: none;
+      }
+
+      .box-handle {
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        border: 1px solid rgba(20, 25, 25, 0.55);
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 2px;
+      }
+
+      .box-handle[data-handle="nw"] {
+        top: -6px;
+        left: -6px;
+        cursor: nwse-resize;
+      }
+
+      .box-handle[data-handle="n"] {
+        top: -6px;
+        left: calc(50% - 5px);
+        cursor: ns-resize;
+      }
+
+      .box-handle[data-handle="ne"] {
+        top: -6px;
+        right: -6px;
+        cursor: nesw-resize;
+      }
+
+      .box-handle[data-handle="e"] {
+        top: calc(50% - 5px);
+        right: -6px;
+        cursor: ew-resize;
+      }
+
+      .box-handle[data-handle="se"] {
+        bottom: -6px;
+        right: -6px;
+        cursor: nwse-resize;
+      }
+
+      .box-handle[data-handle="s"] {
+        bottom: -6px;
+        left: calc(50% - 5px);
+        cursor: ns-resize;
+      }
+
+      .box-handle[data-handle="sw"] {
+        bottom: -6px;
+        left: -6px;
+        cursor: nesw-resize;
+      }
+
+      .box-handle[data-handle="w"] {
+        top: calc(50% - 5px);
+        left: -6px;
+        cursor: ew-resize;
+      }
+
+      .box.layout-selected {
+        z-index: 2;
+        box-shadow: 0 0 0 2px rgba(30, 31, 28, 0.38);
+      }
+
+      .box.layout-selected .box-label {
+        font-weight: 700;
       }
 
       table {
@@ -256,6 +329,14 @@
       th {
         font-size: 13px;
         color: var(--muted);
+      }
+
+      #layouts-body tr.layout-selected td {
+        background: #eeeadd;
+      }
+
+      #layouts-body tr.layout-selected td:first-child {
+        box-shadow: inset 3px 0 0 var(--accent);
       }
 
       input {
@@ -285,6 +366,12 @@
       @media (max-width: 980px) {
         .grid {
           grid-template-columns: 1fr;
+        }
+
+        .layouts-panel {
+          position: static;
+          max-height: none;
+          overflow: visible;
         }
       }
     </style>
@@ -393,6 +480,7 @@
         serverLayoutsById: {},
         localEditsById: {},
         deletedLayoutIds: new Set(),
+        selectedLayoutId: null,
       };
 
       function applyStoredDetectThresholds() {
@@ -631,6 +719,20 @@
         };
       }
 
+      function applyBoxElementStyle(boxElement, bbox, color) {
+        const style = boxStyle({ bbox });
+        boxElement.style.left = style.left;
+        boxElement.style.top = style.top;
+        boxElement.style.width = style.width;
+        boxElement.style.height = style.height;
+        boxElement.style.borderColor = color;
+        boxElement.style.background = hexToRgba(color, 0.16);
+      }
+
+      function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+      }
+
       function readingOrderSortValue(layout) {
         const value = Number(layout.reading_order);
         if (Number.isInteger(value) && value >= 1) {
@@ -649,19 +751,206 @@
         });
       }
 
+      function findLayoutById(layoutId) {
+        return state.layouts.find((row) => Number(row.id) === Number(layoutId)) || null;
+      }
+
+      function clearSelectedLayoutIfMissing() {
+        if (state.selectedLayoutId === null) {
+          return;
+        }
+        const exists = state.layouts.some((row) => Number(row.id) === Number(state.selectedLayoutId));
+        if (!exists) {
+          state.selectedLayoutId = null;
+        }
+      }
+
+      function applySelectedLayoutStyles({ scrollRowIntoView = false } = {}) {
+        clearSelectedLayoutIfMissing();
+        const selectedId = Number(state.selectedLayoutId);
+
+        for (const rowEl of layoutsBody.querySelectorAll("tr[data-layout-id]")) {
+          const rowId = Number(rowEl.dataset.layoutId);
+          rowEl.classList.toggle("layout-selected", rowId === selectedId);
+        }
+        for (const boxEl of overlay.querySelectorAll(".box[data-layout-id]")) {
+          const boxId = Number(boxEl.dataset.layoutId);
+          boxEl.classList.toggle("layout-selected", boxId === selectedId);
+        }
+
+        if (scrollRowIntoView) {
+          const selectedRow = layoutsBody.querySelector(`tr[data-layout-id="${selectedId}"]`);
+          selectedRow?.scrollIntoView({ block: "nearest" });
+        }
+      }
+
+      function selectLayout(layoutId, { scrollRowIntoView = false } = {}) {
+        const normalizedId = Number(layoutId);
+        if (!Number.isInteger(normalizedId)) {
+          return;
+        }
+        const exists = state.layouts.some((row) => Number(row.id) === normalizedId);
+        if (!exists) {
+          return;
+        }
+        state.selectedLayoutId = normalizedId;
+        applySelectedLayoutStyles({ scrollRowIntoView });
+      }
+
+      function upsertDraftForLayout(layoutId, draft) {
+        const layout = findLayoutById(layoutId);
+        if (!layout) {
+          return false;
+        }
+
+        layout.class_name = draft.class_name;
+        layout.reading_order = draft.reading_order;
+        layout.bbox = { ...draft.bbox };
+
+        const serverLayout = state.serverLayoutsById[String(layoutId)];
+        const serverBaseline = serverLayout ? toDraftShape(serverLayout) : toDraftShape(layout);
+        if (sameDraft(draft, serverBaseline)) {
+          delete state.localEditsById[String(layoutId)];
+        } else {
+          state.localEditsById[String(layoutId)] = draft;
+        }
+        state.deletedLayoutIds.delete(Number(layoutId));
+        persistLayoutDraftState();
+        return true;
+      }
+
+      function bboxWithMinSize(bbox, handle) {
+        const minSize = 0.001;
+        let { x1, y1, x2, y2 } = bbox;
+
+        x1 = clamp(x1, 0, 1);
+        x2 = clamp(x2, 0, 1);
+        y1 = clamp(y1, 0, 1);
+        y2 = clamp(y2, 0, 1);
+
+        if (x2 - x1 < minSize) {
+          if (handle.includes("w")) {
+            x1 = x2 - minSize;
+          } else {
+            x2 = x1 + minSize;
+          }
+        }
+        if (y2 - y1 < minSize) {
+          if (handle.includes("n")) {
+            y1 = y2 - minSize;
+          } else {
+            y2 = y1 + minSize;
+          }
+        }
+
+        x1 = clamp(x1, 0, 1 - minSize);
+        x2 = clamp(x2, minSize, 1);
+        y1 = clamp(y1, 0, 1 - minSize);
+        y2 = clamp(y2, minSize, 1);
+
+        if (x2 - x1 < minSize) {
+          x2 = clamp(x1 + minSize, minSize, 1);
+        }
+        if (y2 - y1 < minSize) {
+          y2 = clamp(y1 + minSize, minSize, 1);
+        }
+
+        return {
+          x1: roundTo4(x1),
+          y1: roundTo4(y1),
+          x2: roundTo4(x2),
+          y2: roundTo4(y2),
+        };
+      }
+
+      function resizeBBox(startBBox, deltaX, deltaY, handle) {
+        const next = { ...startBBox };
+        if (handle.includes("w")) next.x1 += deltaX;
+        if (handle.includes("e")) next.x2 += deltaX;
+        if (handle.includes("n")) next.y1 += deltaY;
+        if (handle.includes("s")) next.y2 += deltaY;
+        return bboxWithMinSize(next, handle);
+      }
+
+      function beginOverlayDrag(event, layoutId, handle, boxElement, color) {
+        if (event.button !== 0) {
+          return;
+        }
+        const layout = findLayoutById(layoutId);
+        if (!layout) {
+          return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        selectLayout(layoutId, { scrollRowIntoView: true });
+        boxElement.setPointerCapture?.(event.pointerId);
+
+        const rect = overlay.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+          return;
+        }
+
+        const startClientX = event.clientX;
+        const startClientY = event.clientY;
+        const startBBox = { ...layout.bbox };
+
+        const onPointerMove = (moveEvent) => {
+          const dx = (moveEvent.clientX - startClientX) / rect.width;
+          const dy = (moveEvent.clientY - startClientY) / rect.height;
+
+          const nextBBox = resizeBBox(startBBox, dx, dy, handle);
+          layout.bbox = { ...nextBBox };
+          applyBoxElementStyle(boxElement, nextBBox, color);
+        };
+
+        const finish = () => {
+          window.removeEventListener("pointermove", onPointerMove);
+          window.removeEventListener("pointerup", onPointerUp);
+          window.removeEventListener("pointercancel", onPointerCancel);
+
+          const latest = findLayoutById(layoutId);
+          if (!latest) {
+            return;
+          }
+          const draft = toDraftShape(latest);
+          if (!upsertDraftForLayout(layoutId, draft)) {
+            return;
+          }
+          renderLayouts();
+          setStatus("Layout draft updated from canvas.");
+        };
+
+        const onPointerUp = () => {
+          finish();
+        };
+        const onPointerCancel = () => {
+          finish();
+        };
+
+        window.addEventListener("pointermove", onPointerMove);
+        window.addEventListener("pointerup", onPointerUp);
+        window.addEventListener("pointercancel", onPointerCancel);
+      }
+
       function renderOverlay() {
         overlay.innerHTML = "";
         for (const layout of state.layouts) {
           const color = colorForClass(layout.class_name);
           const box = document.createElement("div");
           box.className = "box";
-          const style = boxStyle(layout);
-          box.style.left = style.left;
-          box.style.top = style.top;
-          box.style.width = style.width;
-          box.style.height = style.height;
-          box.style.borderColor = color;
-          box.style.background = hexToRgba(color, 0.16);
+          box.dataset.layoutId = String(layout.id);
+          applyBoxElementStyle(box, layout.bbox, color);
+          box.addEventListener("pointerdown", (event) => {
+            if (event.button !== 0) {
+              return;
+            }
+            const target = event.target;
+            if (target instanceof Element && target.closest(".box-handle")) {
+              return;
+            }
+            selectLayout(layout.id, { scrollRowIntoView: true });
+          });
 
           const label = document.createElement("div");
           label.className = "box-label";
@@ -669,8 +958,20 @@
           label.style.borderColor = hexToRgba(color, 0.62);
           label.textContent = `${layout.reading_order}. ${layout.class_name}`;
           box.appendChild(label);
+
+          for (const handle of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+            const handleEl = document.createElement("div");
+            handleEl.className = "box-handle";
+            handleEl.dataset.handle = handle;
+            handleEl.addEventListener("pointerdown", (event) => {
+              beginOverlayDrag(event, layout.id, handle, box, color);
+            });
+            box.appendChild(handleEl);
+          }
+
           overlay.appendChild(box);
         }
+        applySelectedLayoutStyles();
       }
 
       function formatClassLabel(className) {
@@ -714,6 +1015,13 @@
       function layoutRow(layout) {
         const tr = document.createElement("tr");
         const layoutId = Number(layout.id);
+        tr.dataset.layoutId = String(layoutId);
+        tr.addEventListener("pointerdown", () => {
+          selectLayout(layoutId);
+        });
+        tr.addEventListener("focusin", () => {
+          selectLayout(layoutId);
+        });
         const serverLayout = state.serverLayoutsById[String(layoutId)];
         const serverBaseline = serverLayout ? toDraftShape(serverLayout) : toDraftShape(layout);
 
@@ -954,11 +1262,13 @@
 
       function renderLayouts() {
         sortLayoutsInPlace();
+        clearSelectedLayoutIfMissing();
         layoutsBody.innerHTML = "";
         for (const layout of state.layouts) {
           layoutsBody.appendChild(layoutRow(layout));
         }
         renderOverlay();
+        applySelectedLayoutStyles();
       }
 
       async function loadPage() {
