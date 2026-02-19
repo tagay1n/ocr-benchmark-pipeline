@@ -631,6 +631,24 @@
         };
       }
 
+      function readingOrderSortValue(layout) {
+        const value = Number(layout.reading_order);
+        if (Number.isInteger(value) && value >= 1) {
+          return value;
+        }
+        return Number.MAX_SAFE_INTEGER;
+      }
+
+      function sortLayoutsInPlace() {
+        state.layouts.sort((a, b) => {
+          const orderCmp = readingOrderSortValue(a) - readingOrderSortValue(b);
+          if (orderCmp !== 0) {
+            return orderCmp;
+          }
+          return Number(a.id) - Number(b.id);
+        });
+      }
+
       function renderOverlay() {
         overlay.innerHTML = "";
         for (const layout of state.layouts) {
@@ -816,7 +834,7 @@
             draft = payloadFromInputs();
           } catch (error) {
             setStatus(`Draft not saved: ${error.message}`, { isError: true });
-            return;
+            return false;
           }
 
           applyDraftToState(draft);
@@ -830,13 +848,57 @@
             setStatus("Draft saved locally.");
           }
           persistLayoutDraftState();
+          return true;
         }
 
         classInput.addEventListener("change", () => {
           applyClassColorToSelect(classInput, classInput.value);
           saveLocalDraft();
         });
-        orderInput.addEventListener("change", saveLocalDraft);
+        orderInput.addEventListener("change", () => {
+          const previousOrder = Number.isInteger(Number(layout.reading_order))
+            ? Number(layout.reading_order)
+            : null;
+          if (saveLocalDraft()) {
+            const currentLayout = state.layouts.find((row) => Number(row.id) === layoutId);
+            const nextOrder =
+              currentLayout && Number.isInteger(Number(currentLayout.reading_order))
+                ? Number(currentLayout.reading_order)
+                : null;
+            let swapped = false;
+
+            if (previousOrder !== null && nextOrder !== null && previousOrder !== nextOrder) {
+              const conflict = state.layouts.find(
+                (row) => Number(row.id) !== layoutId && Number(row.reading_order) === nextOrder,
+              );
+              if (conflict) {
+                const conflictId = Number(conflict.id);
+                const conflictDraft = toDraftShape(conflict);
+                conflictDraft.reading_order = previousOrder;
+
+                conflict.class_name = conflictDraft.class_name;
+                conflict.reading_order = conflictDraft.reading_order;
+                conflict.bbox = { ...conflictDraft.bbox };
+
+                const conflictServer = state.serverLayoutsById[String(conflictId)];
+                const conflictBaseline = conflictServer ? toDraftShape(conflictServer) : conflictDraft;
+                if (sameDraft(conflictDraft, conflictBaseline)) {
+                  delete state.localEditsById[String(conflictId)];
+                } else {
+                  state.localEditsById[String(conflictId)] = conflictDraft;
+                }
+                state.deletedLayoutIds.delete(conflictId);
+                persistLayoutDraftState();
+                swapped = true;
+              }
+            }
+
+            renderLayouts();
+            if (swapped) {
+              setStatus("Draft saved locally. Order swapped.");
+            }
+          }
+        });
         for (const [, input] of bboxFields) {
           input.addEventListener("change", () => {
             const parsed = Number(input.value);
@@ -864,6 +926,7 @@
           delete state.localEditsById[String(layoutId)];
           state.deletedLayoutIds.delete(layoutId);
           persistLayoutDraftState();
+          renderLayouts();
           setStatus("Layout values restored.");
         });
         actionsWrap.appendChild(restoreBtn);
@@ -890,6 +953,7 @@
       }
 
       function renderLayouts() {
+        sortLayoutsInPlace();
         layoutsBody.innerHTML = "";
         for (const layout of state.layouts) {
           layoutsBody.appendChild(layoutRow(layout));

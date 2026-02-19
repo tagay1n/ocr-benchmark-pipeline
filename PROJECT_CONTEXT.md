@@ -127,6 +127,9 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-19:
+  - Layout review `Order` edits now swap positions when target order is already occupied:
+    - setting layout A to layout B's order moves layout B to layout A's previous order
+  - Layout review table now reorders rows immediately when `Order` is changed (ascending reading order).
   - Layout review bbox spinner step adjusted to `0.001` (arrow up/down increments by thousandths).
   - Layout review draft workflow updated:
     - class/order/bbox edits now persist in browser local storage per page
