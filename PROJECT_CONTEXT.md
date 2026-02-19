@@ -51,20 +51,22 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - SHA-256 dedupe with canonical path tracking
   - missing-file marking
   - auto-scan on app startup
-  - auto-scan on dashboard load
+  - dashboard refresh does not auto-scan; scanning is manual via `Scan` button
   - manual scan endpoint/button
 - Dashboard V1:
-  - indexed pages list
-  - stats (total, missing, duplicates)
+  - single dashboard view with all indexed pages (no stage sidebar/tabs)
+  - removed standalone stats panel (`Total Indexed Pages`, `Missing Pages`, `Active Duplicate Files`)
   - duplicate warnings that persist until duplicates are removed
+  - header actions: `Scan`, `Review layouts`, `Wipe DB State`
+  - header actions are rendered under title; pipeline flow is shown as `Scan > Review layouts`
+  - source folder and allowed formats are included in discovery `scan_started` backend event messages/data in pipeline logs
+  - total/missing/active-duplicate stats are included in discovery `scan_finished` backend event messages/data
+  - scan button success no longer prints verbose summary label; scan details are shown in backend activity logs
+  - `Review layouts` button auto-disables when no page is ready
   - wipe DB state action with typed confirmation (`wipe`) in modal
-  - collapsible left sidebar with pipeline-stage tabs
-  - includes explicit `Discovery` tab as full indexed-documents overview
-  - each stage tab shows pending count in parentheses
-  - stage tables show all historical docs that have reached the selected stage
-  - stage tabs become green when pending count is `0`
-  - zero-pending tabs remain clickable and show stage empty-state content
-  - page table is filtered by selected pipeline stage
+  - live pipeline activity panel is collapsed by default and persisted in local storage
+  - activity rows render as plain log lines (no numeric indexes)
+  - dashboard timestamps use 24-hour format with day/month date order (non-US)
 - Layout Review V1 backend+UI scaffold:
   - `layouts` table and indexes
   - layout CRUD API
@@ -74,6 +76,8 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - mark-layout-review-complete endpoint
   - `layouts.html` page to view/edit layouts
   - redetect thresholds (confidence/IoU) editable in UI
+  - page-level `Review` button to jump to the next pending review page
+  - stage sidebar removed from layout review page for a consistent no-bar UX
 
 ### Not Completed Yet
 
@@ -89,6 +93,8 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 - `POST /api/state/wipe`
 - `GET /api/pages`
 - `GET /api/pages/{page_id}`
+- `GET /api/layout-review/next`
+- `GET /api/pages/{page_id}/layout-review-next`
 - `GET /api/pages/{page_id}/image`
 - `GET /api/pages/{page_id}/layouts`
 - `POST /api/pages/{page_id}/layouts/detect`
@@ -96,6 +102,8 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 - `PATCH /api/layouts/{layout_id}`
 - `DELETE /api/layouts/{layout_id}`
 - `POST /api/pages/{page_id}/layouts/review-complete`
+- `GET /api/pipeline/activity`
+- `GET /api/pipeline/activity/stream`
 - `GET /api/duplicates`
 - `GET /api/stats`
 
@@ -114,6 +122,37 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-19:
+  - `Discovery scan finished` log messages now include full scan counters and totals:
+    - scanned/new/updated/missing-marked/duplicates
+    - total indexed/missing/active-duplicates
+  - Removed verbose scan-success text from dashboard status label; details are shown in activity logs instead.
+  - Disabled dashboard auto-scan on page load/refresh.
+    - dashboard now loads existing state only; discovery scan runs only on explicit `Scan` button click
+  - Dashboard date rendering now uses day/month order (non-US locale) while keeping 24-hour time.
+  - Removed dashboard stats panel from UI.
+    - `Total Indexed Pages`, `Missing Pages`, `Active Duplicate Files` are now emitted in `scan_finished` backend events
+    - same stats are included in scan API responses (`/api/discovery/scan`, wipe rescan summary)
+  - Discovery `scan_started` backend events now include source folder and allowed extensions in message/data:
+    - applies to startup discovery, manual scan, and wipe-rescan flows
+    - replaces prior synthetic standalone source-config log entry approach
+  - Removed source/folder formats text from dashboard header.
+    - source path and allowed extensions are now printed in pipeline activity log entries
+  - Restored `Wipe DB State` button to the previous top-right header position on dashboard.
+    - `Scan > Review layouts` remains under the dashboard title
+  - Updated dashboard header actions layout:
+    - moved actions under `Dashboard` title
+    - visualized flow as `Scan > Review layouts`
+    - kept `Wipe DB State` as separate danger action
+  - Replaced stage-tab navigation with a single dashboard model:
+    - removed stage bars/sidebars from dashboard and layout review pages
+    - dashboard now always shows one `All Indexed Images` table
+    - `Scan` and `Review layouts` actions moved to dashboard header
+  - Added global next-review API endpoint `GET /api/layout-review/next`:
+    - dashboard uses it to enable/disable `Review layouts`
+    - `Review layouts` opens the next `layout_detected` page directly
+  - Pipeline activity panel log rows now render without numeric indexes.
+  - Dashboard date/time rendering now uses 24-hour format consistently.
+  - Supersedes earlier same-day notes that described stage sidebar/tab UX.
   - Added reusable backend pipeline runtime (`app/pipeline_runtime.py`) for long-running stage jobs:
     - generic queued/running/completed/failed job model (`pipeline_jobs` table)
     - stage-agnostic event stream (`pipeline_events` table)
@@ -131,9 +170,13 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
     - panel is expandable/collapsible with collapsed-by-default behavior
   - Dashboard stats summary panel (`Total Indexed Pages`, `Missing Pages`, duplicates stat) is now shown only in `Discovery` stage view.
   - `Scan Input Folder` action moved into Discovery stats panel, so scan action appears only in Discovery view.
+  - Superseded later on 2026-02-19 by single-dashboard/no-stats-panel UX.
   - UI state persistence added across refresh:
     - dashboard remembers selected stage, sidebar collapsed state, and activity-panel expanded state
     - layout review remembers sidebar collapsed state and redetect threshold inputs (confidence/IoU)
+  - Layout review page now includes `Review` action button to jump to next pending layout-review page:
+    - resolved by new endpoint `GET /api/pages/{page_id}/layout-review-next`
+    - button disables automatically when there is no next `layout_detected` page
   - Removed separate `Layout Detection` sidebar stage (layout detection is now automatic).
   - Sidebar is now present on both dashboard and layout review pages with consistent collapse/expand behavior.
   - Added config flag `enable_background_jobs` (`ENABLE_BACKGROUND_JOBS`) to control worker execution.

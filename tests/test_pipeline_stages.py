@@ -132,6 +132,8 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(page_payload["page"]["status"], "layout_reviewed")
 
     def test_pipeline_activity_endpoint_shape(self) -> None:
+        self._write_image("activity.png", b"activity")
+        main.scan_images()
         payload = main.pipeline_activity(limit=5)
         self.assertIn("worker_running", payload)
         self.assertIn("in_progress", payload)
@@ -139,6 +141,88 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertIn("recent_events", payload)
         self.assertIn("registered_stages", payload)
         self.assertIn("layout_detect", payload["registered_stages"])
+        start_events = [event for event in payload["recent_events"] if event.get("event_type") == "scan_started"]
+        self.assertGreaterEqual(len(start_events), 1)
+        start_event = start_events[-1]
+        self.assertIn("Discovery scan started", start_event["message"])
+        self.assertIn(str(self.test_settings.source_dir), start_event["message"])
+        self.assertEqual(start_event["data"]["source_dir"], str(self.test_settings.source_dir))
+        self.assertEqual(start_event["data"]["allowed_extensions"], list(self.test_settings.allowed_extensions))
+
+        finished_events = [event for event in payload["recent_events"] if event.get("event_type") == "scan_finished"]
+        self.assertGreaterEqual(len(finished_events), 1)
+        finished_event = finished_events[-1]
+        self.assertIn("Discovery scan finished", finished_event["message"])
+        self.assertIn("Scanned:", finished_event["message"])
+        self.assertIn("new:", finished_event["message"])
+        self.assertIn("updated:", finished_event["message"])
+        self.assertIn("missing marked:", finished_event["message"])
+        self.assertIn("duplicates:", finished_event["message"])
+        self.assertIn("Total Indexed Pages:", finished_event["message"])
+        self.assertIn("Missing Pages:", finished_event["message"])
+        self.assertIn("Active Duplicate Files:", finished_event["message"])
+        self.assertIn("total_pages", finished_event["data"])
+        self.assertIn("missing_pages", finished_event["data"])
+        self.assertIn("active_duplicate_files", finished_event["data"])
+
+    def test_next_layout_review_page(self) -> None:
+        self._write_image("p1.png", b"p1")
+        self._write_image("p2.png", b"p2")
+        main.scan_images()
+        pages = main.list_pages()["pages"]
+        page_ids = [int(page["id"]) for page in pages]
+        self.assertEqual(len(page_ids), 2)
+
+        for page_id in page_ids:
+            main.create_page_layout(
+                page_id,
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=None,
+                    bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.25),
+                ),
+            )
+
+        first_id, second_id = sorted(page_ids)
+        next_from_first = main.next_layout_review_page(first_id)
+        self.assertTrue(next_from_first["has_next"])
+        self.assertEqual(next_from_first["next_page_id"], second_id)
+
+        next_from_second = main.next_layout_review_page(second_id)
+        self.assertTrue(next_from_second["has_next"])
+        self.assertEqual(next_from_second["next_page_id"], first_id)
+
+        main.complete_layout_review(first_id)
+        main.complete_layout_review(second_id)
+        none_left = main.next_layout_review_page(first_id)
+        self.assertFalse(none_left["has_next"])
+        self.assertIsNone(none_left["next_page_id"])
+
+    def test_global_next_layout_review_page(self) -> None:
+        self._write_image("g1.png", b"g1")
+        self._write_image("g2.png", b"g2")
+        main.scan_images()
+
+        payload = main.next_layout_review_page_global()
+        self.assertFalse(payload["has_next"])
+        self.assertIsNone(payload["next_page_id"])
+
+        pages = main.list_pages()["pages"]
+        page_ids = [int(page["id"]) for page in pages]
+        self.assertGreaterEqual(len(page_ids), 2)
+        for page_id in page_ids:
+            main.create_page_layout(
+                page_id,
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=None,
+                    bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.25),
+                ),
+            )
+
+        payload = main.next_layout_review_page_global()
+        self.assertTrue(payload["has_next"])
+        self.assertEqual(payload["next_page_id"], min(page_ids))
 
 
 if __name__ == "__main__":

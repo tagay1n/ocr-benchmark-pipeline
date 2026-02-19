@@ -13,9 +13,6 @@
         --accent: #0b7a75;
         --danger: #a52222;
         --border: #e0dccf;
-        --success: #2f7d32;
-        --success-soft: #eaf6eb;
-        --sidebar: #17322f;
       }
 
       * {
@@ -32,100 +29,6 @@
           var(--bg);
       }
 
-      .app-shell {
-        min-height: 100vh;
-        display: grid;
-        grid-template-columns: 280px minmax(0, 1fr);
-        transition: grid-template-columns 180ms ease;
-      }
-
-      .app-shell.sidebar-collapsed {
-        grid-template-columns: 82px minmax(0, 1fr);
-      }
-
-      .sidebar {
-        background: linear-gradient(180deg, #10312d 0%, #1b4742 100%);
-        color: #e9f5f3;
-        border-right: 1px solid rgba(255, 255, 255, 0.12);
-        padding: 14px 10px;
-      }
-
-      .sidebar-top {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 12px;
-      }
-
-      .app-shell.sidebar-collapsed .stage-label {
-        display: none;
-      }
-
-      .sidebar-toggle {
-        border: 1px solid rgba(255, 255, 255, 0.24);
-        background: rgba(255, 255, 255, 0.12);
-        color: #fff;
-        border-radius: 8px;
-        cursor: pointer;
-        width: 34px;
-        height: 34px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 20px;
-        line-height: 1;
-        font-weight: 700;
-      }
-
-      .stage-tabs {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-
-      .stage-tab {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        background: rgba(255, 255, 255, 0.08);
-        color: #e9f5f3;
-        padding: 9px 10px;
-        border-radius: 10px;
-        cursor: pointer;
-        text-align: left;
-        font-weight: 600;
-      }
-
-      .stage-tab.active {
-        border-color: rgba(255, 255, 255, 0.65);
-        background: rgba(255, 255, 255, 0.2);
-      }
-
-      .stage-tab.done {
-        color: var(--success);
-        background: var(--success-soft);
-        border-color: #98d29b;
-        cursor: pointer;
-      }
-
-      .stage-count {
-        color: inherit;
-        font-size: 12px;
-        opacity: 0.95;
-      }
-
-      .app-shell.sidebar-collapsed .stage-tab {
-        justify-content: center;
-        padding: 9px 6px;
-      }
-
-      .app-shell.sidebar-collapsed .stage-count {
-        font-size: 11px;
-      }
-
       main {
         max-width: 1180px;
         width: 100%;
@@ -135,7 +38,7 @@
 
       .header {
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: space-between;
         gap: 16px;
         margin-bottom: 16px;
@@ -143,7 +46,6 @@
 
       h1 {
         margin: 0;
-        font-weight: 700;
         font-size: 28px;
       }
 
@@ -154,29 +56,32 @@
 
       .header-actions {
         display: flex;
+        align-items: center;
         gap: 8px;
         flex-wrap: wrap;
       }
 
-      .stats-actions {
-        margin-top: 10px;
-        display: flex;
-        justify-content: flex-start;
+      .pipeline-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .pipeline-separator {
+        color: var(--muted);
+        font-weight: 700;
+        font-size: 16px;
+        line-height: 1;
       }
 
       button {
         border: 1px solid var(--accent);
         background: var(--accent);
-        color: white;
+        color: #fff;
         font-weight: 600;
         border-radius: 10px;
         padding: 10px 16px;
         cursor: pointer;
-      }
-
-      button.danger-btn {
-        border-color: var(--danger);
-        background: var(--danger);
       }
 
       button.secondary {
@@ -184,9 +89,14 @@
         color: var(--accent);
       }
 
+      button.danger-btn {
+        border-color: var(--danger);
+        background: var(--danger);
+      }
+
       button:disabled {
         opacity: 0.6;
-        cursor: wait;
+        cursor: not-allowed;
       }
 
       .panel {
@@ -197,28 +107,10 @@
         margin-bottom: 16px;
       }
 
-      .stats {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      .stat {
-        background: #ffffff;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 14px;
-      }
-
-      .stat .label {
-        font-size: 13px;
+      #last-scan {
         color: var(--muted);
-      }
-
-      .stat .value {
-        margin-top: 8px;
-        font-size: 26px;
-        font-weight: 700;
+        font-size: 13px;
+        margin: 0 0 12px;
       }
 
       .danger {
@@ -228,6 +120,10 @@
 
       .danger strong {
         color: var(--danger);
+      }
+
+      .panel-title {
+        margin: 0 0 8px;
       }
 
       table {
@@ -260,21 +156,6 @@
       .status.missing {
         color: var(--danger);
         background: #fcebec;
-      }
-
-      #stage-heading {
-        margin-top: 0;
-        margin-bottom: 4px;
-      }
-
-      #stage-description {
-        color: var(--muted);
-        margin-top: 0;
-      }
-
-      #last-scan {
-        color: var(--muted);
-        font-size: 13px;
       }
 
       .empty-row {
@@ -324,7 +205,8 @@
 
       .activity-list {
         margin: 12px 0 0;
-        padding-left: 18px;
+        padding-left: 0;
+        list-style: none;
       }
 
       .activity-list li {
@@ -389,32 +271,9 @@
       }
 
       @media (max-width: 980px) {
-        .app-shell,
-        .app-shell.sidebar-collapsed {
-          grid-template-columns: 1fr;
-        }
-
-        .sidebar {
-          border-right: 0;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .app-shell.sidebar-collapsed .stage-label {
-          display: initial;
-        }
-
-        .app-shell.sidebar-collapsed .stage-tab {
-          justify-content: space-between;
-          padding: 9px 10px;
-        }
-
         .header {
           flex-direction: column;
           align-items: flex-start;
-        }
-
-        .stats {
-          grid-template-columns: 1fr;
         }
 
         table,
@@ -443,84 +302,58 @@
     </style>
   </head>
   <body>
-    <div id="app-shell" class="app-shell">
-      <aside class="sidebar">
-        <div class="sidebar-top">
-          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Collapse sidebar">‹</button>
-        </div>
-        <nav id="stage-tabs" class="stage-tabs" aria-label="Pipeline stage tabs"></nav>
-      </aside>
-
-      <main>
-        <section class="header">
-          <div>
-            <h1>Dashboard</h1>
-            <div id="source-dir" class="subline"></div>
-          </div>
+    <main>
+      <section class="header">
+        <div>
+          <h1>Dashboard</h1>
           <div class="header-actions">
-            <button id="wipe-btn" class="danger-btn" type="button">Wipe DB State</button>
+            <div class="pipeline-actions" role="group" aria-label="Pipeline actions">
+              <button id="scan-btn" type="button">Scan</button>
+              <span class="pipeline-separator" aria-hidden="true">&gt;</span>
+              <button id="review-layouts-btn" class="secondary" type="button" disabled>Review layouts</button>
+            </div>
           </div>
-        </section>
+        </div>
+        <button id="wipe-btn" class="danger-btn" type="button">Wipe DB State</button>
+      </section>
+      <p id="last-scan"></p>
 
-        <section id="stats-panel" class="panel">
-          <div class="stats">
-            <article class="stat">
-              <div class="label">Total Indexed Pages</div>
-              <div id="stat-total" class="value">0</div>
-            </article>
-            <article class="stat">
-              <div class="label">Missing Pages</div>
-              <div id="stat-missing" class="value">0</div>
-            </article>
-            <article class="stat">
-              <div class="label">Active Duplicate Files</div>
-              <div id="stat-duplicates" class="value">0</div>
-            </article>
-          </div>
-          <div class="stats-actions">
-            <button id="scan-btn" type="button">Scan Input Folder</button>
-          </div>
-          <p id="last-scan"></p>
-        </section>
+      <section class="panel">
+        <button id="pipeline-toggle" class="panel-toggle" type="button" aria-expanded="false">
+          <p id="pipeline-headline" class="activity-headline">Pipeline worker idle</p>
+          <span id="pipeline-toggle-icon" class="panel-toggle-icon">+</span>
+        </button>
+        <div id="pipeline-body" class="activity-body" hidden>
+          <p id="pipeline-queue" class="activity-meta"></p>
+          <ul id="pipeline-events" class="activity-list"></ul>
+        </div>
+      </section>
 
-        <section class="panel">
-          <button id="pipeline-toggle" class="panel-toggle" type="button" aria-expanded="false">
-            <p id="pipeline-headline" class="activity-headline">Pipeline worker idle</p>
-            <span id="pipeline-toggle-icon" class="panel-toggle-icon">+</span>
-          </button>
-          <div id="pipeline-body" class="activity-body" hidden>
-            <p id="pipeline-queue" class="activity-meta"></p>
-            <ol id="pipeline-events" class="activity-list"></ol>
-          </div>
-        </section>
+      <section id="duplicate-panel" class="panel danger" hidden>
+        <strong>Duplicate files were skipped.</strong>
+        <p>
+          This warning stays visible on each app start until duplicate files are removed from
+          the input folder.
+        </p>
+        <div id="duplicate-list"></div>
+      </section>
 
-        <section id="duplicate-panel" class="panel danger" hidden>
-          <strong>Duplicate files were skipped.</strong>
-          <p>
-            This warning stays visible on each app start until duplicate files are removed from
-            the input folder.
-          </p>
-          <div id="duplicate-list"></div>
-        </section>
-
-        <section class="panel">
-          <h2 id="stage-heading">Layout Review (0)</h2>
-          <p id="stage-description"></p>
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Relative Path</th>
-                <th>Status</th>
-                <th>Last Seen</th>
-                <th>Layout Review</th>
-              </tr>
-            </thead>
-            <tbody id="pages-body"></tbody>
-          </table>
-        </section>
-      </main>
-    </div>
+      <section class="panel">
+        <h2 class="panel-title">All Indexed Images</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Relative Path</th>
+              <th>Status</th>
+              <th>Last Seen</th>
+              <th>Layout Review</th>
+            </tr>
+          </thead>
+          <tbody id="pages-body"></tbody>
+        </table>
+      </section>
+    </main>
 
     <div id="wipe-modal" class="modal-backdrop" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="wipe-modal-title">
@@ -542,42 +375,7 @@
     </div>
 
     <script type="module">
-      import { STAGES, filterPagesForStage, getStageById, stageCount } from "/static/js/pipeline_stages.mjs";
-
-      const appShell = document.getElementById("app-shell");
-      const sidebarToggle = document.getElementById("sidebar-toggle");
-      const stageTabs = document.getElementById("stage-tabs");
-      const stageHeading = document.getElementById("stage-heading");
-      const stageDescription = document.getElementById("stage-description");
-
-      const scanBtn = document.getElementById("scan-btn");
-      const wipeBtn = document.getElementById("wipe-btn");
-      const wipeModal = document.getElementById("wipe-modal");
-      const wipeConfirmInput = document.getElementById("wipe-confirm-input");
-      const wipeCancelBtn = document.getElementById("wipe-cancel-btn");
-      const wipeConfirmBtn = document.getElementById("wipe-confirm-btn");
-
-      const sourceDirEl = document.getElementById("source-dir");
-      const statTotal = document.getElementById("stat-total");
-      const statMissing = document.getElementById("stat-missing");
-      const statDuplicates = document.getElementById("stat-duplicates");
-      const statsPanel = document.getElementById("stats-panel");
-      const pagesBody = document.getElementById("pages-body");
-      const duplicatePanel = document.getElementById("duplicate-panel");
-      const duplicateList = document.getElementById("duplicate-list");
-      const lastScan = document.getElementById("last-scan");
-      const pipelineToggle = document.getElementById("pipeline-toggle");
-      const pipelineBody = document.getElementById("pipeline-body");
-      const pipelineHeadline = document.getElementById("pipeline-headline");
-      const pipelineToggleIcon = document.getElementById("pipeline-toggle-icon");
-      const pipelineQueue = document.getElementById("pipeline-queue");
-      const pipelineEvents = document.getElementById("pipeline-events");
-
-      const queryParams = new URLSearchParams(window.location.search);
-      const requestedStageId = queryParams.get("stage");
       const STORAGE_KEYS = {
-        selectedStageId: "dashboard.selected_stage_id",
-        sidebarCollapsed: "ui.sidebar_collapsed",
         pipelinePanelExpanded: "dashboard.pipeline_panel_expanded",
       };
 
@@ -605,51 +403,46 @@
         return raw === "1";
       }
 
-      function syncStageParam(stageId) {
-        const url = new URL(window.location.href);
-        url.searchParams.set("stage", stageId);
-        window.history.replaceState({}, "", url);
-      }
+      const scanBtn = document.getElementById("scan-btn");
+      const reviewLayoutsBtn = document.getElementById("review-layouts-btn");
+      const wipeBtn = document.getElementById("wipe-btn");
+      const wipeModal = document.getElementById("wipe-modal");
+      const wipeConfirmInput = document.getElementById("wipe-confirm-input");
+      const wipeCancelBtn = document.getElementById("wipe-cancel-btn");
+      const wipeConfirmBtn = document.getElementById("wipe-confirm-btn");
 
-      const storedStageId = readStorage(STORAGE_KEYS.selectedStageId);
-      const initialStageId = getStageById(requestedStageId)
-        ? requestedStageId
-        : getStageById(storedStageId)
-          ? storedStageId
-          : "layout_review";
+      const pagesBody = document.getElementById("pages-body");
+      const duplicatePanel = document.getElementById("duplicate-panel");
+      const duplicateList = document.getElementById("duplicate-list");
+      const lastScan = document.getElementById("last-scan");
+      const pipelineToggle = document.getElementById("pipeline-toggle");
+      const pipelineBody = document.getElementById("pipeline-body");
+      const pipelineHeadline = document.getElementById("pipeline-headline");
+      const pipelineToggleIcon = document.getElementById("pipeline-toggle-icon");
+      const pipelineQueue = document.getElementById("pipeline-queue");
+      const pipelineEvents = document.getElementById("pipeline-events");
 
-      const state = {
-        selectedStageId: initialStageId,
-        pages: [],
-      };
+      let nextReviewPageId = null;
       let pipelinePanelExpanded = false;
       let activityStream = null;
       let streamReconnectTimer = null;
       let activityPollingTimer = null;
-
-      function getSelectedStage() {
-        return getStageById(state.selectedStageId) || STAGES[0];
-      }
-
-      function updateSidebarToggleState() {
-        const isCollapsed = appShell.classList.contains("sidebar-collapsed");
-        sidebarToggle.setAttribute("aria-label", isCollapsed ? "Expand sidebar" : "Collapse sidebar");
-        sidebarToggle.textContent = isCollapsed ? "›" : "‹";
-      }
-
-      function setSidebarCollapsed(collapsed) {
-        appShell.classList.toggle("sidebar-collapsed", collapsed);
-        writeStorage(STORAGE_KEYS.sidebarCollapsed, collapsed ? "1" : "0");
-        updateSidebarToggleState();
-      }
-
-      function setPipelinePanelExpanded(expanded) {
-        pipelinePanelExpanded = expanded;
-        pipelineToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
-        pipelineBody.hidden = !expanded;
-        pipelineToggleIcon.textContent = expanded ? "−" : "+";
-        writeStorage(STORAGE_KEYS.pipelinePanelExpanded, expanded ? "1" : "0");
-      }
+      const DATE_LOCALE = "en-GB";
+      const DATE_TIME_FORMAT = {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      };
+      const TIME_FORMAT = {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      };
 
       async function fetchJson(url, options) {
         const response = await fetch(url, options);
@@ -659,54 +452,34 @@
         return response.json();
       }
 
-      function renderStageTabs(pages) {
-        stageTabs.innerHTML = "";
+      function formatDateTime(value) {
+        const date = new Date(value);
+        return date.toLocaleString(DATE_LOCALE, DATE_TIME_FORMAT);
+      }
 
-        for (const stage of STAGES) {
-          const count = stageCount(stage, pages);
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "stage-tab";
-          if (count === 0) {
-            button.classList.add("done");
-          }
-          if (stage.id === state.selectedStageId) {
-            button.classList.add("active");
-          }
-          button.innerHTML =
-            `<span class="stage-label">${stage.name}</span>` + `<span class="stage-count">(${count})</span>`;
-          button.title = `${stage.name} (${count})`;
-          button.addEventListener("click", () => {
-            state.selectedStageId = stage.id;
-            writeStorage(STORAGE_KEYS.selectedStageId, stage.id);
-            syncStageParam(stage.id);
-            renderStageTabs(state.pages);
-            renderPages(state.pages);
-          });
-          stageTabs.appendChild(button);
-        }
+      function formatTime(value) {
+        const date = new Date(value);
+        return date.toLocaleTimeString(DATE_LOCALE, TIME_FORMAT);
+      }
+
+      function setPipelinePanelExpanded(expanded) {
+        pipelinePanelExpanded = expanded;
+        pipelineToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+        pipelineBody.hidden = !expanded;
+        pipelineToggleIcon.textContent = expanded ? "-" : "+";
+        writeStorage(STORAGE_KEYS.pipelinePanelExpanded, expanded ? "1" : "0");
       }
 
       function renderPages(pages) {
-        const stage = getSelectedStage();
-        statsPanel.hidden = stage.id !== "discovery";
-        const filteredPages = filterPagesForStage(stage, pages);
-        stageHeading.textContent = `${stage.name} (${filteredPages.length})`;
-        stageDescription.textContent = stage.description || "";
-
         pagesBody.innerHTML = "";
-        if (filteredPages.length === 0) {
+        if (pages.length === 0) {
           const tr = document.createElement("tr");
-          const emptyText =
-            stage.id === "discovery"
-              ? "No indexed documents found yet."
-              : "No documents have reached this stage yet.";
-          tr.innerHTML = `<td class="empty-row" colspan="5">${emptyText}</td>`;
+          tr.innerHTML = '<td class="empty-row" colspan="5">No indexed documents found yet.</td>';
           pagesBody.appendChild(tr);
           return;
         }
 
-        for (const page of filteredPages) {
+        for (const page of pages) {
           const tr = document.createElement("tr");
           tr.innerHTML = `
             <td>${page.id}</td>
@@ -716,11 +489,11 @@
                 ${page.is_missing ? "missing" : page.status}
               </span>
             </td>
-            <td>${new Date(page.last_seen_at).toLocaleString()}</td>
+            <td>${formatDateTime(page.last_seen_at)}</td>
             <td>
               ${
                 page.is_missing
-                  ? "<span class=\"subline\">Unavailable</span>"
+                  ? '<span class="subline">Unavailable</span>'
                   : `<a href="/static/layouts.html?page_id=${page.id}">Open</a>`
               }
             </td>
@@ -730,8 +503,6 @@
       }
 
       function renderDuplicates(duplicates) {
-        statDuplicates.textContent = duplicates.length;
-
         if (duplicates.length === 0) {
           duplicatePanel.hidden = true;
           duplicateList.innerHTML = "";
@@ -790,7 +561,7 @@
 
         for (const event of events.slice(-10).reverse()) {
           const li = document.createElement("li");
-          const ts = new Date(event.ts).toLocaleTimeString();
+          const ts = formatTime(event.ts);
           const pageText = event.rel_path ? ` (${event.rel_path})` : "";
           const tsSpan = document.createElement("span");
           tsSpan.className = "activity-event-ts";
@@ -801,30 +572,38 @@
         }
       }
 
+      function applyNextReviewState(payload) {
+        if (payload && payload.has_next && Number.isInteger(payload.next_page_id) && payload.next_page_id > 0) {
+          nextReviewPageId = payload.next_page_id;
+          reviewLayoutsBtn.disabled = false;
+          reviewLayoutsBtn.title = payload.next_page_rel_path
+            ? `Open next page: ${payload.next_page_rel_path}`
+            : "Open next layout review page";
+          return;
+        }
+        nextReviewPageId = null;
+        reviewLayoutsBtn.disabled = true;
+        reviewLayoutsBtn.title = "No images available for layout review.";
+      }
+
       async function reloadDashboard() {
-        const [pagesPayload, duplicatesPayload, statsPayload, activityPayload] = await Promise.all([
+        const [pagesPayload, duplicatesPayload, activityPayload, nextReviewPayload] = await Promise.all([
           fetchJson("/api/pages"),
           fetchJson("/api/duplicates"),
-          fetchJson("/api/stats"),
           fetchJson("/api/pipeline/activity"),
+          fetchJson("/api/layout-review/next"),
         ]);
 
-        sourceDirEl.textContent =
-          `Source folder: ${pagesPayload.source_dir} | Formats: ${pagesPayload.allowed_extensions.join(", ")}`;
-        statTotal.textContent = statsPayload.total_pages;
-        statMissing.textContent = statsPayload.missing_pages;
-
-        state.pages = pagesPayload.pages;
-        renderStageTabs(state.pages);
-        renderPages(state.pages);
+        renderPages(pagesPayload.pages);
         renderDuplicates(duplicatesPayload.duplicates);
         renderActivity(activityPayload);
+        applyNextReviewState(nextReviewPayload);
       }
 
       async function refreshActivityOnly() {
         try {
-          const activityPayload = await fetchJson("/api/pipeline/activity");
-          renderActivity(activityPayload);
+          const payload = await fetchJson("/api/pipeline/activity");
+          renderActivity(payload);
         } catch {
           // Keep existing UI state on transient failures.
         }
@@ -875,15 +654,14 @@
 
       async function runScan({ silent = false } = {}) {
         scanBtn.disabled = true;
+        reviewLayoutsBtn.disabled = true;
         wipeBtn.disabled = true;
         if (!silent) {
           lastScan.textContent = "Scanning source folder...";
         }
         try {
-          const scan = await fetchJson("/api/discovery/scan", { method: "POST" });
-          lastScan.textContent =
-            `Scan finished. Scanned: ${scan.scanned_files}, new: ${scan.new_pages}, updated: ${scan.updated_pages}, ` +
-            `missing marked: ${scan.missing_marked}, duplicates: ${scan.duplicate_files}`;
+          await fetchJson("/api/discovery/scan", { method: "POST" });
+          lastScan.textContent = "";
           await reloadDashboard();
         } catch (error) {
           lastScan.textContent = `Scan failed: ${error.message}`;
@@ -909,6 +687,7 @@
       async function runWipe() {
         closeWipeModal();
         scanBtn.disabled = true;
+        reviewLayoutsBtn.disabled = true;
         wipeBtn.disabled = true;
         lastScan.textContent = "Wiping database state...";
 
@@ -923,7 +702,8 @@
           const rescan = result.rescan_summary;
           lastScan.textContent =
             `State wiped. Deleted pages: ${deleted.pages}, layouts: ${deleted.layouts}, duplicates: ${deleted.duplicates}. ` +
-            `Rescan files: ${rescan ? rescan.scanned_files : 0}, indexed: ${rescan ? rescan.new_pages : 0}, duplicates: ${rescan ? rescan.duplicate_files : 0}.`;
+            `Rescan files: ${rescan ? rescan.scanned_files : 0}, indexed: ${rescan ? rescan.new_pages : 0}, duplicates: ${rescan ? rescan.duplicate_files : 0}. ` +
+            `Total Indexed Pages: ${rescan ? rescan.total_pages : 0}, Missing Pages: ${rescan ? rescan.missing_pages : 0}, Active Duplicate Files: ${rescan ? rescan.active_duplicate_files : 0}.`;
           await reloadDashboard();
         } catch (error) {
           lastScan.textContent = `Wipe failed: ${error.message}`;
@@ -933,13 +713,15 @@
         }
       }
 
-      sidebarToggle.addEventListener("click", () => {
-        setSidebarCollapsed(!appShell.classList.contains("sidebar-collapsed"));
-      });
       pipelineToggle.addEventListener("click", () => {
         setPipelinePanelExpanded(!pipelinePanelExpanded);
       });
       scanBtn.addEventListener("click", runScan);
+      reviewLayoutsBtn.addEventListener("click", () => {
+        if (Number.isInteger(nextReviewPageId) && nextReviewPageId > 0) {
+          window.location.href = `/static/layouts.html?page_id=${nextReviewPageId}`;
+        }
+      });
       wipeBtn.addEventListener("click", openWipeModal);
       wipeCancelBtn.addEventListener("click", closeWipeModal);
       wipeConfirmBtn.addEventListener("click", runWipe);
@@ -960,12 +742,9 @@
         }
       });
 
-      writeStorage(STORAGE_KEYS.selectedStageId, state.selectedStageId);
-      syncStageParam(state.selectedStageId);
-      setSidebarCollapsed(readStorageBool(STORAGE_KEYS.sidebarCollapsed, false));
       setPipelinePanelExpanded(readStorageBool(STORAGE_KEYS.pipelinePanelExpanded, false));
-      runScan({ silent: true }).catch((error) => {
-        lastScan.textContent = `Failed to scan dashboard on startup: ${error.message}`;
+      reloadDashboard().catch((error) => {
+        lastScan.textContent = `Failed to load dashboard: ${error.message}`;
       });
       startActivityStream();
     </script>

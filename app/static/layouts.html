@@ -13,8 +13,6 @@
         --accent: #0b7a75;
         --danger: #a52222;
         --border: #e0dccf;
-        --success: #2f7d32;
-        --success-soft: #eaf6eb;
       }
 
       * {
@@ -29,99 +27,6 @@
           radial-gradient(circle at 100% 0, #d6ebe7 0, transparent 30%),
           radial-gradient(circle at 0 100%, #f7e3cf 0, transparent 32%),
           var(--bg);
-      }
-
-      .app-shell {
-        min-height: 100vh;
-        display: grid;
-        grid-template-columns: 280px minmax(0, 1fr);
-        transition: grid-template-columns 180ms ease;
-      }
-
-      .app-shell.sidebar-collapsed {
-        grid-template-columns: 82px minmax(0, 1fr);
-      }
-
-      .sidebar {
-        background: linear-gradient(180deg, #10312d 0%, #1b4742 100%);
-        color: #e9f5f3;
-        border-right: 1px solid rgba(255, 255, 255, 0.12);
-        padding: 14px 10px;
-      }
-
-      .sidebar-top {
-        display: flex;
-        align-items: center;
-        margin-bottom: 12px;
-      }
-
-      .sidebar-toggle {
-        border: 1px solid rgba(255, 255, 255, 0.24);
-        background: rgba(255, 255, 255, 0.12);
-        color: #fff;
-        border-radius: 8px;
-        cursor: pointer;
-        width: 34px;
-        height: 34px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 20px;
-        line-height: 1;
-        font-weight: 700;
-      }
-
-      .stage-tabs {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-
-      .stage-tab {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        border: 1px solid rgba(255, 255, 255, 0.16);
-        background: rgba(255, 255, 255, 0.08);
-        color: #e9f5f3;
-        padding: 9px 10px;
-        border-radius: 10px;
-        cursor: pointer;
-        text-align: left;
-        font-weight: 600;
-        text-decoration: none;
-      }
-
-      .stage-tab.active {
-        border-color: rgba(255, 255, 255, 0.65);
-        background: rgba(255, 255, 255, 0.2);
-      }
-
-      .stage-tab.done {
-        color: var(--success);
-        background: var(--success-soft);
-        border-color: #98d29b;
-      }
-
-      .stage-count {
-        color: inherit;
-        font-size: 12px;
-        opacity: 0.95;
-      }
-
-      .app-shell.sidebar-collapsed .stage-label {
-        display: none;
-      }
-
-      .app-shell.sidebar-collapsed .stage-tab {
-        justify-content: center;
-        padding: 9px 6px;
-      }
-
-      .app-shell.sidebar-collapsed .stage-count {
-        font-size: 11px;
       }
 
       main {
@@ -338,25 +243,6 @@
       }
 
       @media (max-width: 980px) {
-        .app-shell,
-        .app-shell.sidebar-collapsed {
-          grid-template-columns: 1fr;
-        }
-
-        .sidebar {
-          border-right: 0;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-        }
-
-        .app-shell.sidebar-collapsed .stage-label {
-          display: initial;
-        }
-
-        .app-shell.sidebar-collapsed .stage-tab {
-          justify-content: space-between;
-          padding: 9px 10px;
-        }
-
         .grid {
           grid-template-columns: 1fr;
         }
@@ -364,77 +250,67 @@
     </style>
   </head>
   <body>
-    <div id="app-shell" class="app-shell">
-      <aside class="sidebar">
-        <div class="sidebar-top">
-          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Collapse sidebar">‹</button>
+    <main>
+      <section class="header">
+        <div>
+          <h1>Layout Review</h1>
+          <div id="page-meta" class="subline"></div>
         </div>
-        <nav id="stage-tabs" class="stage-tabs" aria-label="Pipeline stage tabs"></nav>
-      </aside>
-
-      <main>
-        <section class="header">
-          <div>
-            <h1>Layout Review</h1>
-            <div id="page-meta" class="subline"></div>
+        <div class="actions">
+          <a class="button-link secondary" href="/">Back to Dashboard</a>
+          <div class="detect-controls">
+            <label>
+              Conf
+              <input id="detect-conf" type="number" min="0" max="1" step="0.01" value="0.25" />
+            </label>
+            <label>
+              IoU
+              <input id="detect-iou" type="number" min="0" max="1" step="0.01" value="0.45" />
+            </label>
           </div>
-          <div class="actions">
-            <a class="button-link secondary" href="/">Back to Dashboard</a>
-            <div class="detect-controls">
-              <label>
-                Conf
-                <input id="detect-conf" type="number" min="0" max="1" step="0.01" value="0.25" />
-              </label>
-              <label>
-                IoU
-                <input id="detect-iou" type="number" min="0" max="1" step="0.01" value="0.45" />
-              </label>
-            </div>
-            <button id="detect-btn" type="button">Redetect Layouts</button>
-            <button id="add-btn" class="secondary" type="button">Add Box</button>
-            <button id="review-btn" type="button">Mark Reviewed</button>
+          <button id="detect-btn" type="button">Redetect Layouts</button>
+          <button id="add-btn" class="secondary" type="button">Add Box</button>
+          <button id="review-btn" type="button">Mark Reviewed</button>
+          <button id="review-next-btn" class="secondary" type="button" disabled>Review</button>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="image-wrap">
+            <img id="page-image" alt="Page for layout review" />
+            <div id="overlay"></div>
           </div>
-        </section>
+          <div id="status-line" class="status-line"></div>
+        </article>
 
-        <section class="grid">
-          <article class="panel">
-            <div class="image-wrap">
-              <img id="page-image" alt="Page for layout review" />
-              <div id="overlay"></div>
-            </div>
-            <div id="status-line" class="status-line"></div>
-          </article>
-
-          <article class="panel">
-            <h2>Layouts</h2>
-            <div id="legend" class="legend">
-              <p class="legend-title">Class Colors</p>
-              <div id="legend-grid" class="legend-grid"></div>
-              <p class="legend-note">Unknown classes are assigned deterministic fallback colors.</p>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Class</th>
-                  <th>Order</th>
-                  <th>BBox (0-1)</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="layouts-body"></tbody>
-            </table>
-          </article>
-        </section>
-      </main>
-    </div>
+        <article class="panel">
+          <h2>Layouts</h2>
+          <div id="legend" class="legend">
+            <p class="legend-title">Class Colors</p>
+            <div id="legend-grid" class="legend-grid"></div>
+            <p class="legend-note">Unknown classes are assigned deterministic fallback colors.</p>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Class</th>
+                <th>Order</th>
+                <th>BBox (0-1)</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="layouts-body"></tbody>
+          </table>
+        </article>
+      </section>
+    </main>
 
     <script type="module">
-      import { STAGES, stageCount, stageDashboardHref } from "/static/js/pipeline_stages.mjs";
       const params = new URLSearchParams(window.location.search);
       const pageId = Number(params.get("page_id"));
       const STORAGE_KEYS = {
-        sidebarCollapsed: "ui.sidebar_collapsed",
         detectConf: "layout.detect_conf",
         detectIou: "layout.detect_iou",
       };
@@ -455,18 +331,6 @@
         }
       }
 
-      function readStorageBool(key, defaultValue) {
-        const raw = readStorage(key);
-        if (raw === null) {
-          return defaultValue;
-        }
-        return raw === "1";
-      }
-
-      const appShell = document.getElementById("app-shell");
-      const sidebarToggle = document.getElementById("sidebar-toggle");
-      const stageTabs = document.getElementById("stage-tabs");
-
       const pageMeta = document.getElementById("page-meta");
       const pageImage = document.getElementById("page-image");
       const overlay = document.getElementById("overlay");
@@ -477,6 +341,7 @@
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
       const reviewBtn = document.getElementById("review-btn");
+      const reviewNextBtn = document.getElementById("review-next-btn");
       const detectConfInput = document.getElementById("detect-conf");
       const detectIouInput = document.getElementById("detect-iou");
 
@@ -484,19 +349,6 @@
         page: null,
         layouts: [],
       };
-      const activeStageId = "layout_review";
-
-      function updateSidebarToggleState() {
-        const isCollapsed = appShell.classList.contains("sidebar-collapsed");
-        sidebarToggle.setAttribute("aria-label", isCollapsed ? "Expand sidebar" : "Collapse sidebar");
-        sidebarToggle.textContent = isCollapsed ? "›" : "‹";
-      }
-
-      function setSidebarCollapsed(collapsed) {
-        appShell.classList.toggle("sidebar-collapsed", collapsed);
-        writeStorage(STORAGE_KEYS.sidebarCollapsed, collapsed ? "1" : "0");
-        updateSidebarToggleState();
-      }
 
       function applyStoredDetectThresholds() {
         const storedConf = readStorage(STORAGE_KEYS.detectConf);
@@ -513,27 +365,6 @@
           if (!Number.isNaN(parsedIou) && parsedIou >= 0 && parsedIou <= 1) {
             detectIouInput.value = storedIou;
           }
-        }
-      }
-
-      function renderStageTabs(pages) {
-        stageTabs.innerHTML = "";
-
-        for (const stage of STAGES) {
-          const count = stageCount(stage, pages);
-          const link = document.createElement("a");
-          link.className = "stage-tab";
-          link.href = stageDashboardHref(stage.id);
-          if (count === 0) {
-            link.classList.add("done");
-          }
-          if (stage.id === activeStageId) {
-            link.classList.add("active");
-          }
-          link.innerHTML =
-            `<span class="stage-label">${stage.name}</span>` + `<span class="stage-count">(${count})</span>`;
-          link.title = `${stage.name} (${count})`;
-          stageTabs.appendChild(link);
         }
       }
 
@@ -831,12 +662,22 @@
         renderLayouts();
       }
 
-      async function loadSidebarCounts() {
+      async function refreshNextReviewButton() {
         try {
-          const payload = await fetchJson("/api/pages");
-          renderStageTabs(payload.pages || []);
+          const payload = await fetchJson(`/api/pages/${pageId}/layout-review-next`);
+          if (payload.has_next && Number.isInteger(payload.next_page_id) && payload.next_page_id > 0) {
+            reviewNextBtn.disabled = false;
+            reviewNextBtn.dataset.nextPageId = String(payload.next_page_id);
+            reviewNextBtn.title = `Open next page: ${payload.next_page_rel_path}`;
+          } else {
+            reviewNextBtn.disabled = true;
+            reviewNextBtn.dataset.nextPageId = "";
+            reviewNextBtn.title = "No pages are waiting for layout review.";
+          }
         } catch {
-          renderStageTabs([]);
+          reviewNextBtn.disabled = true;
+          reviewNextBtn.dataset.nextPageId = "";
+          reviewNextBtn.title = "Failed to load next page for review.";
         }
       }
 
@@ -866,7 +707,7 @@
           );
           await loadPage();
           await loadLayouts();
-          await loadSidebarCounts();
+          await refreshNextReviewButton();
         } catch (error) {
           setStatus(`Redetect failed: ${error.message}`, { isError: true });
         } finally {
@@ -889,7 +730,7 @@
           setStatus("Manual layout added.");
           await loadPage();
           await loadLayouts();
-          await loadSidebarCounts();
+          await refreshNextReviewButton();
         } catch (error) {
           setStatus(`Add failed: ${error.message}`, { isError: true });
         } finally {
@@ -906,7 +747,7 @@
           setStatus(`Page marked reviewed with ${payload.layout_count} layouts.`);
           await loadPage();
           await loadLayouts();
-          await loadSidebarCounts();
+          await refreshNextReviewButton();
         } catch (error) {
           setStatus(`Mark reviewed failed: ${error.message}`, { isError: true });
         } finally {
@@ -917,8 +758,11 @@
       detectBtn.addEventListener("click", detectLayouts);
       addBtn.addEventListener("click", addLayout);
       reviewBtn.addEventListener("click", markReviewed);
-      sidebarToggle.addEventListener("click", () => {
-        setSidebarCollapsed(!appShell.classList.contains("sidebar-collapsed"));
+      reviewNextBtn.addEventListener("click", () => {
+        const nextPageId = Number.parseInt(reviewNextBtn.dataset.nextPageId || "", 10);
+        if (Number.isInteger(nextPageId) && nextPageId > 0) {
+          window.location.href = `/static/layouts.html?page_id=${nextPageId}`;
+        }
       });
       detectConfInput.addEventListener("change", () => {
         writeStorage(STORAGE_KEYS.detectConf, detectConfInput.value);
@@ -933,16 +777,15 @@
           return;
         }
         try {
-          await loadSidebarCounts();
           await loadPage();
           await loadLayouts();
+          await refreshNextReviewButton();
           setStatus("Ready.");
         } catch (error) {
           setStatus(`Load failed: ${error.message}`, { isError: true });
         }
       }
 
-      setSidebarCollapsed(readStorageBool(STORAGE_KEYS.sidebarCollapsed, false));
       applyStoredDetectThresholds();
       init();
     </script>

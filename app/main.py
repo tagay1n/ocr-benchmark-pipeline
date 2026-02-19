@@ -33,17 +33,34 @@ from .pipeline_runtime import (
 async def lifespan(_: FastAPI):
     init_db()
     register_default_handlers()
+    source_dir, allowed_extensions = _discovery_source_info()
+    allowed_text = ", ".join(allowed_extensions)
     emit_event(
         stage="discovery",
         event_type="scan_started",
-        message="Startup discovery scan started.",
-        data={"trigger": "startup"},
+        message=f"Startup discovery scan started for folder {source_dir} (formats: {allowed_text}).",
+        data={
+            "trigger": "startup",
+            "source_dir": source_dir,
+            "allowed_extensions": allowed_extensions,
+        },
     )
     summary = discover_images()
+    stats_snapshot = _pipeline_stats_snapshot()
     emit_event(
         stage="discovery",
         event_type="scan_finished",
-        message="Startup discovery scan finished.",
+        message=_scan_finished_message(
+            "Startup discovery scan finished.",
+            {
+                "scanned_files": summary.scanned_files,
+                "new_pages": summary.new_pages,
+                "updated_pages": summary.updated_pages,
+                "missing_marked": summary.missing_marked,
+                "duplicate_files": summary.duplicate_files,
+                **stats_snapshot,
+            },
+        ),
         data={
             "trigger": "startup",
             "scanned_files": summary.scanned_files,
@@ -51,6 +68,7 @@ async def lifespan(_: FastAPI):
             "updated_pages": summary.updated_pages,
             "missing_marked": summary.missing_marked,
             "duplicate_files": summary.duplicate_files,
+            **stats_snapshot,
         },
     )
     if settings.enable_background_jobs:
@@ -66,6 +84,32 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="OCR Pipeline", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+
+def _discovery_source_info() -> tuple[str, list[str]]:
+    return str(settings.source_dir), list(settings.allowed_extensions)
+
+
+def _pipeline_stats_snapshot() -> dict[str, int]:
+    with get_connection() as conn:
+        total_pages = int(conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0])
+        missing_pages = int(conn.execute("SELECT COUNT(*) FROM pages WHERE is_missing = 1").fetchone()[0])
+        active_duplicate_files = int(conn.execute("SELECT COUNT(*) FROM duplicate_files WHERE active = 1").fetchone()[0])
+    return {
+        "total_pages": total_pages,
+        "missing_pages": missing_pages,
+        "active_duplicate_files": active_duplicate_files,
+    }
+
+
+def _scan_finished_message(prefix: str, payload: dict[str, object]) -> str:
+    return (
+        f"{prefix} "
+        f"Scanned: {payload['scanned_files']}, new: {payload['new_pages']}, updated: {payload['updated_pages']}, "
+        f"missing marked: {payload['missing_marked']}, duplicates: {payload['duplicate_files']}. "
+        f"Total Indexed Pages: {payload['total_pages']}, Missing Pages: {payload['missing_pages']}, "
+        f"Active Duplicate Files: {payload['active_duplicate_files']}."
+    )
 
 
 class BBoxPayload(BaseModel):
@@ -106,13 +150,20 @@ def root() -> FileResponse:
 @app.post("/api/discovery/scan")
 def scan_images() -> dict[str, object]:
     register_default_handlers()
+    source_dir, allowed_extensions = _discovery_source_info()
+    allowed_text = ", ".join(allowed_extensions)
     emit_event(
         stage="discovery",
         event_type="scan_started",
-        message="Discovery scan started.",
-        data={"trigger": "api"},
+        message=f"Discovery scan started for folder {source_dir} (formats: {allowed_text}).",
+        data={
+            "trigger": "api",
+            "source_dir": source_dir,
+            "allowed_extensions": allowed_extensions,
+        },
     )
     summary = discover_images()
+    stats_snapshot = _pipeline_stats_snapshot()
     response: dict[str, object] = {
         "source_dir": summary.source_dir,
         "scanned_files": summary.scanned_files,
@@ -120,11 +171,12 @@ def scan_images() -> dict[str, object]:
         "updated_pages": summary.updated_pages,
         "missing_marked": summary.missing_marked,
         "duplicate_files": summary.duplicate_files,
+        **stats_snapshot,
     }
     emit_event(
         stage="discovery",
         event_type="scan_finished",
-        message="Discovery scan finished.",
+        message=_scan_finished_message("Discovery scan finished.", response),
         data={"trigger": "api", **response},
     )
     if settings.enable_background_jobs:
@@ -178,13 +230,20 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
     rescan_summary: dict[str, int | str] | None = None
     auto_layout_detection: dict[str, int] | None = None
     if payload.rescan:
+        source_dir, allowed_extensions = _discovery_source_info()
+        allowed_text = ", ".join(allowed_extensions)
         emit_event(
             stage="discovery",
             event_type="scan_started",
-            message="Discovery scan started after wipe.",
-            data={"trigger": "wipe"},
+            message=f"Discovery scan started after wipe for folder {source_dir} (formats: {allowed_text}).",
+            data={
+                "trigger": "wipe",
+                "source_dir": source_dir,
+                "allowed_extensions": allowed_extensions,
+            },
         )
         summary = discover_images()
+        stats_snapshot = _pipeline_stats_snapshot()
         rescan_summary = {
             "source_dir": summary.source_dir,
             "scanned_files": summary.scanned_files,
@@ -192,11 +251,12 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
             "updated_pages": summary.updated_pages,
             "missing_marked": summary.missing_marked,
             "duplicate_files": summary.duplicate_files,
+            **stats_snapshot,
         }
         emit_event(
             stage="discovery",
             event_type="scan_finished",
-            message="Discovery scan finished after wipe.",
+            message=_scan_finished_message("Discovery scan finished after wipe.", rescan_summary),
             data={"trigger": "wipe", **rescan_summary},
         )
         if settings.enable_background_jobs:
@@ -300,6 +360,81 @@ def page_layouts(page_id: int) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="Page not found.")
     layouts = list_layouts(page_id)
     return {"page_id": page_id, "count": len(layouts), "layouts": layouts}
+
+
+@app.get("/api/layout-review/next")
+def next_layout_review_page_global() -> dict[str, object]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, rel_path
+            FROM pages
+            WHERE is_missing = 0
+              AND status = 'layout_detected'
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    if row is None:
+        return {
+            "has_next": False,
+            "next_page_id": None,
+            "next_page_rel_path": None,
+        }
+
+    return {
+        "has_next": True,
+        "next_page_id": int(row["id"]),
+        "next_page_rel_path": row["rel_path"],
+    }
+
+
+@app.get("/api/pages/{page_id}/layout-review-next")
+def next_layout_review_page(page_id: int) -> dict[str, object]:
+    page = get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, rel_path
+            FROM pages
+            WHERE is_missing = 0
+              AND status = 'layout_detected'
+              AND id > ?
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (page_id,),
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                """
+                SELECT id, rel_path
+                FROM pages
+                WHERE is_missing = 0
+                  AND status = 'layout_detected'
+                  AND id < ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (page_id,),
+            ).fetchone()
+
+    if row is None:
+        return {
+            "has_next": False,
+            "next_page_id": None,
+            "next_page_rel_path": None,
+        }
+
+    return {
+        "has_next": True,
+        "next_page_id": int(row["id"]),
+        "next_page_rel_path": row["rel_path"],
+    }
 
 
 @app.post("/api/pages/{page_id}/layouts/detect")
@@ -482,13 +617,9 @@ def list_duplicates() -> dict[str, object]:
 
 @app.get("/api/stats")
 def stats() -> dict[str, int]:
-    with get_connection() as conn:
-        total_pages = conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
-        missing_pages = conn.execute("SELECT COUNT(*) FROM pages WHERE is_missing = 1").fetchone()[0]
-        duplicate_count = conn.execute("SELECT COUNT(*) FROM duplicate_files WHERE active = 1").fetchone()[0]
-
+    snapshot = _pipeline_stats_snapshot()
     return {
-        "total_pages": int(total_pages),
-        "missing_pages": int(missing_pages),
-        "duplicate_files": int(duplicate_count),
+        "total_pages": snapshot["total_pages"],
+        "missing_pages": snapshot["missing_pages"],
+        "duplicate_files": snapshot["active_duplicate_files"],
     }
