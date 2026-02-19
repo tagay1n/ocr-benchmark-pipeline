@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+import json
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -19,16 +21,50 @@ from .layouts import (
     mark_layout_reviewed,
     update_layout,
 )
+from .pipeline_runtime import (
+    emit_event,
+    enqueue_layout_detection_for_new_pages,
+    get_activity_snapshot,
+    register_default_handlers,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    discover_images()
+    register_default_handlers()
+    emit_event(
+        stage="discovery",
+        event_type="scan_started",
+        message="Startup discovery scan started.",
+        data={"trigger": "startup"},
+    )
+    summary = discover_images()
+    emit_event(
+        stage="discovery",
+        event_type="scan_finished",
+        message="Startup discovery scan finished.",
+        data={
+            "trigger": "startup",
+            "scanned_files": summary.scanned_files,
+            "new_pages": summary.new_pages,
+            "updated_pages": summary.updated_pages,
+            "missing_marked": summary.missing_marked,
+            "duplicate_files": summary.duplicate_files,
+        },
+    )
+    if settings.enable_background_jobs:
+        auto = enqueue_layout_detection_for_new_pages()
+        emit_event(
+            stage="layout_detect",
+            event_type="jobs_enqueued",
+            message=f"Auto-enqueued {auto['queued']} layout detection jobs after startup discovery.",
+            data={"trigger": "startup", **auto},
+        )
     yield
 
 
-app = FastAPI(title="OCR Benchmark Pipeline", lifespan=lifespan)
+app = FastAPI(title="OCR Pipeline", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
@@ -57,21 +93,134 @@ class UpdateLayoutRequest(BaseModel):
     bbox: BBoxPayload | None = None
 
 
+class WipeStateRequest(BaseModel):
+    confirm: bool = False
+    rescan: bool = True
+
+
 @app.get("/")
 def root() -> FileResponse:
     return FileResponse("app/static/index.html")
 
 
 @app.post("/api/discovery/scan")
-def scan_images() -> dict[str, int | str]:
+def scan_images() -> dict[str, object]:
+    register_default_handlers()
+    emit_event(
+        stage="discovery",
+        event_type="scan_started",
+        message="Discovery scan started.",
+        data={"trigger": "api"},
+    )
     summary = discover_images()
-    return {
+    response: dict[str, object] = {
         "source_dir": summary.source_dir,
         "scanned_files": summary.scanned_files,
         "new_pages": summary.new_pages,
         "updated_pages": summary.updated_pages,
         "missing_marked": summary.missing_marked,
         "duplicate_files": summary.duplicate_files,
+    }
+    emit_event(
+        stage="discovery",
+        event_type="scan_finished",
+        message="Discovery scan finished.",
+        data={"trigger": "api", **response},
+    )
+    if settings.enable_background_jobs:
+        auto = enqueue_layout_detection_for_new_pages()
+        response["auto_layout_detection"] = auto
+        emit_event(
+            stage="layout_detect",
+            event_type="jobs_enqueued",
+            message=f"Auto-enqueued {auto['queued']} layout detection jobs after discovery scan.",
+            data={"trigger": "api", **auto},
+        )
+    else:
+        response["auto_layout_detection"] = {
+            "considered": 0,
+            "queued": 0,
+            "already_queued_or_running": 0,
+        }
+    return response
+
+
+@app.post("/api/state/wipe")
+def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Wipe not confirmed.")
+    emit_event(
+        stage="pipeline",
+        event_type="wipe_started",
+        message="Pipeline state wipe started.",
+    )
+
+    with get_connection() as conn:
+        counts = {
+            "pages": int(conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0]),
+            "layouts": int(conn.execute("SELECT COUNT(*) FROM layouts").fetchone()[0]),
+            "duplicates": int(conn.execute("SELECT COUNT(*) FROM duplicate_files").fetchone()[0]),
+            "pipeline_jobs": int(conn.execute("SELECT COUNT(*) FROM pipeline_jobs").fetchone()[0]),
+            "pipeline_events": int(conn.execute("SELECT COUNT(*) FROM pipeline_events").fetchone()[0]),
+        }
+        conn.execute("DELETE FROM pipeline_events")
+        conn.execute("DELETE FROM pipeline_jobs")
+        conn.execute("DELETE FROM duplicate_files")
+        conn.execute("DELETE FROM layouts")
+        conn.execute("DELETE FROM pages")
+        conn.execute(
+            """
+            DELETE FROM sqlite_sequence
+            WHERE name IN ('pages', 'duplicate_files', 'layouts', 'pipeline_jobs', 'pipeline_events')
+            """
+        )
+
+    rescan_summary: dict[str, int | str] | None = None
+    auto_layout_detection: dict[str, int] | None = None
+    if payload.rescan:
+        emit_event(
+            stage="discovery",
+            event_type="scan_started",
+            message="Discovery scan started after wipe.",
+            data={"trigger": "wipe"},
+        )
+        summary = discover_images()
+        rescan_summary = {
+            "source_dir": summary.source_dir,
+            "scanned_files": summary.scanned_files,
+            "new_pages": summary.new_pages,
+            "updated_pages": summary.updated_pages,
+            "missing_marked": summary.missing_marked,
+            "duplicate_files": summary.duplicate_files,
+        }
+        emit_event(
+            stage="discovery",
+            event_type="scan_finished",
+            message="Discovery scan finished after wipe.",
+            data={"trigger": "wipe", **rescan_summary},
+        )
+        if settings.enable_background_jobs:
+            register_default_handlers()
+            auto_layout_detection = enqueue_layout_detection_for_new_pages()
+            emit_event(
+                stage="layout_detect",
+                event_type="jobs_enqueued",
+                message=f"Auto-enqueued {auto_layout_detection['queued']} layout detection jobs after wipe scan.",
+                data={"trigger": "wipe", **auto_layout_detection},
+            )
+
+    emit_event(
+        stage="pipeline",
+        event_type="wipe_finished",
+        message="Pipeline state wipe finished.",
+        data={"deleted_counts": counts, "rescanned": payload.rescan},
+    )
+    return {
+        "wiped": True,
+        "deleted_counts": counts,
+        "rescanned": payload.rescan,
+        "rescan_summary": rescan_summary,
+        "auto_layout_detection": auto_layout_detection,
     }
 
 
@@ -114,10 +263,12 @@ def page_details(page_id: int) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="Page not found.")
 
     image_path = settings.source_dir / page["rel_path"]
+    image_exists = image_path.exists() and image_path.is_file()
+    image_version = int(image_path.stat().st_mtime_ns) if image_exists else 0
     return {
         "page": page,
-        "image_url": f"/api/pages/{page_id}/image",
-        "image_exists": image_path.exists() and image_path.is_file(),
+        "image_url": f"/api/pages/{page_id}/image?v={image_version}",
+        "image_exists": image_exists,
     }
 
 
@@ -132,7 +283,14 @@ def page_image(page_id: int) -> FileResponse:
         raise HTTPException(status_code=400, detail="Invalid page image path.")
     if not image_path.exists() or not image_path.is_file():
         raise HTTPException(status_code=404, detail="Image file not found.")
-    return FileResponse(image_path)
+    return FileResponse(
+        image_path,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.get("/api/pages/{page_id}/layouts")
@@ -146,6 +304,12 @@ def page_layouts(page_id: int) -> dict[str, object]:
 
 @app.post("/api/pages/{page_id}/layouts/detect")
 def detect_page_layouts(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
+    emit_event(
+        stage="layout_detect",
+        event_type="manual_detect_started",
+        page_id=page_id,
+        message="Manual layout detection started.",
+    )
     try:
         result = detect_layouts_for_page(
             page_id,
@@ -154,7 +318,20 @@ def detect_page_layouts(page_id: int, payload: DetectLayoutsRequest) -> dict[str
             iou_threshold=payload.iou_threshold,
         )
     except ValueError as error:
+        emit_event(
+            stage="layout_detect",
+            event_type="manual_detect_failed",
+            page_id=page_id,
+            message=f"Manual layout detection failed: {error}",
+        )
         raise HTTPException(status_code=400, detail=str(error)) from error
+    emit_event(
+        stage="layout_detect",
+        event_type="manual_detect_completed",
+        page_id=page_id,
+        message=f"Manual layout detection completed with {result['created']} regions.",
+        data={"created": result["created"], "class_counts": result["class_counts"]},
+    )
     return result
 
 
@@ -212,11 +389,60 @@ def remove_layout(layout_id: int) -> dict[str, object]:
 
 @app.post("/api/pages/{page_id}/layouts/review-complete")
 def complete_layout_review(page_id: int) -> dict[str, object]:
+    emit_event(
+        stage="layout_review",
+        event_type="manual_review_complete_started",
+        page_id=page_id,
+        message="Layout review completion requested.",
+    )
     try:
         result = mark_layout_reviewed(page_id)
     except ValueError as error:
+        emit_event(
+            stage="layout_review",
+            event_type="manual_review_complete_failed",
+            page_id=page_id,
+            message=f"Layout review completion failed: {error}",
+        )
         raise HTTPException(status_code=400, detail=str(error)) from error
+    emit_event(
+        stage="layout_review",
+        event_type="manual_review_completed",
+        page_id=page_id,
+        message="Layout review completed.",
+        data={"layout_count": result["layout_count"]},
+    )
     return result
+
+
+@app.get("/api/pipeline/activity")
+def pipeline_activity(limit: int = 30) -> dict[str, object]:
+    register_default_handlers()
+    return get_activity_snapshot(limit=limit)
+
+
+@app.get("/api/pipeline/activity/stream")
+async def pipeline_activity_stream(request: Request, limit: int = 30) -> StreamingResponse:
+    register_default_handlers()
+    safe_limit = max(1, min(limit, 200))
+
+    async def event_generator():
+        while True:
+            if await request.is_disconnected():
+                break
+            payload = get_activity_snapshot(limit=safe_limit)
+            yield f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
+            await asyncio.sleep(2.0)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/duplicates")

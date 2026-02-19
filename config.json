@@ -1,5 +1,0 @@
-{
-  "source_dir": "input",
-  "db_path": "data/ocr_dataset.db",
-  "allowed_image_extensions": [".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"]
-}

@@ -1,17 +1,136 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import UTC, datetime
 import json
+from pathlib import Path
 import sqlite3
+from threading import Lock
 from typing import Any
 
+from .config import settings
 from .db import get_connection
 
-PLACEHOLDER_DETECTOR = "placeholder-doclaynet"
+DOC_LAYOUTNET_REPO_ID = "hantian/yolo-doclaynet"
+DOC_LAYOUTNET_CHECKPOINT = "yolov10b-doclaynet.pt"
+DOC_LAYOUTNET_IMGSZ = 1024
+DOC_LAYOUTNET_DEFAULT_CONF = 0.25
+DOC_LAYOUTNET_DEFAULT_IOU = 0.45
+
+_DOC_LAYOUTNET_MODEL = None
+_DOC_LAYOUTNET_MODEL_LOCK = Lock()
 
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _normalize_class_name(value: str) -> str:
+    normalized = value.strip().lower().replace("-", "_").replace("/", "_")
+    return "_".join(normalized.split())
+
+
+def _load_doclaynet_model():
+    global _DOC_LAYOUTNET_MODEL
+    if _DOC_LAYOUTNET_MODEL is not None:
+        return _DOC_LAYOUTNET_MODEL
+
+    with _DOC_LAYOUTNET_MODEL_LOCK:
+        if _DOC_LAYOUTNET_MODEL is not None:
+            return _DOC_LAYOUTNET_MODEL
+        try:
+            from huggingface_hub import hf_hub_download
+            from ultralytics import YOLO
+        except ImportError as error:
+            raise ValueError(
+                "Layout detector dependencies are missing. Install `ultralytics` and `huggingface_hub`."
+            ) from error
+
+        try:
+            checkpoint_path = hf_hub_download(
+                repo_id=DOC_LAYOUTNET_REPO_ID,
+                filename=DOC_LAYOUTNET_CHECKPOINT,
+            )
+        except Exception as error:
+            raise ValueError(f"Failed to download detector checkpoint: {error}") from error
+
+        try:
+            _DOC_LAYOUTNET_MODEL = YOLO(checkpoint_path)
+        except Exception as error:
+            raise ValueError(f"Failed to initialize layout detector: {error}") from error
+
+    return _DOC_LAYOUTNET_MODEL
+
+
+def _detect_doclaynet_layouts(
+    image_path: Path,
+    *,
+    confidence_threshold: float | None,
+    iou_threshold: float | None,
+) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    model = _load_doclaynet_model()
+
+    conf = DOC_LAYOUTNET_DEFAULT_CONF if confidence_threshold is None else confidence_threshold
+    iou = DOC_LAYOUTNET_DEFAULT_IOU if iou_threshold is None else iou_threshold
+
+    try:
+        prediction = model.predict(
+            str(image_path),
+            verbose=False,
+            imgsz=DOC_LAYOUTNET_IMGSZ,
+            device="cpu",
+            conf=conf,
+            iou=iou,
+        )
+    except Exception as error:
+        raise ValueError(f"Layout detection failed: {error}") from error
+
+    if not prediction:
+        return [], {"confidence_threshold": conf, "iou_threshold": iou}
+
+    result = prediction[0].cpu()
+    height, width = result.orig_shape
+    if width <= 0 or height <= 0:
+        raise ValueError("Invalid image size detected for layout inference.")
+
+    rows: list[dict[str, Any]] = []
+    boxes = result.boxes
+    if boxes is None or len(boxes) == 0:
+        return rows, {"confidence_threshold": conf, "iou_threshold": iou}
+
+    names = result.names
+    for xyxy, confidence, cls_idx in zip(boxes.xyxy, boxes.conf, boxes.cls):
+        x1_abs, y1_abs, x2_abs, y2_abs = [float(v) for v in xyxy.tolist()]
+        x1 = _clamp01(x1_abs / width)
+        y1 = _clamp01(y1_abs / height)
+        x2 = _clamp01(x2_abs / width)
+        y2 = _clamp01(y2_abs / height)
+        if x2 <= x1 or y2 <= y1:
+            continue
+
+        class_id = int(cls_idx.item())
+        if isinstance(names, dict):
+            raw_name = str(names.get(class_id, f"class_{class_id}"))
+        else:
+            raw_name = str(names[class_id]) if class_id < len(names) else f"class_{class_id}"
+
+        rows.append(
+            {
+                "class_name": _normalize_class_name(raw_name),
+                "confidence": float(confidence.item()),
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+            }
+        )
+
+    rows.sort(key=lambda row: (row["y1"], row["x1"]))
+    return rows, {"confidence_threshold": conf, "iou_threshold": iou}
 
 
 def validate_bbox(x1: float, y1: float, x2: float, y2: float) -> None:
@@ -83,11 +202,6 @@ def detect_layouts_for_page(
     iou_threshold: float | None,
 ) -> dict[str, Any]:
     now = _utc_now()
-    detector_params = {
-        "confidence_threshold": confidence_threshold,
-        "iou_threshold": iou_threshold,
-    }
-
     with get_connection() as conn:
         page_row = _get_page_row(conn, page_id)
         if page_row is None:
@@ -95,45 +209,73 @@ def detect_layouts_for_page(
         if int(page_row["is_missing"]) == 1:
             raise ValueError("Page is marked as missing and cannot be detected.")
 
+    image_path = (settings.source_dir / str(page_row["rel_path"])).resolve()
+    source_root = settings.source_dir.resolve()
+    if source_root not in image_path.parents:
+        raise ValueError("Invalid page image path for detection.")
+    if not image_path.exists() or not image_path.is_file():
+        raise ValueError("Image file not found on disk.")
+
+    detected_rows, thresholds = _detect_doclaynet_layouts(
+        image_path,
+        confidence_threshold=confidence_threshold,
+        iou_threshold=iou_threshold,
+    )
+    detector_params = {
+        "confidence_threshold": thresholds["confidence_threshold"],
+        "iou_threshold": thresholds["iou_threshold"],
+        "imgsz": DOC_LAYOUTNET_IMGSZ,
+        "device": "cpu",
+        "model": DOC_LAYOUTNET_CHECKPOINT,
+    }
+    detector_source = f"detector:{DOC_LAYOUTNET_REPO_ID}:{json.dumps(detector_params, separators=(',', ':'))}"
+
+    created_count = 0
+    with get_connection() as conn:
         if replace_existing:
             conn.execute("DELETE FROM layouts WHERE page_id = ?", (page_id,))
 
-        existing_count = conn.execute(
-            "SELECT COUNT(*) FROM layouts WHERE page_id = ?",
-            (page_id,),
-        ).fetchone()[0]
-        next_order = int(existing_count) + 1
-
-        conn.execute(
-            """
-            INSERT INTO layouts(
-                page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                page_id,
-                "text_block",
-                0.0,
-                0.0,
-                1.0,
-                1.0,
-                next_order,
-                None,
-                f"detector:{PLACEHOLDER_DETECTOR}:{json.dumps(detector_params, separators=(',', ':'))}",
-                now,
-                now,
-            ),
+        existing_count = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM layouts WHERE page_id = ?",
+                (page_id,),
+            ).fetchone()[0]
         )
+        for idx, row in enumerate(detected_rows, start=1):
+            conn.execute(
+                """
+                INSERT INTO layouts(
+                    page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    page_id,
+                    row["class_name"],
+                    row["x1"],
+                    row["y1"],
+                    row["x2"],
+                    row["y2"],
+                    existing_count + idx,
+                    row["confidence"],
+                    detector_source,
+                    now,
+                    now,
+                ),
+            )
+            created_count += 1
         conn.execute(
             "UPDATE pages SET status = 'layout_detected', updated_at = ? WHERE id = ?",
             (now, page_id),
         )
 
+    class_counts = dict(Counter(row["class_name"] for row in detected_rows))
     return {
-        "created": 1,
-        "detector": PLACEHOLDER_DETECTOR,
-        "note": "Placeholder detector created one full-page text block. Replace with yolo-doclaynet integration next.",
+        "created": created_count,
+        "detector": f"{DOC_LAYOUTNET_REPO_ID}:{DOC_LAYOUTNET_CHECKPOINT}",
+        "thresholds": thresholds,
+        "class_counts": class_counts,
+        "note": "DocLayNet detection completed.",
     }
 
 

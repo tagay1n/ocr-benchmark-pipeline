@@ -93,3 +93,59 @@ def init_db() -> None:
             ON layouts(page_id, reading_order)
             """
         )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stage TEXT NOT NULL,
+                page_id INTEGER,
+                status TEXT NOT NULL,
+                payload_json TEXT,
+                result_json TEXT,
+                error TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pipeline_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                page_id INTEGER,
+                message TEXT NOT NULL,
+                data_json TEXT,
+                FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE SET NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_status_stage
+            ON pipeline_jobs(status, stage, id)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_stage_page_status
+            ON pipeline_jobs(stage, page_id, status)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_pipeline_events_stage_ts
+            ON pipeline_events(stage, ts DESC)
+            """
+        )

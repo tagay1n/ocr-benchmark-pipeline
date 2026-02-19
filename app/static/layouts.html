@@ -13,6 +13,8 @@
         --accent: #0b7a75;
         --danger: #a52222;
         --border: #e0dccf;
+        --success: #2f7d32;
+        --success-soft: #eaf6eb;
       }
 
       * {
@@ -29,8 +31,102 @@
           var(--bg);
       }
 
+      .app-shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+        transition: grid-template-columns 180ms ease;
+      }
+
+      .app-shell.sidebar-collapsed {
+        grid-template-columns: 82px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        background: linear-gradient(180deg, #10312d 0%, #1b4742 100%);
+        color: #e9f5f3;
+        border-right: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 14px 10px;
+      }
+
+      .sidebar-top {
+        display: flex;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .sidebar-toggle {
+        border: 1px solid rgba(255, 255, 255, 0.24);
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+        border-radius: 8px;
+        cursor: pointer;
+        width: 34px;
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        line-height: 1;
+        font-weight: 700;
+      }
+
+      .stage-tabs {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .stage-tab {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.08);
+        color: #e9f5f3;
+        padding: 9px 10px;
+        border-radius: 10px;
+        cursor: pointer;
+        text-align: left;
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .stage-tab.active {
+        border-color: rgba(255, 255, 255, 0.65);
+        background: rgba(255, 255, 255, 0.2);
+      }
+
+      .stage-tab.done {
+        color: var(--success);
+        background: var(--success-soft);
+        border-color: #98d29b;
+      }
+
+      .stage-count {
+        color: inherit;
+        font-size: 12px;
+        opacity: 0.95;
+      }
+
+      .app-shell.sidebar-collapsed .stage-label {
+        display: none;
+      }
+
+      .app-shell.sidebar-collapsed .stage-tab {
+        justify-content: center;
+        padding: 9px 6px;
+      }
+
+      .app-shell.sidebar-collapsed .stage-count {
+        font-size: 11px;
+      }
+
       main {
-        max-width: 1320px;
+        max-width: 1360px;
+        width: 100%;
         margin: 0 auto;
         padding: 24px;
       }
@@ -55,6 +151,25 @@
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
+      }
+
+      .detect-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .detect-controls label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .detect-controls input {
+        width: 84px;
       }
 
       button,
@@ -130,8 +245,9 @@
         top: -20px;
         left: 0;
         font-size: 12px;
-        background: #0b7a75;
-        color: #fff;
+        background: rgba(255, 253, 247, 0.92);
+        color: #1e1f1c;
+        border: 1px solid #cfc8b7;
         border-radius: 6px;
         padding: 2px 6px;
         white-space: nowrap;
@@ -162,9 +278,59 @@
         border-radius: 8px;
       }
 
+      select {
+        width: 100%;
+        padding: 6px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fff;
+      }
+
       .status-line {
         margin-top: 8px;
         color: var(--muted);
+      }
+
+      .legend {
+        margin-bottom: 12px;
+        padding: 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fff;
+      }
+
+      .legend-title {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .legend-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 10px;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 12px;
+      }
+
+      .legend-swatch {
+        width: 14px;
+        height: 14px;
+        border-radius: 3px;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        flex: 0 0 auto;
+      }
+
+      .legend-note {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 11px;
       }
 
       .error {
@@ -172,6 +338,25 @@
       }
 
       @media (max-width: 980px) {
+        .app-shell,
+        .app-shell.sidebar-collapsed {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          border-right: 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        .app-shell.sidebar-collapsed .stage-label {
+          display: initial;
+        }
+
+        .app-shell.sidebar-collapsed .stage-tab {
+          justify-content: space-between;
+          padding: 9px 10px;
+        }
+
         .grid {
           grid-template-columns: 1fr;
         }
@@ -179,65 +364,236 @@
     </style>
   </head>
   <body>
-    <main>
-      <section class="header">
-        <div>
-          <h1>Layout Review</h1>
-          <div id="page-meta" class="subline"></div>
+    <div id="app-shell" class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-top">
+          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Collapse sidebar">‹</button>
         </div>
-        <div class="actions">
-          <a class="button-link secondary" href="/">Back to Dashboard</a>
-          <button id="detect-btn" type="button">Redetect Layouts</button>
-          <button id="add-btn" class="secondary" type="button">Add Box</button>
-          <button id="review-btn" type="button">Mark Reviewed</button>
-        </div>
-      </section>
+        <nav id="stage-tabs" class="stage-tabs" aria-label="Pipeline stage tabs"></nav>
+      </aside>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="image-wrap">
-            <img id="page-image" alt="Page for layout review" />
-            <div id="overlay"></div>
+      <main>
+        <section class="header">
+          <div>
+            <h1>Layout Review</h1>
+            <div id="page-meta" class="subline"></div>
           </div>
-          <div id="status-line" class="status-line"></div>
-        </article>
+          <div class="actions">
+            <a class="button-link secondary" href="/">Back to Dashboard</a>
+            <div class="detect-controls">
+              <label>
+                Conf
+                <input id="detect-conf" type="number" min="0" max="1" step="0.01" value="0.25" />
+              </label>
+              <label>
+                IoU
+                <input id="detect-iou" type="number" min="0" max="1" step="0.01" value="0.45" />
+              </label>
+            </div>
+            <button id="detect-btn" type="button">Redetect Layouts</button>
+            <button id="add-btn" class="secondary" type="button">Add Box</button>
+            <button id="review-btn" type="button">Mark Reviewed</button>
+          </div>
+        </section>
 
-        <article class="panel">
-          <h2>Layouts</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Class</th>
-                <th>Order</th>
-                <th>BBox (0-1)</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="layouts-body"></tbody>
-          </table>
-        </article>
-      </section>
-    </main>
+        <section class="grid">
+          <article class="panel">
+            <div class="image-wrap">
+              <img id="page-image" alt="Page for layout review" />
+              <div id="overlay"></div>
+            </div>
+            <div id="status-line" class="status-line"></div>
+          </article>
 
-    <script>
+          <article class="panel">
+            <h2>Layouts</h2>
+            <div id="legend" class="legend">
+              <p class="legend-title">Class Colors</p>
+              <div id="legend-grid" class="legend-grid"></div>
+              <p class="legend-note">Unknown classes are assigned deterministic fallback colors.</p>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Class</th>
+                  <th>Order</th>
+                  <th>BBox (0-1)</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="layouts-body"></tbody>
+            </table>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script type="module">
+      import { STAGES, stageCount, stageDashboardHref } from "/static/js/pipeline_stages.mjs";
       const params = new URLSearchParams(window.location.search);
       const pageId = Number(params.get("page_id"));
+      const STORAGE_KEYS = {
+        sidebarCollapsed: "ui.sidebar_collapsed",
+        detectConf: "layout.detect_conf",
+        detectIou: "layout.detect_iou",
+      };
+
+      function readStorage(key) {
+        try {
+          return window.localStorage.getItem(key);
+        } catch {
+          return null;
+        }
+      }
+
+      function writeStorage(key, value) {
+        try {
+          window.localStorage.setItem(key, value);
+        } catch {
+          // Ignore storage errors (private mode / quota / disabled storage).
+        }
+      }
+
+      function readStorageBool(key, defaultValue) {
+        const raw = readStorage(key);
+        if (raw === null) {
+          return defaultValue;
+        }
+        return raw === "1";
+      }
+
+      const appShell = document.getElementById("app-shell");
+      const sidebarToggle = document.getElementById("sidebar-toggle");
+      const stageTabs = document.getElementById("stage-tabs");
 
       const pageMeta = document.getElementById("page-meta");
       const pageImage = document.getElementById("page-image");
       const overlay = document.getElementById("overlay");
       const statusLine = document.getElementById("status-line");
       const layoutsBody = document.getElementById("layouts-body");
+      const legendGrid = document.getElementById("legend-grid");
 
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
       const reviewBtn = document.getElementById("review-btn");
+      const detectConfInput = document.getElementById("detect-conf");
+      const detectIouInput = document.getElementById("detect-iou");
 
       const state = {
         page: null,
         layouts: [],
       };
+      const activeStageId = "layout_review";
+
+      function updateSidebarToggleState() {
+        const isCollapsed = appShell.classList.contains("sidebar-collapsed");
+        sidebarToggle.setAttribute("aria-label", isCollapsed ? "Expand sidebar" : "Collapse sidebar");
+        sidebarToggle.textContent = isCollapsed ? "›" : "‹";
+      }
+
+      function setSidebarCollapsed(collapsed) {
+        appShell.classList.toggle("sidebar-collapsed", collapsed);
+        writeStorage(STORAGE_KEYS.sidebarCollapsed, collapsed ? "1" : "0");
+        updateSidebarToggleState();
+      }
+
+      function applyStoredDetectThresholds() {
+        const storedConf = readStorage(STORAGE_KEYS.detectConf);
+        const storedIou = readStorage(STORAGE_KEYS.detectIou);
+
+        if (storedConf !== null) {
+          const parsedConf = Number(storedConf);
+          if (!Number.isNaN(parsedConf) && parsedConf >= 0 && parsedConf <= 1) {
+            detectConfInput.value = storedConf;
+          }
+        }
+        if (storedIou !== null) {
+          const parsedIou = Number(storedIou);
+          if (!Number.isNaN(parsedIou) && parsedIou >= 0 && parsedIou <= 1) {
+            detectIouInput.value = storedIou;
+          }
+        }
+      }
+
+      function renderStageTabs(pages) {
+        stageTabs.innerHTML = "";
+
+        for (const stage of STAGES) {
+          const count = stageCount(stage, pages);
+          const link = document.createElement("a");
+          link.className = "stage-tab";
+          link.href = stageDashboardHref(stage.id);
+          if (count === 0) {
+            link.classList.add("done");
+          }
+          if (stage.id === activeStageId) {
+            link.classList.add("active");
+          }
+          link.innerHTML =
+            `<span class="stage-label">${stage.name}</span>` + `<span class="stage-count">(${count})</span>`;
+          link.title = `${stage.name} (${count})`;
+          stageTabs.appendChild(link);
+        }
+      }
+
+      const CLASS_COLORS = {
+        title: "#8f4b63",
+        section_header: "#355fa8",
+        text: "#4f5d69",
+        list_item: "#2f6f5f",
+        table: "#6f7d2f",
+        picture: "#8a6831",
+        caption: "#496f98",
+        footnote: "#7a6030",
+        formula: "#7b5a95",
+        page_header: "#3f6e69",
+        page_footer: "#8b5949",
+      };
+
+      const KNOWN_LAYOUT_CLASSES = [
+        "title",
+        "section_header",
+        "text",
+        "list_item",
+        "table",
+        "picture",
+        "caption",
+        "footnote",
+        "formula",
+        "page_header",
+        "page_footer",
+      ];
+
+      const FALLBACK_COLORS = ["#4e6f8f", "#7c5f90", "#3f7b69", "#8d6a3b", "#82605b", "#537987", "#6e6b3f"];
+
+      function hashString(value) {
+        let hash = 0;
+        for (let i = 0; i < value.length; i += 1) {
+          hash = (hash << 5) - hash + value.charCodeAt(i);
+          hash |= 0;
+        }
+        return Math.abs(hash);
+      }
+
+      function colorForClass(className) {
+        const normalized = String(className || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[-/\s]+/g, "_");
+        if (CLASS_COLORS[normalized]) {
+          return CLASS_COLORS[normalized];
+        }
+        return FALLBACK_COLORS[hashString(normalized) % FALLBACK_COLORS.length];
+      }
+
+      function hexToRgba(hex, alpha) {
+        const clean = hex.replace("#", "");
+        const r = Number.parseInt(clean.slice(0, 2), 16);
+        const g = Number.parseInt(clean.slice(2, 4), 16);
+        const b = Number.parseInt(clean.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      }
 
       function setStatus(message, { isError = false } = {}) {
         statusLine.textContent = message;
@@ -271,6 +627,7 @@
       function renderOverlay() {
         overlay.innerHTML = "";
         for (const layout of state.layouts) {
+          const color = colorForClass(layout.class_name);
           const box = document.createElement("div");
           box.className = "box";
           const style = boxStyle(layout);
@@ -278,12 +635,89 @@
           box.style.top = style.top;
           box.style.width = style.width;
           box.style.height = style.height;
+          box.style.borderColor = color;
+          box.style.background = hexToRgba(color, 0.16);
 
           const label = document.createElement("div");
           label.className = "box-label";
+          label.style.color = color;
+          label.style.borderColor = hexToRgba(color, 0.62);
           label.textContent = `${layout.reading_order}. ${layout.class_name}`;
           box.appendChild(label);
           overlay.appendChild(box);
+        }
+      }
+
+      function formatClassLabel(className) {
+        return String(className)
+          .replace(/_/g, " ")
+          .replace(/\b\w/g, (m) => m.toUpperCase());
+      }
+
+      function normalizeClassName(className) {
+        return String(className || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[-/\s]+/g, "_");
+      }
+
+      function buildClassSelect(initialClass) {
+        const select = document.createElement("select");
+        const normalizedInitial = normalizeClassName(initialClass);
+        const classes = [...KNOWN_LAYOUT_CLASSES];
+        if (normalizedInitial && !classes.includes(normalizedInitial)) {
+          classes.unshift(normalizedInitial);
+        }
+
+        for (const className of classes) {
+          const option = document.createElement("option");
+          option.value = className;
+          option.textContent = formatClassLabel(className);
+          select.appendChild(option);
+        }
+
+        select.value = normalizedInitial || "text";
+        return select;
+      }
+
+      function applyClassColorToSelect(select, className) {
+        const color = colorForClass(className);
+        select.style.borderColor = hexToRgba(color, 0.55);
+        select.style.color = color;
+      }
+
+      function renderLegend() {
+        const seen = new Set(Object.keys(CLASS_COLORS));
+        for (const layout of state.layouts) {
+          const normalized = String(layout.class_name || "")
+            .trim()
+            .toLowerCase()
+            .replace(/[-/\s]+/g, "_");
+          if (normalized) {
+            seen.add(normalized);
+          }
+        }
+
+        const classes = Array.from(seen).sort();
+        legendGrid.innerHTML = "";
+
+        for (const className of classes) {
+          const color = colorForClass(className);
+          const item = document.createElement("div");
+          item.className = "legend-item";
+
+          const swatch = document.createElement("span");
+          swatch.className = "legend-swatch";
+          swatch.style.background = hexToRgba(color, 0.22);
+          swatch.style.borderColor = hexToRgba(color, 0.7);
+
+          const label = document.createElement("span");
+          label.textContent = formatClassLabel(className);
+          label.style.color = color;
+
+          item.appendChild(swatch);
+          item.appendChild(label);
+          legendGrid.appendChild(item);
         }
       }
 
@@ -295,8 +729,11 @@
         tr.appendChild(idTd);
 
         const classTd = document.createElement("td");
-        const classInput = document.createElement("input");
-        classInput.value = layout.class_name;
+        const classInput = buildClassSelect(layout.class_name);
+        applyClassColorToSelect(classInput, layout.class_name);
+        classInput.addEventListener("change", () => {
+          applyClassColorToSelect(classInput, classInput.value);
+        });
         classTd.appendChild(classInput);
         tr.appendChild(classTd);
 
@@ -335,7 +772,7 @@
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                class_name: classInput.value.trim(),
+                class_name: classInput.value,
                 reading_order: Number(orderInput.value),
                 bbox: {
                   x1: Number(bboxFields[0][1].value),
@@ -378,6 +815,7 @@
           layoutsBody.appendChild(layoutRow(layout));
         }
         renderOverlay();
+        renderLegend();
       }
 
       async function loadPage() {
@@ -393,17 +831,42 @@
         renderLayouts();
       }
 
+      async function loadSidebarCounts() {
+        try {
+          const payload = await fetchJson("/api/pages");
+          renderStageTabs(payload.pages || []);
+        } catch {
+          renderStageTabs([]);
+        }
+      }
+
       async function detectLayouts() {
         detectBtn.disabled = true;
         try {
+          const confidence = Number(detectConfInput.value);
+          const iou = Number(detectIouInput.value);
+          if (Number.isNaN(confidence) || confidence < 0 || confidence > 1) {
+            throw new Error("Confidence must be between 0 and 1.");
+          }
+          if (Number.isNaN(iou) || iou < 0 || iou > 1) {
+            throw new Error("IoU must be between 0 and 1.");
+          }
+
           const payload = await fetchJson(`/api/pages/${pageId}/layouts/detect`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ replace_existing: true }),
+            body: JSON.stringify({
+              replace_existing: true,
+              confidence_threshold: confidence,
+              iou_threshold: iou,
+            }),
           });
-          setStatus(`Redetect finished. ${payload.note}`);
+          setStatus(
+            `Redetect finished. Created ${payload.created} layouts. Conf=${payload.thresholds.confidence_threshold}, IoU=${payload.thresholds.iou_threshold}.`,
+          );
           await loadPage();
           await loadLayouts();
+          await loadSidebarCounts();
         } catch (error) {
           setStatus(`Redetect failed: ${error.message}`, { isError: true });
         } finally {
@@ -418,7 +881,7 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              class_name: "text_block",
+              class_name: "text",
               reading_order: null,
               bbox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.2 },
             }),
@@ -426,6 +889,7 @@
           setStatus("Manual layout added.");
           await loadPage();
           await loadLayouts();
+          await loadSidebarCounts();
         } catch (error) {
           setStatus(`Add failed: ${error.message}`, { isError: true });
         } finally {
@@ -442,6 +906,7 @@
           setStatus(`Page marked reviewed with ${payload.layout_count} layouts.`);
           await loadPage();
           await loadLayouts();
+          await loadSidebarCounts();
         } catch (error) {
           setStatus(`Mark reviewed failed: ${error.message}`, { isError: true });
         } finally {
@@ -452,6 +917,15 @@
       detectBtn.addEventListener("click", detectLayouts);
       addBtn.addEventListener("click", addLayout);
       reviewBtn.addEventListener("click", markReviewed);
+      sidebarToggle.addEventListener("click", () => {
+        setSidebarCollapsed(!appShell.classList.contains("sidebar-collapsed"));
+      });
+      detectConfInput.addEventListener("change", () => {
+        writeStorage(STORAGE_KEYS.detectConf, detectConfInput.value);
+      });
+      detectIouInput.addEventListener("change", () => {
+        writeStorage(STORAGE_KEYS.detectIou, detectIouInput.value);
+      });
 
       async function init() {
         if (!Number.isInteger(pageId) || pageId <= 0) {
@@ -459,6 +933,7 @@
           return;
         }
         try {
+          await loadSidebarCounts();
           await loadPage();
           await loadLayouts();
           setStatus("Ready.");
@@ -467,6 +942,8 @@
         }
       }
 
+      setSidebarCollapsed(readStorageBool(STORAGE_KEYS.sidebarCollapsed, false));
+      applyStoredDetectThresholds();
       init();
     </script>
   </body>
