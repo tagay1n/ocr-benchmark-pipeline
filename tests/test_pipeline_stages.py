@@ -20,6 +20,7 @@ class PipelineStagesTests(unittest.TestCase):
             project_root=self.project_root,
             source_dir=self.project_root / "input",
             db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
             allowed_extensions=DEFAULT_EXTENSIONS,
             enable_background_jobs=False,
         )
@@ -189,6 +190,7 @@ class PipelineStagesTests(unittest.TestCase):
             project_root=self.project_root,
             source_dir=self.project_root / "input",
             db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
             allowed_extensions=DEFAULT_EXTENSIONS,
             enable_background_jobs=True,
         )
@@ -271,6 +273,7 @@ class PipelineStagesTests(unittest.TestCase):
             project_root=self.project_root,
             source_dir=self.project_root / "input",
             db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
             allowed_extensions=DEFAULT_EXTENSIONS,
             enable_background_jobs=False,
             gemini_keys=("k1", "k2"),
@@ -309,9 +312,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(result["requests_count"], 1)
         gemini_mock.assert_called_once()
 
-        usage_payload = json.loads(self.test_settings.gemini_usage_path.read_text(encoding="utf-8"))
-        self.assertEqual(usage_payload["requests_per_key"]["k1"], 1)
-        self.assertEqual(usage_payload["last_key"], "k1")
+        self.assertFalse(self.test_settings.gemini_usage_path.exists())
 
         page_payload = main.page_details(page_id)
         self.assertEqual(page_payload["page"]["status"], "ocr_done")
@@ -321,11 +322,61 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(outputs_payload["outputs"][0]["output_format"], "markdown")
         self.assertEqual(outputs_payload["outputs"][0]["content"], "Extracted text")
 
+    def test_ocr_extract_stores_exhausted_keys_as_json_array(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=False,
+            gemini_keys=("k1", "k2"),
+            gemini_usage_path=self.project_root / "_artifacts" / "gemini_usage.json",
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        db.init_db()
+
+        self._write_image("ocr-exhausted.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        def fake_gemini_call(api_key: str, prompt: str, image_bytes: bytes) -> str:
+            del prompt, image_bytes
+            if api_key == "k1":
+                raise RuntimeError("HTTP 429 quota exceeded")
+            return "Extracted text"
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", side_effect=fake_gemini_call
+        ):
+            result = pipeline_runtime._ocr_extract_handler({"page_id": page_id, "payload": {}, "id": 1, "stage": "ocr_extract"})
+
+        self.assertEqual(result["status"], "ocr_done")
+        usage_payload = json.loads(self.test_settings.gemini_usage_path.read_text(encoding="utf-8"))
+        self.assertEqual(usage_payload, ["k1"])
+
     def test_ocr_review_flow_updates_output_and_marks_reviewed(self) -> None:
         self.test_settings = Settings(
             project_root=self.project_root,
             source_dir=self.project_root / "input",
             db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
             allowed_extensions=DEFAULT_EXTENSIONS,
             enable_background_jobs=False,
             gemini_keys=("k1",),

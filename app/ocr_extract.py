@@ -14,7 +14,6 @@ from .config import settings
 from .db import get_connection
 
 GEMINI_MODEL = "gemini-3-flash-preview"
-MAX_REQUESTS_PER_KEY = 20
 MAX_RETRIES_PER_LAYOUT = 3
 
 MARKDOWN_CLASSES = {
@@ -58,94 +57,58 @@ def _usage_path() -> Path:
     return usage_path
 
 
-def _empty_usage() -> dict[str, Any]:
-    return {
-        "requests_per_key": {},
-        "exhausted_keys": [],
-        "last_key": None,
-        "updated_at": _utc_now(),
-    }
-
-
-def _load_usage_state() -> dict[str, Any]:
+def _load_usage_state() -> list[str]:
     path = _usage_path()
     if not path.exists():
-        return _empty_usage()
+        return []
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return _empty_usage()
-    if not isinstance(payload, dict):
-        return _empty_usage()
+        return []
 
-    requests_per_key_raw = payload.get("requests_per_key", {})
-    requests_per_key: dict[str, int] = {}
-    if isinstance(requests_per_key_raw, dict):
-        for key, value in requests_per_key_raw.items():
-            if not isinstance(key, str):
-                continue
-            try:
-                requests_per_key[key] = max(0, int(value))
-            except (TypeError, ValueError):
-                continue
+    exhausted_keys_raw: list[object]
+    if isinstance(payload, list):
+        exhausted_keys_raw = payload
+    elif isinstance(payload, dict):
+        exhausted_keys_raw = payload.get("exhausted_keys", [])
+        if not isinstance(exhausted_keys_raw, list):
+            return []
+    else:
+        return []
 
-    exhausted_raw = payload.get("exhausted_keys", [])
     exhausted_keys: list[str] = []
-    if isinstance(exhausted_raw, list):
-        exhausted_keys = [str(value) for value in exhausted_raw if str(value).strip()]
-
-    last_key_raw = payload.get("last_key")
-    last_key = str(last_key_raw) if isinstance(last_key_raw, str) and last_key_raw.strip() else None
-
-    return {
-        "requests_per_key": requests_per_key,
-        "exhausted_keys": exhausted_keys,
-        "last_key": last_key,
-        "updated_at": str(payload.get("updated_at") or _utc_now()),
-    }
+    seen: set[str] = set()
+    for value in exhausted_keys_raw:
+        key = str(value).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        exhausted_keys.append(key)
+    return exhausted_keys
 
 
-def _save_usage_state(state: dict[str, Any]) -> None:
+def _save_usage_state(exhausted_keys: list[str]) -> None:
     path = _usage_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    state["updated_at"] = _utc_now()
-    path.write_text(json.dumps(state, ensure_ascii=True, indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(json.dumps(exhausted_keys, ensure_ascii=True, indent=2), encoding="utf-8")
 
 
-def _next_available_key(state: dict[str, Any]) -> str:
+def _next_available_key(exhausted_keys: list[str]) -> str:
     configured = list(settings.gemini_keys)
     if not configured:
         raise GeminiQuotaExhaustedError("No Gemini API keys configured.")
 
-    requests_per_key = state.get("requests_per_key", {})
-    exhausted_set = set(state.get("exhausted_keys", []))
-    candidates = [
-        key for key in configured if key not in exhausted_set and int(requests_per_key.get(key, 0)) < MAX_REQUESTS_PER_KEY
-    ]
+    exhausted_set = set(exhausted_keys)
+    candidates = [key for key in configured if key not in exhausted_set]
     if not candidates:
         raise GeminiQuotaExhaustedError("All configured Gemini keys are exhausted for today.")
-
-    last_key = state.get("last_key")
-    if last_key in candidates:
-        last_idx = candidates.index(last_key)
-        next_idx = (last_idx + 1) % len(candidates)
-        return candidates[next_idx]
     return candidates[0]
 
 
-def _mark_key_success(state: dict[str, Any], key: str) -> None:
-    requests_per_key = state.setdefault("requests_per_key", {})
-    requests_per_key[key] = int(requests_per_key.get(key, 0)) + 1
-    state["last_key"] = key
-    _save_usage_state(state)
-
-
-def _mark_key_exhausted(state: dict[str, Any], key: str) -> None:
-    exhausted_keys = state.setdefault("exhausted_keys", [])
+def _mark_key_exhausted(exhausted_keys: list[str], key: str) -> None:
     if key not in exhausted_keys:
         exhausted_keys.append(key)
-    state["last_key"] = key
-    _save_usage_state(state)
+        _save_usage_state(exhausted_keys)
 
 
 def _extract_text_from_response(payload: dict[str, Any]) -> str:
@@ -387,7 +350,7 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
     if not layouts:
         raise ValueError("No layouts found for OCR extraction.")
 
-    usage_state = _load_usage_state()
+    exhausted_keys = _load_usage_state()
 
     extracted_count = 0
     skipped_count = 0
@@ -411,10 +374,9 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
         response_text = ""
         used_key = ""
         for _ in range(MAX_RETRIES_PER_LAYOUT):
-            key = _next_available_key(usage_state)
+            key = _next_available_key(exhausted_keys)
             try:
                 response_text = _gemini_generate_content(key, prompt, image_bytes)
-                _mark_key_success(usage_state, key)
                 request_count += 1
                 used_key = key
                 last_error = None
@@ -422,7 +384,7 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
             except Exception as error:
                 error_text = str(error)
                 if _is_quota_error(error_text):
-                    _mark_key_exhausted(usage_state, key)
+                    _mark_key_exhausted(exhausted_keys, key)
                     last_error = error_text
                     continue
                 last_error = error_text
