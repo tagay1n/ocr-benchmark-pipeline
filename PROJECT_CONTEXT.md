@@ -53,16 +53,20 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - auto-scan on app startup
   - dashboard refresh does not auto-scan; scanning is manual via `Scan` button
   - manual scan endpoint/button
-- Dashboard V1:
-  - single dashboard view with all indexed pages (no stage sidebar/tabs)
+  - Dashboard V1:
+    - single dashboard view with all indexed pages (no stage sidebar/tabs)
   - removed standalone stats panel (`Total Indexed Pages`, `Missing Pages`, `Active Duplicate Files`)
   - duplicate warnings that persist until duplicates are removed
   - header actions: `Scan`, `Review layouts`, `Wipe DB State`
-  - header actions are rendered under title; pipeline flow is shown as `Scan > Review layouts`
+    - header actions are rendered under title; pipeline flow is shown as `Scan -> Review layouts`
+    - pipeline direction separator uses a larger icon-only flow chip (double chevrons, no text)
+    - `Scan` and `Review layouts` now share the same primary button color scheme
   - source folder and allowed formats are included in discovery `scan_started` backend event messages/data in pipeline logs
   - total/missing/active-duplicate stats are included in discovery `scan_finished` backend event messages/data
   - scan button success no longer prints verbose summary label; scan details are shown in backend activity logs
-  - `Review layouts` button auto-disables when no page is ready
+    - `Review layouts` button auto-disables when no page is ready
+    - removed per-row `Layout Review` table column/action from dashboard list
+    - added extra vertical spacing between `Dashboard` title and pipeline action buttons
   - wipe DB state action with typed confirmation (`wipe`) in modal
   - live pipeline activity panel is collapsed by default and persisted in local storage
   - activity rows render as plain log lines (no numeric indexes)
@@ -113,6 +117,9 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - layout review `Back to Dashboard` text button replaced with isolated top-right back glyph button
   - layout review nav controls switched from font glyphs to inline SVG icons for precise centering and consistent rendering
   - layout review page meta line no longer renders `status: ...` label (keeps page id and path labels)
+  - layout review header now shows explicit review-state badge:
+    - `Needs review` when page status is `layout_detected`
+    - `Reviewed` when page status is `layout_reviewed`
   - replaced standalone `Review` action with top-left navigation controls:
     - `Back` button goes to previous page from persistent review history
     - `Forth` button opens next page waiting for layout review
@@ -129,6 +136,9 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
     - modal includes direct links to official Ultralytics docs for parameter meanings
   - backend detection API/schema now accepts and validates the same inference params
   - `Mark Reviewed` now automatically opens the next available page waiting for layout review
+  - `Mark Reviewed` button state now reflects page review state:
+    - on already-reviewed pages with no local edits, button becomes disabled `Reviewed`
+    - if local edits exist on a reviewed page, button is enabled as `Mark Reviewed` to submit changes
   - layout review image panel spacing tightened:
     - removed extra card padding around image viewport
     - removed dynamic viewport side/top/bottom padding that created large empty margins
@@ -179,6 +189,25 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-20:
+  - Layout review status clarity update:
+    - added header review-state badge (`Needs review` / `Reviewed`) driven by page status
+    - main review action now auto-switches between active `Mark Reviewed` and disabled `Reviewed` based on status+draft edits
+  - Dashboard pipeline separator size increase:
+    - scaled up the capsule double-chevron icon for stronger visibility
+  - Dashboard pipeline separator visual refinement:
+    - upgraded separator to a larger capsule-style double-chevron flow icon
+  - Dashboard pipeline separator update:
+    - replaced text separator with an icon-only right-arrow divider between `Scan` and `Review layouts`
+  - Dashboard pipeline separator refinement:
+    - replaced arrow separator with styled text label (`then`) for a cleaner professional look
+  - Dashboard pipeline button style consistency:
+    - unified `Scan` and `Review layouts` to the same primary styling (removed secondary variant on review button)
+  - Dashboard pipeline action separator polish:
+    - replaced `>` divider between `Scan` and `Review layouts` with right-arrow glyph (`→`)
+  - Dashboard header spacing tweak:
+    - increased gap between `Dashboard` title and `Scan > Review layouts` action row
+  - Dashboard table cleanup:
+    - removed `Layout Review` column and per-row `Open` action link from `All Indexed Images`
   - Layout review draw-mode cursor simplification:
     - removed extra inline plus marker rendering near pointer
     - retained native crosshair cursor + drag preview rectangle

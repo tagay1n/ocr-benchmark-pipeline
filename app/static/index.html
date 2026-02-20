@@ -57,6 +57,7 @@
         align-items: center;
         gap: 8px;
         flex-wrap: wrap;
+        margin-top: 10px;
       }
 
       .pipeline-actions {
@@ -66,10 +67,26 @@
       }
 
       .pipeline-separator {
+        width: 44px;
+        height: 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         color: var(--muted);
-        font-weight: 700;
-        font-size: 16px;
-        line-height: 1;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: #f1ece1;
+      }
+
+      .pipeline-separator-icon {
+        width: 26px;
+        height: 26px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
       button {
@@ -307,8 +324,13 @@
           <div class="header-actions">
             <div class="pipeline-actions" role="group" aria-label="Pipeline actions">
               <button id="scan-btn" type="button">Scan</button>
-              <span class="pipeline-separator" aria-hidden="true">&gt;</span>
-              <button id="review-layouts-btn" class="secondary" type="button" disabled>Review layouts</button>
+              <span class="pipeline-separator" aria-hidden="true">
+                <svg class="pipeline-separator-icon" viewBox="0 0 24 24" focusable="false">
+                  <path d="m6 7 5 5-5 5"></path>
+                  <path d="m13 7 5 5-5 5"></path>
+                </svg>
+              </span>
+              <button id="review-layouts-btn" type="button" disabled>Review layouts</button>
             </div>
           </div>
         </div>
@@ -345,7 +367,6 @@
               <th>Relative Path</th>
               <th>Status</th>
               <th>Last Seen</th>
-              <th>Layout Review</th>
             </tr>
           </thead>
           <tbody id="pages-body"></tbody>
@@ -472,7 +493,7 @@
         pagesBody.innerHTML = "";
         if (pages.length === 0) {
           const tr = document.createElement("tr");
-          tr.innerHTML = '<td class="empty-row" colspan="5">No indexed documents found yet.</td>';
+          tr.innerHTML = '<td class="empty-row" colspan="4">No indexed documents found yet.</td>';
           pagesBody.appendChild(tr);
           return;
         }
@@ -488,13 +509,6 @@
               </span>
             </td>
             <td>${formatDateTime(page.last_seen_at)}</td>
-            <td>
-              ${
-                page.is_missing
-                  ? '<span class="subline">Unavailable</span>'
-                  : `<a href="/static/layouts.html?page_id=${page.id}">Open</a>`
-              }
-            </td>
           `;
           pagesBody.appendChild(tr);
         }

@@ -108,6 +108,45 @@
         color: var(--muted);
       }
 
+      .meta-strip {
+        margin-top: 4px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .review-state-badge {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.35;
+        color: var(--muted);
+        background: #ece9df;
+      }
+
+      .review-state-badge.needs-review {
+        color: #7a5a1d;
+        border-color: #dfcba2;
+        background: #f4ead2;
+      }
+
+      .review-state-badge.reviewed {
+        color: #1c5e4f;
+        border-color: #b9d8cc;
+        background: #deeee7;
+      }
+
+      .review-state-badge.unknown {
+        color: #4e4f49;
+        border-color: #cfc8b7;
+        background: #ece8df;
+      }
+
       .actions {
         display: flex;
         flex-wrap: wrap;
@@ -743,7 +782,10 @@
       <section class="header">
         <div>
           <h1>Layout Review</h1>
-          <div id="page-meta" class="subline"></div>
+          <div class="meta-strip">
+            <div id="page-meta" class="subline"></div>
+            <span id="review-state-badge" class="review-state-badge" hidden></span>
+          </div>
         </div>
         <div class="actions">
           <div class="zoom-control">
@@ -917,6 +959,7 @@
       const drawPreviewBox = document.getElementById("draw-preview-box");
       const statusLine = document.getElementById("status-line");
       const layoutsBody = document.getElementById("layouts-body");
+      const reviewStateBadge = document.getElementById("review-state-badge");
       const zoomTrigger = document.getElementById("zoom-trigger");
       const zoomMenu = document.getElementById("zoom-menu");
       const zoomOptions = Array.from(document.querySelectorAll(".zoom-option"));
@@ -954,6 +997,7 @@
         drawModeActive: false,
         drawPointerId: null,
         drawStartPoint: null,
+        reviewSubmitInProgress: false,
       };
 
       function applyStoredZoomSettings() {
@@ -1267,12 +1311,14 @@
           deleted_ids: Array.from(state.deletedLayoutIds).sort((a, b) => a - b),
         };
         writeStorage(draftStorageKey(), JSON.stringify(payload));
+        updateReviewUiState();
       }
 
       function clearLayoutDraftState() {
         state.localEditsById = {};
         state.deletedLayoutIds = new Set();
         removeStorage(draftStorageKey());
+        updateReviewUiState();
       }
 
       const CLASS_COLORS = {
@@ -1342,6 +1388,72 @@
         }
         statusLine.textContent = message;
         statusLine.classList.toggle("error", isError);
+      }
+
+      function hasPendingLayoutDraftChanges() {
+        return (
+          Object.keys(state.localEditsById).length > 0 ||
+          state.deletedLayoutIds.size > 0
+        );
+      }
+
+      function updateReviewBadge() {
+        if (!reviewStateBadge) {
+          return;
+        }
+        reviewStateBadge.classList.remove("needs-review", "reviewed", "unknown");
+        const status = String(state.page?.status || "").trim();
+        if (!status) {
+          reviewStateBadge.hidden = true;
+          reviewStateBadge.textContent = "";
+          return;
+        }
+
+        reviewStateBadge.hidden = false;
+        if (status === "layout_detected") {
+          reviewStateBadge.textContent = "Needs review";
+          reviewStateBadge.classList.add("needs-review");
+          reviewStateBadge.title = "This page is waiting for layout review.";
+          return;
+        }
+        if (status === "layout_reviewed") {
+          reviewStateBadge.textContent = "Reviewed";
+          reviewStateBadge.classList.add("reviewed");
+          reviewStateBadge.title = "This page was already marked as layout reviewed.";
+          return;
+        }
+
+        reviewStateBadge.textContent = status.replace(/_/g, " ");
+        reviewStateBadge.classList.add("unknown");
+        reviewStateBadge.title = `Current page status: ${status}.`;
+      }
+
+      function updateReviewButtonState() {
+        const hasDraftChanges = hasPendingLayoutDraftChanges();
+        const alreadyReviewed = state.page?.status === "layout_reviewed";
+        if (state.reviewSubmitInProgress) {
+          reviewBtn.textContent = "Saving...";
+          reviewBtn.disabled = true;
+          reviewBtn.title = "Saving layout review changes.";
+          return;
+        }
+        if (alreadyReviewed && !hasDraftChanges) {
+          reviewBtn.textContent = "Reviewed";
+          reviewBtn.disabled = true;
+          reviewBtn.title = "This page is already reviewed.";
+          return;
+        }
+
+        reviewBtn.textContent = "Mark Reviewed";
+        reviewBtn.disabled = false;
+        reviewBtn.title = alreadyReviewed
+          ? "Submit current changes and keep this page reviewed."
+          : "Mark this page as reviewed.";
+      }
+
+      function updateReviewUiState() {
+        updateReviewBadge();
+        updateReviewButtonState();
       }
 
       async function fetchJson(url, options) {
@@ -2036,6 +2148,7 @@
         const payload = await fetchJson(`/api/pages/${pageId}`);
         state.page = payload.page;
         pageMeta.textContent = `Page #${state.page.id} | ${state.page.rel_path}`;
+        updateReviewUiState();
         pageImage.src = payload.image_url;
       }
 
@@ -2249,7 +2362,8 @@
       }
 
       async function markReviewed() {
-        reviewBtn.disabled = true;
+        state.reviewSubmitInProgress = true;
+        updateReviewUiState();
         try {
           const deletedIds = Array.from(state.deletedLayoutIds).sort((a, b) => a - b);
           const editedEntries = Object.entries(state.localEditsById).sort(
@@ -2292,7 +2406,8 @@
         } catch (error) {
           setStatus(`Mark reviewed failed: ${error.message}`, { isError: true });
         } finally {
-          reviewBtn.disabled = false;
+          state.reviewSubmitInProgress = false;
+          updateReviewUiState();
         }
       }
 
