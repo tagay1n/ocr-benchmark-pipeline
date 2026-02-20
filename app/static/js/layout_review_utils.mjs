@@ -1,0 +1,119 @@
+export function clampZoomPercent(value, { min = 10, max = 400, fallback = 100 } = {}) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.min(max, Math.max(min, numeric));
+}
+
+export function formatZoomPercent(percentValue) {
+  const rounded = Math.round(Number(percentValue) * 10) / 10;
+  if (Number.isInteger(rounded)) {
+    return `${rounded}%`;
+  }
+  return `${rounded.toFixed(1)}%`;
+}
+
+export function computeZoomScale({
+  mode,
+  zoomPercent,
+  naturalWidth,
+  naturalHeight,
+  viewportWidth,
+  viewportHeight,
+}) {
+  if (!naturalWidth || !naturalHeight || !viewportWidth || !viewportHeight) {
+    return null;
+  }
+
+  const fitWidthScale = viewportWidth / naturalWidth;
+  const fitPageScale = Math.min(fitWidthScale, viewportHeight / naturalHeight);
+  const automaticScale = Math.min(fitWidthScale, 1);
+
+  if (mode === "fit-page") {
+    return fitPageScale;
+  }
+  if (mode === "fit-width") {
+    return fitWidthScale;
+  }
+  if (mode === "automatic") {
+    return automaticScale;
+  }
+  return clampZoomPercent(zoomPercent) / 100;
+}
+
+export function pointHandleForCoordinateKey(key) {
+  if (key === "x1" || key === "y1") {
+    return "nw";
+  }
+  if (key === "x2" || key === "y2") {
+    return "se";
+  }
+  return null;
+}
+
+export function compactReadingOrdersAfterDeletion(layouts, deletedOrder) {
+  const threshold = Number(deletedOrder);
+  if (!Number.isInteger(threshold) || threshold < 1) {
+    return { layouts: [...layouts], shiftedIds: [] };
+  }
+
+  const shiftedIds = [];
+  const compactedLayouts = layouts.map((layout) => {
+    const order = Number(layout.reading_order);
+    if (!Number.isInteger(order) || order <= threshold) {
+      return layout;
+    }
+    shiftedIds.push(Number(layout.id));
+    return {
+      ...layout,
+      reading_order: order - 1,
+    };
+  });
+  return { layouts: compactedLayouts, shiftedIds };
+}
+
+export function computeViewportScrollToCenterBBox({
+  bbox,
+  contentWidth,
+  contentHeight,
+  viewportWidth,
+  viewportHeight,
+}) {
+  if (!bbox || !Number.isFinite(contentWidth) || !Number.isFinite(contentHeight)) {
+    return null;
+  }
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight)) {
+    return null;
+  }
+  if (contentWidth <= 0 || contentHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+    return null;
+  }
+
+  const centerX = ((Number(bbox.x1) + Number(bbox.x2)) / 2) * contentWidth;
+  const centerY = ((Number(bbox.y1) + Number(bbox.y2)) / 2) * contentHeight;
+  if (!Number.isFinite(centerX) || !Number.isFinite(centerY)) {
+    return null;
+  }
+
+  const maxLeft = Math.max(0, contentWidth - viewportWidth);
+  const maxTop = Math.max(0, contentHeight - viewportHeight);
+  const targetLeft = Math.max(0, Math.min(maxLeft, centerX - viewportWidth / 2));
+  const targetTop = Math.max(0, Math.min(maxTop, centerY - viewportHeight / 2));
+
+  return {
+    left: Math.round(targetLeft),
+    top: Math.round(targetTop),
+  };
+}
+
+export function nextLayoutReviewUrl(nextPayload) {
+  if (!nextPayload || !nextPayload.has_next) {
+    return null;
+  }
+  const nextPageId = Number(nextPayload.next_page_id);
+  if (!Number.isInteger(nextPageId) || nextPageId <= 0) {
+    return null;
+  }
+  return `/static/layouts.html?page_id=${nextPageId}`;
+}

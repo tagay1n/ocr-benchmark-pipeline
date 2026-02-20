@@ -13,9 +13,11 @@ from .db import get_connection
 
 DOC_LAYOUTNET_REPO_ID = "hantian/yolo-doclaynet"
 DOC_LAYOUTNET_CHECKPOINT = "yolov10b-doclaynet.pt"
-DOC_LAYOUTNET_IMGSZ = 1024
+DOC_LAYOUTNET_DEFAULT_IMGSZ = 1024
 DOC_LAYOUTNET_DEFAULT_CONF = 0.25
 DOC_LAYOUTNET_DEFAULT_IOU = 0.45
+DOC_LAYOUTNET_DEFAULT_MAX_DET = 300
+DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS = False
 
 _DOC_LAYOUTNET_MODEL = None
 _DOC_LAYOUTNET_MODEL_LOCK = Lock()
@@ -71,26 +73,41 @@ def _detect_doclaynet_layouts(
     *,
     confidence_threshold: float | None,
     iou_threshold: float | None,
-) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    image_size: int | None,
+    max_detections: int | None,
+    agnostic_nms: bool | None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     model = _load_doclaynet_model()
 
     conf = DOC_LAYOUTNET_DEFAULT_CONF if confidence_threshold is None else confidence_threshold
     iou = DOC_LAYOUTNET_DEFAULT_IOU if iou_threshold is None else iou_threshold
+    imgsz = DOC_LAYOUTNET_DEFAULT_IMGSZ if image_size is None else int(image_size)
+    max_det = DOC_LAYOUTNET_DEFAULT_MAX_DET if max_detections is None else int(max_detections)
+    agnostic = DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS if agnostic_nms is None else bool(agnostic_nms)
+    inference_params = {
+        "confidence_threshold": conf,
+        "iou_threshold": iou,
+        "image_size": imgsz,
+        "max_detections": max_det,
+        "agnostic_nms": agnostic,
+    }
 
     try:
         prediction = model.predict(
             str(image_path),
             verbose=False,
-            imgsz=DOC_LAYOUTNET_IMGSZ,
+            imgsz=imgsz,
             device="cpu",
             conf=conf,
             iou=iou,
+            max_det=max_det,
+            agnostic_nms=agnostic,
         )
     except Exception as error:
         raise ValueError(f"Layout detection failed: {error}") from error
 
     if not prediction:
-        return [], {"confidence_threshold": conf, "iou_threshold": iou}
+        return [], inference_params
 
     result = prediction[0].cpu()
     height, width = result.orig_shape
@@ -100,7 +117,7 @@ def _detect_doclaynet_layouts(
     rows: list[dict[str, Any]] = []
     boxes = result.boxes
     if boxes is None or len(boxes) == 0:
-        return rows, {"confidence_threshold": conf, "iou_threshold": iou}
+        return rows, inference_params
 
     names = result.names
     for xyxy, confidence, cls_idx in zip(boxes.xyxy, boxes.conf, boxes.cls):
@@ -130,7 +147,7 @@ def _detect_doclaynet_layouts(
         )
 
     rows.sort(key=lambda row: (row["y1"], row["x1"]))
-    return rows, {"confidence_threshold": conf, "iou_threshold": iou}
+    return rows, inference_params
 
 
 def validate_bbox(x1: float, y1: float, x2: float, y2: float) -> None:
@@ -200,6 +217,9 @@ def detect_layouts_for_page(
     replace_existing: bool,
     confidence_threshold: float | None,
     iou_threshold: float | None,
+    image_size: int | None = None,
+    max_detections: int | None = None,
+    agnostic_nms: bool | None = None,
 ) -> dict[str, Any]:
     now = _utc_now()
     with get_connection() as conn:
@@ -220,11 +240,16 @@ def detect_layouts_for_page(
         image_path,
         confidence_threshold=confidence_threshold,
         iou_threshold=iou_threshold,
+        image_size=image_size,
+        max_detections=max_detections,
+        agnostic_nms=agnostic_nms,
     )
     detector_params = {
         "confidence_threshold": thresholds["confidence_threshold"],
         "iou_threshold": thresholds["iou_threshold"],
-        "imgsz": DOC_LAYOUTNET_IMGSZ,
+        "image_size": thresholds["image_size"],
+        "max_detections": thresholds["max_detections"],
+        "agnostic_nms": thresholds["agnostic_nms"],
         "device": "cpu",
         "model": DOC_LAYOUTNET_CHECKPOINT,
     }
@@ -273,7 +298,17 @@ def detect_layouts_for_page(
     return {
         "created": created_count,
         "detector": f"{DOC_LAYOUTNET_REPO_ID}:{DOC_LAYOUTNET_CHECKPOINT}",
-        "thresholds": thresholds,
+        "thresholds": {
+            "confidence_threshold": detector_params["confidence_threshold"],
+            "iou_threshold": detector_params["iou_threshold"],
+        },
+        "inference_params": {
+            "confidence_threshold": detector_params["confidence_threshold"],
+            "iou_threshold": detector_params["iou_threshold"],
+            "image_size": detector_params["image_size"],
+            "max_detections": detector_params["max_detections"],
+            "agnostic_nms": detector_params["agnostic_nms"],
+        },
         "class_counts": class_counts,
         "note": "DocLayNet detection completed.",
     }

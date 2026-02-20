@@ -123,6 +123,9 @@ class DetectLayoutsRequest(BaseModel):
     replace_existing: bool = True
     confidence_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     iou_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
+    image_size: int | None = Field(default=None, ge=32)
+    max_detections: int | None = Field(default=None, ge=1)
+    agnostic_nms: bool | None = None
 
 
 class CreateLayoutRequest(BaseModel):
@@ -451,6 +454,9 @@ def detect_page_layouts(page_id: int, payload: DetectLayoutsRequest) -> dict[str
             replace_existing=payload.replace_existing,
             confidence_threshold=payload.confidence_threshold,
             iou_threshold=payload.iou_threshold,
+            image_size=payload.image_size,
+            max_detections=payload.max_detections,
+            agnostic_nms=payload.agnostic_nms,
         )
     except ValueError as error:
         emit_event(

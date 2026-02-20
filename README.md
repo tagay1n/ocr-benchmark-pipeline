@@ -54,7 +54,7 @@ Backend unit tests:
 Frontend unit tests:
 
 ```bash
-node --test frontend_tests/pipeline_stages.test.mjs
+node --test frontend_tests/*.test.mjs
 ```
 
 ## Implemented So Far

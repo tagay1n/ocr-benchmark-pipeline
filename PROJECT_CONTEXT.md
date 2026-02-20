@@ -86,12 +86,28 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - bbox can be adjusted directly on canvas by dragging box corners/edges
   - `Layouts` panel stays visible while scrolling image content (desktop sticky panel)
   - selecting a bbox on canvas highlights its row in `Layouts`, and selecting a row highlights its bbox on canvas
+  - clicking a row in `Layouts` auto-scrolls/jumps the image viewport to that layout bbox
   - clicking/focusing bbox coordinate inputs highlights matching bbox corner point on overlay (`x1/y1` -> top-left, `x2/y2` -> bottom-right)
+  - deleting a layout compacts reading order of subsequent layouts (e.g. delete `1` -> old `2` becomes `1`)
+  - bbox border/corner handle emphasis is shown only for the currently selected/focused bbox
   - page image zoom control added on layout review page:
     - dropdown with `Fit Page`, `Fit Width`, `Automatic`, and preset percentages (`50%`..`400%`)
     - scrollable viewport with real image/overlay scaling
     - image viewport keeps page centered (both on load and when zoom changes)
     - zoom choice persisted in local storage
+  - removed visible status row from layout review page (no `Ready`/inline status text bar)
+  - layout review `Back to Dashboard` text button replaced with isolated top-right back glyph button
+  - layout review page meta line no longer renders `status: ...` label (keeps page id and path labels)
+  - `Redetect Layouts` now opens a modal with explicit Ultralytics/YOLO inference params:
+    - `confidence_threshold (conf)`
+    - `iou_threshold (iou)`
+    - `image_size (imgsz)`
+    - `max_detections (max_det)`
+    - `agnostic_nms`
+    - `replace_existing`
+    - modal includes direct links to official Ultralytics docs for parameter meanings
+  - backend detection API/schema now accepts and validates the same inference params
+  - `Mark Reviewed` now automatically opens the next available page waiting for layout review
 
 ### Not Completed Yet
 
@@ -135,6 +151,49 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-19:
+  - Layout review completion flow updated:
+    - after `Mark Reviewed`, UI automatically redirects to next `layout_detected` page when available
+    - if no pending review page remains, current page stays open in reviewed state
+  - Added frontend unit test coverage for next-review navigation URL resolution.
+  - Unified non-danger button styling on layout review page:
+    - `secondary` controls now use the same filled accent style as primary actions
+    - destructive actions remain red (`danger`)
+  - Added official documentation links in redetect modal for reviewer reference:
+    - Ultralytics Predict inference arguments
+    - Ultralytics Predict settings reference
+  - Redetect flow refactored to modal-based parameter entry:
+    - removed inline conf/IoU controls from header
+    - added modal with defaults and validation for YOLO `predict()` arguments
+    - redetect request now sends `replace_existing`, `confidence_threshold`, `iou_threshold`, `image_size`, `max_detections`, `agnostic_nms`
+  - Backend `POST /api/pages/{id}/layouts/detect` request model extended with YOLO inference params:
+    - `image_size` (`imgsz`)
+    - `max_detections` (`max_det`)
+    - `agnostic_nms`
+  - DocLayNet detection backend now forwards these parameters to Ultralytics `model.predict(...)` and returns them in `inference_params`.
+  - Updated backend unit test for layout detection stage to assert new parameter passthrough.
+  - Layout review back-navigation icon moved to upper-left and glyph refined (`↩`) for cleaner affordance.
+  - Layout review page metadata line simplified:
+    - removed `status: ...` label
+    - retained page id and relative path labels
+  - Layout review navigation control refined:
+    - replaced `Back to Dashboard` text button with icon-only back glyph
+    - moved control to isolated top-right position away from action controls
+  - Layout bbox emphasis refined:
+    - edge/corner handles are visible only for the selected/focused bbox
+    - selected bbox keeps emphasized border while non-selected boxes stay less prominent
+  - Layout review row click behavior improved:
+    - clicking/focusing a layout row now auto-centers the corresponding bbox in the image viewport
+  - Layout delete behavior updated to compact reading order:
+    - when a layout is removed, all later integer reading orders are decremented by `1`
+    - compaction updates are stored in local drafts and applied on `Mark Reviewed`
+  - Added/expanded frontend unit tests for layout review helper logic:
+    - reading-order compaction after deletion
+    - viewport scroll target calculation for row-click jump-to-bbox behavior
+  - Added frontend unit tests for layout review helper logic (`frontend_tests/layout_review_utils.test.mjs`):
+    - zoom clamping/formatting
+    - fit/custom zoom scale computation
+    - bbox coordinate-to-corner mapping (`x1/y1 -> nw`, `x2/y2 -> se`)
+  - Removed visible status line below the layout review image area (`Ready`/inline messages no longer shown).
   - Layout review image viewport centering improved:
     - image stays centered instead of sticking to a corner
     - centering is applied on page load and after zoom changes

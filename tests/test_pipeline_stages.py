@@ -86,21 +86,37 @@ class PipelineStagesTests(unittest.TestCase):
                 "y2": 0.9,
             }
         ]
-        fake_thresholds = {"confidence_threshold": 0.3, "iou_threshold": 0.5}
+        fake_inference_params = {
+            "confidence_threshold": 0.3,
+            "iou_threshold": 0.5,
+            "image_size": 960,
+            "max_detections": 123,
+            "agnostic_nms": True,
+        }
 
-        with patch.object(layouts, "_detect_doclaynet_layouts", return_value=(fake_rows, fake_thresholds)):
+        with patch.object(layouts, "_detect_doclaynet_layouts", return_value=(fake_rows, fake_inference_params)) as detect_mock:
             result = main.detect_page_layouts(
                 page_id,
                 main.DetectLayoutsRequest(
                     replace_existing=True,
                     confidence_threshold=0.3,
                     iou_threshold=0.5,
+                    image_size=960,
+                    max_detections=123,
+                    agnostic_nms=True,
                 ),
             )
 
         self.assertEqual(result["created"], 1)
-        self.assertEqual(result["thresholds"], fake_thresholds)
+        self.assertEqual(result["thresholds"], {"confidence_threshold": 0.3, "iou_threshold": 0.5})
+        self.assertEqual(result["inference_params"], fake_inference_params)
         self.assertEqual(result["class_counts"], {"text": 1})
+        detect_mock.assert_called_once()
+        self.assertEqual(detect_mock.call_args.kwargs["confidence_threshold"], 0.3)
+        self.assertEqual(detect_mock.call_args.kwargs["iou_threshold"], 0.5)
+        self.assertEqual(detect_mock.call_args.kwargs["image_size"], 960)
+        self.assertEqual(detect_mock.call_args.kwargs["max_detections"], 123)
+        self.assertEqual(detect_mock.call_args.kwargs["agnostic_nms"], True)
 
         layouts_payload = main.page_layouts(page_id)
         self.assertEqual(layouts_payload["count"], 1)
