@@ -54,6 +54,7 @@
       .history-nav-btn {
         width: 44px;
         height: 44px;
+        padding: 0;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -62,9 +63,18 @@
         background: var(--surface);
         color: var(--ink);
         text-decoration: none;
-        font-size: 24px;
-        line-height: 1;
         box-shadow: 0 8px 20px rgba(31, 35, 41, 0.08);
+      }
+
+      .nav-icon {
+        width: 20px;
+        height: 20px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
       .back-nav:hover,
@@ -286,6 +296,37 @@
         top: 16px;
         max-height: calc(100vh - 32px);
         overflow: auto;
+      }
+
+      .layouts-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .layouts-header h2 {
+        margin: 0;
+      }
+
+      .layouts-add-btn {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .layouts-add-btn-icon {
+        width: 16px;
+        height: 16px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
       }
 
       .layouts-panel table {
@@ -623,7 +664,11 @@
         .history-nav-btn {
           width: 40px;
           height: 40px;
-          font-size: 22px;
+        }
+
+        .nav-icon {
+          width: 18px;
+          height: 18px;
         }
 
         .header {
@@ -649,9 +694,22 @@
   <body>
     <main>
       <div class="nav-strip">
-        <a class="back-nav" href="/" aria-label="Back to Dashboard" title="Back to Dashboard">↩</a>
-        <button id="history-back-btn" class="history-nav-btn" type="button" aria-label="Previous reviewed page" title="Previous reviewed page" disabled>←</button>
-        <button id="history-forth-btn" class="history-nav-btn" type="button" aria-label="Next page for review" title="Next page for review" disabled>→</button>
+        <a class="back-nav" href="/" aria-label="Back to Dashboard" title="Back to Dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M10 7 5 12l5 5"></path>
+            <path d="M5 12h9a5 5 0 0 0 0-10h-2"></path>
+          </svg>
+        </a>
+        <button id="history-back-btn" class="history-nav-btn" type="button" aria-label="Previous reviewed page" title="Previous reviewed page" disabled>
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m15 18-6-6 6-6"></path>
+          </svg>
+        </button>
+        <button id="history-forth-btn" class="history-nav-btn" type="button" aria-label="Next page for review" title="Next page for review" disabled>
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m9 6 6 6-6 6"></path>
+          </svg>
+        </button>
       </div>
       <section class="header">
         <div>
@@ -684,7 +742,6 @@
             </div>
           </div>
           <button id="detect-btn" type="button">Redetect Layouts</button>
-          <button id="add-btn" class="secondary" type="button">Add Box</button>
           <button id="review-btn" type="button">Mark Reviewed</button>
         </div>
       </section>
@@ -700,7 +757,15 @@
         </article>
 
         <article class="panel layouts-panel">
-          <h2>Layouts</h2>
+          <div class="layouts-header">
+            <h2>Layouts</h2>
+            <button id="add-btn" class="secondary layouts-add-btn" type="button" aria-label="Add box" title="Add box">
+              <svg class="layouts-add-btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M12 5v14"></path>
+                <path d="M5 12h14"></path>
+              </svg>
+            </button>
+          </div>
           <table>
             <thead>
                 <tr>
@@ -1014,6 +1079,9 @@
       }
 
       function scrollImageViewportToLayout(layoutId) {
+        if (!pageImage.naturalWidth || !pageImage.naturalHeight) {
+          return false;
+        }
         const target = computeViewportScrollTargetForLayoutId({
           layoutId,
           layouts: state.layouts,
@@ -1023,10 +1091,23 @@
           viewportHeight: imageViewport.clientHeight,
         });
         if (!target) {
-          return;
+          return false;
         }
         imageViewport.scrollLeft = target.left;
         imageViewport.scrollTop = target.top;
+        return true;
+      }
+
+      function ensureLayoutVisible(layoutId, retries = 8) {
+        if (scrollImageViewportToLayout(layoutId)) {
+          return;
+        }
+        if (retries <= 0) {
+          return;
+        }
+        requestAnimationFrame(() => {
+          ensureLayoutVisible(layoutId, retries - 1);
+        });
       }
 
       function draftStorageKey() {
@@ -1330,7 +1411,7 @@
         state.selectedLayoutId = normalizedId;
         applySelectedLayoutStyles({ scrollRowIntoView });
         if (scrollImageToLayout) {
-          scrollImageViewportToLayout(normalizedId);
+          ensureLayoutVisible(normalizedId);
         }
       }
 
@@ -1607,12 +1688,6 @@
         const tr = document.createElement("tr");
         const layoutId = Number(layout.id);
         tr.dataset.layoutId = String(layoutId);
-        tr.addEventListener("pointerdown", () => {
-          selectLayout(layoutId, { scrollImageToLayout: true });
-        });
-        tr.addEventListener("focusin", () => {
-          selectLayout(layoutId, { scrollImageToLayout: true });
-        });
         const serverLayout = state.serverLayoutsById[String(layoutId)];
         const serverBaseline = serverLayout ? toDraftShape(serverLayout) : toDraftShape(layout);
 
@@ -2152,6 +2227,30 @@
         if (event.target === detectModal) {
           closeDetectModal();
         }
+      });
+      function selectLayoutFromPanelEventTarget(target) {
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const row = target.closest("tr[data-layout-id]");
+        if (!row) {
+          return;
+        }
+        const layoutId = Number(row.dataset.layoutId);
+        if (!Number.isInteger(layoutId) || layoutId <= 0) {
+          return;
+        }
+        selectLayout(layoutId, { scrollImageToLayout: true });
+      }
+
+      layoutsBody.addEventListener("click", (event) => {
+        selectLayoutFromPanelEventTarget(event.target);
+      });
+      layoutsBody.addEventListener("pointerdown", (event) => {
+        selectLayoutFromPanelEventTarget(event.target);
+      });
+      layoutsBody.addEventListener("focusin", (event) => {
+        selectLayoutFromPanelEventTarget(event.target);
       });
       zoomTrigger.addEventListener("click", () => {
         if (zoomMenu.hidden) {

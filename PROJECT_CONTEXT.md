@@ -80,6 +80,7 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - local drafts are applied to backend only when reviewer clicks `Mark Reviewed`
   - per-row restore button (`↺`) reverts class/order/bbox to backend baseline
   - per-row delete uses trash icon button
+  - `Add Box` action moved into `Layouts` panel header and switched to icon-only plus glyph button
   - layout ID column hidden in review table UI
   - page-level `Review` button to jump to the next pending review page
   - stage sidebar removed from layout review page for a consistent no-bar UX
@@ -88,6 +89,10 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - selecting a bbox on canvas highlights its row in `Layouts`, and selecting a row highlights its bbox on canvas
   - clicking a row in `Layouts` auto-scrolls/jumps the image viewport to that layout bbox
   - focusing controls inside a layout row (`Class`, `Order`, `BBox`) also forces image jump to that layout bbox
+  - layout row click-to-jump made resilient:
+    - jump now runs on explicit `click` and `pointerdown`
+    - if viewport/content dimensions are not ready, jump retries on next animation frame
+  - layout panel selection handlers are delegated at tbody-level for reliable jump behavior across rerenders
   - clicking/focusing bbox coordinate inputs highlights matching bbox corner point on overlay (`x1/y1` -> top-left, `x2/y2` -> bottom-right)
   - deleting a layout compacts reading order of subsequent layouts (e.g. delete `1` -> old `2` becomes `1`)
   - bbox border/corner handle emphasis is shown only for the currently selected/focused bbox
@@ -101,6 +106,7 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
     - fixed large-zoom vertical clipping: top of page remains reachable via normal scroll
   - removed visible status row from layout review page (no `Ready`/inline status text bar)
   - layout review `Back to Dashboard` text button replaced with isolated top-right back glyph button
+  - layout review nav controls switched from font glyphs to inline SVG icons for precise centering and consistent rendering
   - layout review page meta line no longer renders `status: ...` label (keeps page id and path labels)
   - replaced standalone `Review` action with top-left navigation controls:
     - `Back` button goes to previous page from persistent review history
@@ -168,6 +174,18 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-20:
+  - Layout review controls polish:
+    - moved `Add Box` button from top action bar into `Layouts` panel header
+    - replaced text label with commonly-used plus glyph icon button
+  - Layout review jump-to-bbox reliability improvement:
+    - switched panel row selection handling to delegated listeners on `#layouts-body` (`click`/`pointerdown`/`focusin`)
+    - added multi-frame retry in visibility helper so jump works even if image/viewport dimensions initialize late
+  - Layout review nav glyph polish:
+    - replaced text glyph arrows with inline SVG icons (`Back to Dashboard`, `Back`, `Forth`)
+    - enforced centered icon alignment with fixed icon box sizing across desktop/mobile
+  - Layout review row selection visibility fix:
+    - clicking layout rows now reliably scrolls image viewport so selected bbox becomes visible
+    - added retry-on-next-frame fallback to avoid missed jumps during late layout sizing
   - Layout review row-focus jump hardening:
     - selecting/focusing row controls now explicitly triggers image jump-to-bbox
     - extracted shared helper `computeViewportScrollTargetForLayoutId` for deterministic selection->scroll mapping
