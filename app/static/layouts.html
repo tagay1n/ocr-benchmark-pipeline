@@ -77,6 +77,74 @@
         width: 84px;
       }
 
+      .zoom-control {
+        position: relative;
+      }
+
+      .zoom-trigger {
+        display: inline-flex;
+        align-items: center;
+        min-width: 86px;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .zoom-caret {
+        opacity: 0.75;
+      }
+
+      .zoom-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        min-width: 136px;
+        padding: 8px 0;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--ink);
+        box-shadow: 0 14px 32px rgba(31, 35, 41, 0.14);
+        z-index: 40;
+      }
+
+      .zoom-menu[hidden] {
+        display: none;
+      }
+
+      .zoom-option {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        padding: 6px 12px;
+        font-size: 15px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      .zoom-option:hover {
+        background: #f0ece1;
+      }
+
+      .zoom-option.active::after {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      .zoom-separator {
+        height: 1px;
+        margin: 6px 0;
+        background: var(--border);
+      }
+
       button,
       a.button-link {
         border: 1px solid var(--accent);
@@ -204,19 +272,31 @@
         width: 76px;
       }
 
-      .image-wrap {
+      .image-viewport {
         position: relative;
         width: 100%;
+        height: calc(100vh - 220px);
+        min-height: 460px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         border: 1px solid var(--border);
         border-radius: 10px;
-        overflow: hidden;
+        overflow: auto;
         background: #f7f5ef;
+      }
+
+      .image-wrap {
+        position: relative;
+        width: max-content;
+        flex: 0 0 auto;
       }
 
       #page-image {
         display: block;
-        width: 100%;
+        width: auto;
         height: auto;
+        max-width: none;
       }
 
       #overlay {
@@ -313,6 +393,14 @@
         font-weight: 700;
       }
 
+      .box-handle.point-highlight {
+        z-index: 3;
+        transform: scale(1.35);
+        border-color: rgba(30, 31, 28, 0.9);
+        background: rgba(255, 253, 247, 0.98);
+        box-shadow: 0 0 0 2px rgba(11, 122, 117, 0.35);
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -368,6 +456,11 @@
           grid-template-columns: 1fr;
         }
 
+        .image-viewport {
+          height: 68vh;
+          min-height: 320px;
+        }
+
         .layouts-panel {
           position: static;
           max-height: none;
@@ -385,6 +478,28 @@
         </div>
         <div class="actions">
           <a class="button-link secondary" href="/">Back to Dashboard</a>
+          <div class="zoom-control">
+            <button id="zoom-trigger" class="secondary zoom-trigger" type="button" aria-haspopup="true" aria-expanded="false">
+              <span id="zoom-trigger-label">100%</span>
+              <span class="zoom-caret">▾</span>
+            </button>
+            <div id="zoom-menu" class="zoom-menu" hidden>
+              <button class="zoom-option" type="button" data-zoom-mode="fit-page">Fit Page</button>
+              <button class="zoom-option" type="button" data-zoom-mode="fit-width">Fit Width</button>
+              <button class="zoom-option" type="button" data-zoom-mode="automatic">Automatic</button>
+              <div class="zoom-separator"></div>
+              <button class="zoom-option" type="button" data-zoom-percent="50">50%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="70">70%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="85">85%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="100">100%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="125">125%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="150">150%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="175">175%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="200">200%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="300">300%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="400">400%</button>
+            </div>
+          </div>
           <div class="detect-controls">
             <label>
               Conf
@@ -404,9 +519,11 @@
 
       <section class="grid">
         <article class="panel">
-          <div class="image-wrap">
-            <img id="page-image" alt="Page for layout review" />
-            <div id="overlay"></div>
+          <div id="image-viewport" class="image-viewport">
+            <div id="image-wrap" class="image-wrap">
+              <img id="page-image" alt="Page for layout review" />
+              <div id="overlay"></div>
+            </div>
           </div>
           <div id="status-line" class="status-line"></div>
         </article>
@@ -435,6 +552,8 @@
         detectConf: "layout.detect_conf",
         detectIou: "layout.detect_iou",
         layoutDraftPrefix: "layout.draft.page",
+        zoomMode: "layout.zoom.mode",
+        zoomPercent: "layout.zoom.percent",
       };
 
       function readStorage(key) {
@@ -462,10 +581,16 @@
       }
 
       const pageMeta = document.getElementById("page-meta");
+      const imageViewport = document.getElementById("image-viewport");
+      const imageWrap = document.getElementById("image-wrap");
       const pageImage = document.getElementById("page-image");
       const overlay = document.getElementById("overlay");
       const statusLine = document.getElementById("status-line");
       const layoutsBody = document.getElementById("layouts-body");
+      const zoomTrigger = document.getElementById("zoom-trigger");
+      const zoomTriggerLabel = document.getElementById("zoom-trigger-label");
+      const zoomMenu = document.getElementById("zoom-menu");
+      const zoomOptions = Array.from(document.querySelectorAll(".zoom-option"));
 
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
@@ -481,6 +606,10 @@
         localEditsById: {},
         deletedLayoutIds: new Set(),
         selectedLayoutId: null,
+        activePointHighlight: null,
+        zoomMode: "automatic",
+        zoomPercent: 100,
+        zoomAppliedPercent: 100,
       };
 
       function applyStoredDetectThresholds() {
@@ -499,6 +628,151 @@
             detectIouInput.value = storedIou;
           }
         }
+      }
+
+      function clampZoomPercent(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return 100;
+        }
+        return Math.min(400, Math.max(10, numeric));
+      }
+
+      function applyStoredZoomSettings() {
+        const storedMode = readStorage(STORAGE_KEYS.zoomMode);
+        if (storedMode === "fit-page" || storedMode === "fit-width" || storedMode === "automatic" || storedMode === "custom") {
+          state.zoomMode = storedMode;
+        }
+        const storedPercent = readStorage(STORAGE_KEYS.zoomPercent);
+        if (storedPercent !== null) {
+          state.zoomPercent = clampZoomPercent(storedPercent);
+        }
+        if (state.zoomMode === "custom") {
+          state.zoomAppliedPercent = Math.round(state.zoomPercent * 10) / 10;
+        } else {
+          state.zoomAppliedPercent = 100;
+        }
+        setZoomLabelFromApplied();
+        updateZoomMenuSelection();
+      }
+
+      function formatZoomPercent(percentValue) {
+        const rounded = Math.round(Number(percentValue) * 10) / 10;
+        if (Number.isInteger(rounded)) {
+          return `${rounded}%`;
+        }
+        return `${rounded.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+      }
+
+      function closeZoomMenu() {
+        zoomMenu.hidden = true;
+        zoomTrigger.setAttribute("aria-expanded", "false");
+      }
+
+      function openZoomMenu() {
+        zoomMenu.hidden = false;
+        zoomTrigger.setAttribute("aria-expanded", "true");
+      }
+
+      function updateZoomMenuSelection() {
+        for (const option of zoomOptions) {
+          const optionMode = option.dataset.zoomMode || "";
+          const optionPercent = option.dataset.zoomPercent || "";
+          const modeMatch = optionMode !== "" && optionMode === state.zoomMode;
+          const percentMatch =
+            optionPercent !== "" &&
+            state.zoomMode === "custom" &&
+            Number(optionPercent) === Math.round(state.zoomPercent);
+          option.classList.toggle("active", modeMatch || percentMatch);
+        }
+      }
+
+      function setZoomLabelFromApplied() {
+        zoomTriggerLabel.textContent = formatZoomPercent(state.zoomAppliedPercent);
+      }
+
+      function zoomScaleForMode() {
+        const naturalWidth = pageImage.naturalWidth;
+        const naturalHeight = pageImage.naturalHeight;
+        if (!naturalWidth || !naturalHeight) {
+          return null;
+        }
+        const viewportWidth = Math.max(1, imageViewport.clientWidth);
+        const viewportHeight = Math.max(1, imageViewport.clientHeight);
+        const fitWidthScale = viewportWidth / naturalWidth;
+        const fitPageScale = Math.min(fitWidthScale, viewportHeight / naturalHeight);
+        const automaticScale = Math.min(fitWidthScale, 1);
+
+        if (state.zoomMode === "fit-page") {
+          return fitPageScale;
+        }
+        if (state.zoomMode === "fit-width") {
+          return fitWidthScale;
+        }
+        if (state.zoomMode === "automatic") {
+          return automaticScale;
+        }
+        return clampZoomPercent(state.zoomPercent) / 100;
+      }
+
+      function centerImageInViewport() {
+        const viewportWidth = imageViewport.clientWidth;
+        const viewportHeight = imageViewport.clientHeight;
+        const contentWidth = imageWrap.offsetWidth;
+        const contentHeight = imageWrap.offsetHeight;
+        if (!viewportWidth || !viewportHeight || !contentWidth || !contentHeight) {
+          return;
+        }
+        imageViewport.scrollLeft = Math.max(0, Math.round((contentWidth - viewportWidth) / 2));
+        imageViewport.scrollTop = Math.max(0, Math.round((contentHeight - viewportHeight) / 2));
+      }
+
+      function applyZoom() {
+        const naturalWidth = pageImage.naturalWidth;
+        const naturalHeight = pageImage.naturalHeight;
+        if (!naturalWidth || !naturalHeight) {
+          return;
+        }
+
+        const scale = zoomScaleForMode();
+        if (!scale || !Number.isFinite(scale) || scale <= 0) {
+          return;
+        }
+
+        const displayWidth = Math.max(1, Math.round(naturalWidth * scale));
+        const displayHeight = Math.max(1, Math.round(naturalHeight * scale));
+        pageImage.style.width = `${displayWidth}px`;
+        pageImage.style.height = `${displayHeight}px`;
+        imageWrap.style.width = `${displayWidth}px`;
+        imageWrap.style.height = `${displayHeight}px`;
+
+        state.zoomAppliedPercent = Math.round(scale * 1000) / 10;
+        setZoomLabelFromApplied();
+        updateZoomMenuSelection();
+        requestAnimationFrame(() => {
+          centerImageInViewport();
+        });
+      }
+
+      function persistZoomSettings() {
+        writeStorage(STORAGE_KEYS.zoomMode, state.zoomMode);
+        writeStorage(STORAGE_KEYS.zoomPercent, String(Math.round(clampZoomPercent(state.zoomPercent))));
+      }
+
+      function setZoomMode(mode) {
+        if (!["fit-page", "fit-width", "automatic"].includes(mode)) {
+          return;
+        }
+        state.zoomMode = mode;
+        applyZoom();
+        persistZoomSettings();
+      }
+
+      function setCustomZoomPercent(percent) {
+        state.zoomMode = "custom";
+        state.zoomPercent = clampZoomPercent(percent);
+        applyZoom();
+        persistZoomSettings();
       }
 
       function draftStorageKey() {
@@ -797,6 +1071,58 @@
         applySelectedLayoutStyles({ scrollRowIntoView });
       }
 
+      function clearActivePointHighlightIfMissing() {
+        if (!state.activePointHighlight) {
+          return;
+        }
+        const { layoutId } = state.activePointHighlight;
+        const exists = state.layouts.some((row) => Number(row.id) === Number(layoutId));
+        if (!exists) {
+          state.activePointHighlight = null;
+        }
+      }
+
+      function applyActivePointHighlightStyles() {
+        clearActivePointHighlightIfMissing();
+        const highlight = state.activePointHighlight;
+        const selector = highlight
+          ? `.box-handle[data-layout-id="${highlight.layoutId}"][data-handle="${highlight.handle}"]`
+          : null;
+
+        for (const handleEl of overlay.querySelectorAll(".box-handle")) {
+          const isActive = Boolean(selector) && handleEl.matches(selector);
+          handleEl.classList.toggle("point-highlight", isActive);
+        }
+      }
+
+      function setActivePointHighlight(layoutId, handle) {
+        const normalizedId = Number(layoutId);
+        if (!Number.isInteger(normalizedId)) {
+          return;
+        }
+        const exists = state.layouts.some((row) => Number(row.id) === normalizedId);
+        if (!exists) {
+          return;
+        }
+        if (handle !== "nw" && handle !== "se") {
+          return;
+        }
+        state.activePointHighlight = { layoutId: normalizedId, handle };
+        applyActivePointHighlightStyles();
+      }
+
+      function clearActivePointHighlight(layoutId, handle) {
+        const current = state.activePointHighlight;
+        if (!current) {
+          return;
+        }
+        if (Number(current.layoutId) !== Number(layoutId) || current.handle !== handle) {
+          return;
+        }
+        state.activePointHighlight = null;
+        applyActivePointHighlightStyles();
+      }
+
       function upsertDraftForLayout(layoutId, draft) {
         const layout = findLayoutById(layoutId);
         if (!layout) {
@@ -963,6 +1289,7 @@
             const handleEl = document.createElement("div");
             handleEl.className = "box-handle";
             handleEl.dataset.handle = handle;
+            handleEl.dataset.layoutId = String(layout.id);
             handleEl.addEventListener("pointerdown", (event) => {
               beginOverlayDrag(event, layout.id, handle, box, color);
             });
@@ -972,6 +1299,7 @@
           overlay.appendChild(box);
         }
         applySelectedLayoutStyles();
+        applyActivePointHighlightStyles();
       }
 
       function formatClassLabel(className) {
@@ -1073,6 +1401,27 @@
           bboxTd.appendChild(field);
         }
         tr.appendChild(bboxTd);
+
+        const pointHandleByKey = {
+          x1: "nw",
+          y1: "nw",
+          x2: "se",
+          y2: "se",
+        };
+        for (const [key, input] of bboxFields) {
+          const pointHandle = pointHandleByKey[key];
+          input.addEventListener("focus", () => {
+            selectLayout(layoutId, { scrollRowIntoView: true });
+            setActivePointHighlight(layoutId, pointHandle);
+          });
+          input.addEventListener("pointerdown", () => {
+            selectLayout(layoutId, { scrollRowIntoView: true });
+            setActivePointHighlight(layoutId, pointHandle);
+          });
+          input.addEventListener("blur", () => {
+            clearActivePointHighlight(layoutId, pointHandle);
+          });
+        }
 
         function applyDraftToInputs(draft) {
           classInput.value = draft.class_name;
@@ -1263,6 +1612,7 @@
       function renderLayouts() {
         sortLayoutsInPlace();
         clearSelectedLayoutIfMissing();
+        clearActivePointHighlightIfMissing();
         layoutsBody.innerHTML = "";
         for (const layout of state.layouts) {
           layoutsBody.appendChild(layoutRow(layout));
@@ -1453,6 +1803,63 @@
       detectIouInput.addEventListener("change", () => {
         writeStorage(STORAGE_KEYS.detectIou, detectIouInput.value);
       });
+      zoomTrigger.addEventListener("click", () => {
+        if (zoomMenu.hidden) {
+          openZoomMenu();
+        } else {
+          closeZoomMenu();
+        }
+      });
+      zoomMenu.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const option = target.closest(".zoom-option");
+        if (!(option instanceof HTMLButtonElement)) {
+          return;
+        }
+        const mode = option.dataset.zoomMode;
+        const percent = option.dataset.zoomPercent;
+        if (mode) {
+          setZoomMode(mode);
+        } else if (percent) {
+          setCustomZoomPercent(Number(percent));
+        }
+        closeZoomMenu();
+      });
+      document.addEventListener("pointerdown", (event) => {
+        if (!(event.target instanceof Element)) {
+          return;
+        }
+        if (event.target.closest(".zoom-control")) {
+          return;
+        }
+        closeZoomMenu();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeZoomMenu();
+        }
+      });
+      pageImage.addEventListener("load", () => {
+        applyZoom();
+      });
+
+      if (typeof ResizeObserver !== "undefined") {
+        const viewportResizeObserver = new ResizeObserver(() => {
+          if (state.zoomMode !== "custom") {
+            applyZoom();
+          }
+        });
+        viewportResizeObserver.observe(imageViewport);
+      } else {
+        window.addEventListener("resize", () => {
+          if (state.zoomMode !== "custom") {
+            applyZoom();
+          }
+        });
+      }
 
       async function init() {
         if (!Number.isInteger(pageId) || pageId <= 0) {
@@ -1460,10 +1867,12 @@
           return;
         }
         try {
+          applyStoredZoomSettings();
           loadLayoutDraftState();
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();
+          applyZoom();
           setStatus("Ready.");
         } catch (error) {
           setStatus(`Load failed: ${error.message}`, { isError: true });

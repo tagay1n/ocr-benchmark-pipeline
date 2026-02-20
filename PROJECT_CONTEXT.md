@@ -86,6 +86,12 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - bbox can be adjusted directly on canvas by dragging box corners/edges
   - `Layouts` panel stays visible while scrolling image content (desktop sticky panel)
   - selecting a bbox on canvas highlights its row in `Layouts`, and selecting a row highlights its bbox on canvas
+  - clicking/focusing bbox coordinate inputs highlights matching bbox corner point on overlay (`x1/y1` -> top-left, `x2/y2` -> bottom-right)
+  - page image zoom control added on layout review page:
+    - dropdown with `Fit Page`, `Fit Width`, `Automatic`, and preset percentages (`50%`..`400%`)
+    - scrollable viewport with real image/overlay scaling
+    - image viewport keeps page centered (both on load and when zoom changes)
+    - zoom choice persisted in local storage
 
 ### Not Completed Yet
 
@@ -129,6 +135,22 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-19:
+  - Layout review image viewport centering improved:
+    - image stays centered instead of sticking to a corner
+    - centering is applied on page load and after zoom changes
+  - Zoom dropdown visual style updated from dark popup to light theme to match the layout review page UI.
+  - Added Ubuntu-style zoom dropdown to layout review page:
+    - options: `Fit Page`, `Fit Width`, `Automatic`, and preset percentages (`50%`, `70%`, `85%`, `100%`, `125%`, `150%`, `175%`, `200%`, `300%`, `400%`)
+    - current zoom shown on trigger button in percent format
+    - active menu option marked with indicator dot
+  - Layout review image canvas switched to a scrollable viewport-based zoom model:
+    - image and overlay scale together to preserve bbox interaction accuracy
+    - responsive recompute for fit modes on viewport resize
+    - selected zoom mode/percent persists via local storage
+  - Layout review bbox point targeting added:
+    - clicking/focusing `x1` or `y1` highlights the top-left corner handle on overlay
+    - clicking/focusing `x2` or `y2` highlights the bottom-right corner handle on overlay
+    - highlight clears when input focus leaves that coordinate
   - Layout review selection is now synchronized both ways:
     - interacting with/clicking a bbox highlights the matching `Layouts` row
     - interacting with/clicking a `Layouts` row highlights the matching bbox on canvas
