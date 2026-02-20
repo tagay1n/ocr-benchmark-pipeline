@@ -1466,7 +1466,7 @@
           return;
         }
 
-        reviewStateBadge.textContent = status.replace(/_/g, " ");
+        reviewStateBadge.textContent = formatClassLabel(status);
         reviewStateBadge.classList.add("unknown");
         reviewStateBadge.title = `Current page status: ${status}.`;
       }
@@ -1827,7 +1827,7 @@
           label.className = "box-label";
           label.style.color = color;
           label.style.borderColor = hexToRgba(color, 0.62);
-          label.textContent = `${layout.reading_order}. ${layout.class_name}`;
+          label.textContent = `${layout.reading_order}. ${formatClassLabel(layout.class_name)}`;
           box.appendChild(label);
 
           for (const handle of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
@@ -1848,9 +1848,14 @@
       }
 
       function formatClassLabel(className) {
-        return String(className)
+        const normalized = String(className || "")
           .replace(/_/g, " ")
-          .replace(/\b\w/g, (m) => m.toUpperCase());
+          .trim()
+          .toLowerCase();
+        if (!normalized) {
+          return "";
+        }
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
       }
 
       function normalizeClassName(className) {
@@ -2074,7 +2079,7 @@
             const targetLayoutId = Number(targetLayout.id);
             const option = document.createElement("option");
             option.value = String(targetLayoutId);
-            option.textContent = `${targetLayout.class_name} [id:${targetLayoutId}]`;
+            option.textContent = `${formatClassLabel(targetLayout.class_name)} [id:${targetLayoutId}]`;
             if (selectedTargetIds.has(targetLayoutId)) {
               option.selected = true;
             }

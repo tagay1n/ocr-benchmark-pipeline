@@ -212,6 +212,9 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-20:
+  - UI text casing update:
+    - switched dynamic status/stage/class labels from Title Case to sentence case on dashboard and layout review
+    - updated stage metadata names to sentence case for consistency in future stage UIs
   - Gemini key utilization + OCR extraction wiring:
     - `config.yaml` `gemini_keys` are now parsed and used by backend OCR extraction
     - added key-usage state file at `_artifacts/gemini_usage.json` (success-count based; quota failures mark key exhausted)

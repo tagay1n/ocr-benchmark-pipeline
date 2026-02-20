@@ -481,6 +481,17 @@
         return date.toLocaleTimeString(DATE_LOCALE, TIME_FORMAT);
       }
 
+      function toSentenceCaseLabel(value) {
+        const normalized = String(value || "")
+          .replace(/_/g, " ")
+          .trim()
+          .toLowerCase();
+        if (!normalized) {
+          return "";
+        }
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      }
+
       function setPipelinePanelExpanded(expanded) {
         pipelinePanelExpanded = expanded;
         pipelineToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
@@ -510,6 +521,12 @@
             </td>
             <td>${formatDateTime(page.last_seen_at)}</td>
           `;
+          const statusBadge = tr.querySelector(".status");
+          if (statusBadge) {
+            statusBadge.textContent = page.is_missing
+              ? "Missing"
+              : toSentenceCaseLabel(page.status);
+          }
           pagesBody.appendChild(tr);
         }
       }
@@ -534,9 +551,9 @@
 
       function stageDisplayName(stage) {
         if (!stage) return "Pipeline";
-        if (stage === "layout_detect") return "Layout Detection";
-        if (stage === "ocr_extract") return "OCR Extraction";
-        return stage.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+        if (stage === "layout_detect") return "Layout detection";
+        if (stage === "ocr_extract") return "OCR extraction";
+        return toSentenceCaseLabel(stage);
       }
 
       function renderActivity(activity) {
