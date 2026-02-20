@@ -160,6 +160,11 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
     - extracted-content table (order/class/format/content)
     - bidirectional linking between content rows and image bboxes (select/highlight/jump)
     - local draft persistence + per-row restore + single `Mark reviewed` submit flow
+    - preview modes:
+      - source image panel, reconstructed panel, and extracted-content panel can be shown together
+      - each panel has an independent hide/show toggle (state persisted in local storage)
+      - reconstructed panel renders extracted content inside each bbox on a white canvas matching source geometry
+      - selection stays synchronized across rows, source bbox overlays, and reconstructed boxes
   - dashboard pipeline actions now include `Review OCR` with auto-disable when no `ocr_done` pages
   - dashboard status inference now includes `ocr_review` completion events
   - caption binding for layout review:
@@ -232,6 +237,12 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-20:
+  - OCR review reconstruction preview:
+    - changed OCR review preview into three simultaneous panels (source, reconstructed, extracted content)
+    - added per-panel hide/show controls with persisted visibility state
+    - reconstructed panel renders extracted content inside layout bboxes on a white canvas matching source geometry
+    - implemented safe HTML-table rendering path for table outputs, with plain-text fallback
+    - kept bidirectional selection and jump behavior across rows, overlay boxes, and reconstructed boxes
   - OCR review stage implementation:
     - added backend OCR review APIs for listing/editing outputs and marking page `ocr_reviewed`
     - added OCR review global/next navigation APIs (`ocr_done` pages)
