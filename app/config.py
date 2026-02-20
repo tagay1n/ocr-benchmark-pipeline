@@ -16,6 +16,8 @@ class Settings:
     db_path: Path
     allowed_extensions: tuple[str, ...]
     enable_background_jobs: bool
+    gemini_keys: tuple[str, ...] = ()
+    gemini_usage_path: Path | None = None
 
 
 def _resolve_path(project_root: Path, value: str) -> Path:
@@ -84,6 +86,35 @@ def _parse_bool(raw: object, default: bool) -> bool:
     return default
 
 
+def _coerce_gemini_keys(raw: object) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+
+    flattened: list[str] = []
+    if isinstance(raw, str):
+        flattened = [raw]
+    elif isinstance(raw, list):
+        flattened = [str(value) for value in raw]
+    elif isinstance(raw, dict):
+        for value in raw.values():
+            if isinstance(value, list):
+                flattened.extend(str(item) for item in value)
+            elif isinstance(value, str):
+                flattened.append(value)
+    else:
+        return ()
+
+    deduplicated: list[str] = []
+    seen: set[str] = set()
+    for key in flattened:
+        normalized = key.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduplicated.append(normalized)
+    return tuple(deduplicated)
+
+
 def load_settings() -> Settings:
     project_root = Path(os.getenv("PROJECT_ROOT", ".")).resolve()
     config_path = _resolve_path(project_root, os.getenv("APP_CONFIG_PATH", "config.yaml"))
@@ -95,11 +126,17 @@ def load_settings() -> Settings:
     ext_value = ext_env if ext_env is not None else _coerce_extensions(config.get("allowed_image_extensions"))
     jobs_env = os.getenv("ENABLE_BACKGROUND_JOBS")
     jobs_value = jobs_env if jobs_env is not None else config.get("enable_background_jobs")
+    gemini_keys_env = os.getenv("GEMINI_KEYS")
+    gemini_keys_value = (
+        _coerce_gemini_keys(gemini_keys_env.split(",")) if gemini_keys_env is not None else _coerce_gemini_keys(config.get("gemini_keys"))
+    )
+    gemini_usage_path_value = os.getenv("GEMINI_USAGE_PATH", "_artifacts/gemini_usage.json")
 
     source_dir = _resolve_path(project_root, source_dir_value)
     db_path = _resolve_path(project_root, db_path_value)
     allowed_extensions = _parse_extensions(ext_value)
     enable_background_jobs = _parse_bool(jobs_value, default=True)
+    gemini_usage_path = _resolve_path(project_root, gemini_usage_path_value)
 
     return Settings(
         project_root=project_root,
@@ -107,6 +144,8 @@ def load_settings() -> Settings:
         db_path=db_path,
         allowed_extensions=allowed_extensions,
         enable_background_jobs=enable_background_jobs,
+        gemini_keys=gemini_keys_value,
+        gemini_usage_path=gemini_usage_path,
     )
 
 

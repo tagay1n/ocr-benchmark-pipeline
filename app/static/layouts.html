@@ -395,6 +395,11 @@
         width: 5ch;
       }
 
+      .layout-bind-col {
+        width: 26ch;
+        min-width: 26ch;
+      }
+
       .layout-actions-col {
         width: var(--actions-col-size);
         min-width: var(--actions-col-size);
@@ -427,6 +432,18 @@
 
       .layout-bbox-input {
         width: 76px;
+      }
+
+      .caption-targets-select {
+        width: 100%;
+        min-width: 0;
+        min-height: 66px;
+        font-size: 12px;
+      }
+
+      .caption-targets-select.binding-missing {
+        border-color: #d29c34;
+        background: #fff7e6;
       }
 
       .image-viewport {
@@ -846,6 +863,7 @@
                   <th class="layout-class-col">Class</th>
                   <th class="layout-order-col">Order</th>
                   <th>BBox</th>
+                  <th class="layout-bind-col">Bind</th>
                   <th class="layout-actions-col">Actions</th>
                 </tr>
               </thead>
@@ -984,8 +1002,10 @@
         page: null,
         layouts: [],
         serverLayoutsById: {},
+        serverCaptionBindingsByCaptionId: {},
         localEditsById: {},
         deletedLayoutIds: new Set(),
+        captionBindingsByCaptionId: {},
         selectedLayoutId: null,
         activePointHighlight: null,
         zoomMode: "automatic",
@@ -998,6 +1018,7 @@
         drawPointerId: null,
         drawStartPoint: null,
         reviewSubmitInProgress: false,
+        layoutsLoaded: false,
       };
 
       function applyStoredZoomSettings() {
@@ -1263,6 +1284,8 @@
       function loadLayoutDraftState() {
         state.localEditsById = {};
         state.deletedLayoutIds = new Set();
+        state.captionBindingsByCaptionId = {};
+        state.layoutsLoaded = false;
 
         const raw = readStorage(draftStorageKey());
         if (!raw) {
@@ -1303,12 +1326,27 @@
             }
           }
         }
+
+        const captionBindings = parsed.caption_bindings;
+        if (captionBindings && typeof captionBindings === "object") {
+          for (const [rawCaptionId, rawTargets] of Object.entries(captionBindings)) {
+            const captionId = Number(rawCaptionId);
+            if (!Number.isInteger(captionId) || captionId <= 0) {
+              continue;
+            }
+            state.captionBindingsByCaptionId[String(captionId)] = normalizeLayoutIdList(rawTargets);
+          }
+        }
       }
 
       function persistLayoutDraftState() {
+        if (state.layoutsLoaded) {
+          sanitizeCaptionBindingsInPlace();
+        }
         const payload = {
           edits: state.localEditsById,
           deleted_ids: Array.from(state.deletedLayoutIds).sort((a, b) => a - b),
+          caption_bindings: state.captionBindingsByCaptionId,
         };
         writeStorage(draftStorageKey(), JSON.stringify(payload));
         updateReviewUiState();
@@ -1317,6 +1355,7 @@
       function clearLayoutDraftState() {
         state.localEditsById = {};
         state.deletedLayoutIds = new Set();
+        state.captionBindingsByCaptionId = {};
         removeStorage(draftStorageKey());
         updateReviewUiState();
       }
@@ -1348,6 +1387,9 @@
         "page_header",
         "page_footer",
       ];
+
+      const CAPTION_LAYOUT_CLASS = "caption";
+      const CAPTION_TARGET_CLASSES = new Set(["table", "picture", "formula"]);
 
       const FALLBACK_COLORS = ["#4e6f8f", "#7c5f90", "#3f7b69", "#8d6a3b", "#82605b", "#537987", "#6e6b3f"];
 
@@ -1393,7 +1435,8 @@
       function hasPendingLayoutDraftChanges() {
         return (
           Object.keys(state.localEditsById).length > 0 ||
-          state.deletedLayoutIds.size > 0
+          state.deletedLayoutIds.size > 0 ||
+          hasPendingCaptionBindingDraftChanges()
         );
       }
 
@@ -1431,10 +1474,18 @@
       function updateReviewButtonState() {
         const hasDraftChanges = hasPendingLayoutDraftChanges();
         const alreadyReviewed = state.page?.status === "layout_reviewed";
+        const unboundCaptionIds = findUnboundCaptionIds();
         if (state.reviewSubmitInProgress) {
           reviewBtn.textContent = "Saving...";
           reviewBtn.disabled = true;
           reviewBtn.title = "Saving layout review changes.";
+          return;
+        }
+        if (unboundCaptionIds.length > 0) {
+          reviewBtn.textContent = "Mark Reviewed";
+          reviewBtn.disabled = true;
+          reviewBtn.title =
+            "Each caption must be bound to at least one table, picture, or formula before review.";
           return;
         }
         if (alreadyReviewed && !hasDraftChanges) {
@@ -1809,6 +1860,101 @@
           .replace(/[-/\s]+/g, "_");
       }
 
+      function normalizeLayoutIdList(values) {
+        if (!Array.isArray(values)) {
+          return [];
+        }
+        const uniqueIds = new Set();
+        for (const rawValue of values) {
+          const value = Number(rawValue);
+          if (!Number.isInteger(value) || value <= 0) {
+            continue;
+          }
+          uniqueIds.add(value);
+        }
+        return Array.from(uniqueIds).sort((a, b) => a - b);
+      }
+
+      function isCaptionClass(className) {
+        return normalizeClassName(className) === CAPTION_LAYOUT_CLASS;
+      }
+
+      function isCaptionTargetClass(className) {
+        return CAPTION_TARGET_CLASSES.has(normalizeClassName(className));
+      }
+
+      function sanitizeCaptionBindingsInPlace() {
+        if (!state.layoutsLoaded) {
+          return;
+        }
+
+        const captionIds = new Set();
+        const targetIds = new Set();
+        for (const layout of state.layouts) {
+          const layoutId = Number(layout.id);
+          if (!Number.isInteger(layoutId) || layoutId <= 0) {
+            continue;
+          }
+          if (isCaptionClass(layout.class_name)) {
+            captionIds.add(layoutId);
+          }
+          if (isCaptionTargetClass(layout.class_name)) {
+            targetIds.add(layoutId);
+          }
+        }
+
+        const nextBindings = {};
+        for (const captionId of captionIds) {
+          const key = String(captionId);
+          const sourceList = Array.isArray(state.captionBindingsByCaptionId[key])
+            ? state.captionBindingsByCaptionId[key]
+            : state.serverCaptionBindingsByCaptionId[key] || [];
+          const sanitizedTargets = normalizeLayoutIdList(sourceList).filter(
+            (targetId) => targetId !== captionId && targetIds.has(targetId),
+          );
+          nextBindings[key] = sanitizedTargets;
+        }
+        state.captionBindingsByCaptionId = nextBindings;
+      }
+
+      function hasPendingCaptionBindingDraftChanges() {
+        if (!state.layoutsLoaded) {
+          return false;
+        }
+        const captionIds = state.layouts
+          .filter((layout) => isCaptionClass(layout.class_name))
+          .map((layout) => String(layout.id));
+        for (const captionId of captionIds) {
+          const currentTargets = normalizeLayoutIdList(state.captionBindingsByCaptionId[captionId]);
+          const baselineTargets = normalizeLayoutIdList(state.serverCaptionBindingsByCaptionId[captionId]);
+          if (
+            currentTargets.length !== baselineTargets.length ||
+            currentTargets.some((targetId, index) => targetId !== baselineTargets[index])
+          ) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      function findUnboundCaptionIds() {
+        if (!state.layoutsLoaded) {
+          return [];
+        }
+        const unbound = [];
+        for (const layout of state.layouts) {
+          if (!isCaptionClass(layout.class_name)) {
+            continue;
+          }
+          const layoutId = Number(layout.id);
+          const targets = normalizeLayoutIdList(state.captionBindingsByCaptionId[String(layoutId)]);
+          if (targets.length === 0) {
+            unbound.push(layoutId);
+          }
+        }
+        return unbound.sort((a, b) => a - b);
+      }
+
       function buildClassSelect(initialClass) {
         const select = document.createElement("select");
         const normalizedInitial = normalizeClassName(initialClass);
@@ -1832,6 +1978,17 @@
         const color = colorForClass(className);
         select.style.borderColor = hexToRgba(color, 0.55);
         select.style.color = color;
+      }
+
+      function captionBindingOptions(captionLayoutId) {
+        const currentCaptionId = Number(captionLayoutId);
+        return state.layouts.filter((layout) => {
+          const layoutId = Number(layout.id);
+          if (!Number.isInteger(layoutId) || layoutId <= 0 || layoutId === currentCaptionId) {
+            return false;
+          }
+          return isCaptionTargetClass(layout.class_name);
+        });
       }
 
       function layoutRow(layout) {
@@ -1901,6 +2058,61 @@
           bboxTd.appendChild(field);
         }
         tr.appendChild(bboxTd);
+
+        const bindTd = document.createElement("td");
+        bindTd.className = "layout-bind-col";
+        if (isCaptionClass(layout.class_name)) {
+          const targetsSelect = document.createElement("select");
+          targetsSelect.className = "caption-targets-select";
+          targetsSelect.multiple = true;
+
+          const bindingOptions = captionBindingOptions(layoutId);
+          const selectedTargetIds = new Set(
+            normalizeLayoutIdList(state.captionBindingsByCaptionId[String(layoutId)]),
+          );
+          for (const targetLayout of bindingOptions) {
+            const targetLayoutId = Number(targetLayout.id);
+            const option = document.createElement("option");
+            option.value = String(targetLayoutId);
+            option.textContent = `${targetLayout.class_name} [id:${targetLayoutId}]`;
+            if (selectedTargetIds.has(targetLayoutId)) {
+              option.selected = true;
+            }
+            targetsSelect.appendChild(option);
+          }
+
+          targetsSelect.size = Math.min(6, Math.max(2, bindingOptions.length || 2));
+          targetsSelect.disabled = bindingOptions.length === 0;
+          targetsSelect.classList.toggle("binding-missing", selectedTargetIds.size === 0);
+          targetsSelect.title =
+            bindingOptions.length === 0
+              ? "No available table/picture/formula targets on this page."
+              : "Bind caption to one or more target layouts.";
+
+          targetsSelect.addEventListener("focus", () => {
+            selectLayout(layoutId, { scrollImageToLayout: true });
+          });
+          targetsSelect.addEventListener("pointerdown", () => {
+            selectLayout(layoutId, { scrollImageToLayout: true });
+          });
+          targetsSelect.addEventListener("change", () => {
+            const nextTargets = normalizeLayoutIdList(
+              Array.from(targetsSelect.selectedOptions).map((option) => Number(option.value)),
+            );
+            state.captionBindingsByCaptionId[String(layoutId)] = nextTargets;
+            targetsSelect.classList.toggle("binding-missing", nextTargets.length === 0);
+            persistLayoutDraftState();
+            setStatus("Caption bindings saved locally.");
+          });
+
+          bindTd.appendChild(targetsSelect);
+        } else {
+          const noBinding = document.createElement("span");
+          noBinding.className = "subline";
+          noBinding.textContent = "—";
+          bindTd.appendChild(noBinding);
+        }
+        tr.appendChild(bindTd);
 
         for (const [key, input] of bboxFields) {
           const pointHandle = pointHandleForCoordinateKey(key);
@@ -2007,7 +2219,9 @@
 
         classInput.addEventListener("change", () => {
           applyClassColorToSelect(classInput, classInput.value);
-          saveLocalDraft();
+          if (saveLocalDraft()) {
+            renderLayouts();
+          }
         });
         orderInput.addEventListener("change", () => {
           const previousOrder = Number.isInteger(Number(layout.reading_order))
@@ -2079,6 +2293,9 @@
           applyDraftToState(serverBaseline);
           delete state.localEditsById[String(layoutId)];
           state.deletedLayoutIds.delete(layoutId);
+          state.captionBindingsByCaptionId[String(layoutId)] = normalizeLayoutIdList(
+            state.serverCaptionBindingsByCaptionId[String(layoutId)],
+          );
           persistLayoutDraftState();
           renderLayouts();
           setStatus("Layout values restored.");
@@ -2097,6 +2314,12 @@
 
           state.deletedLayoutIds.add(layoutId);
           delete state.localEditsById[String(layoutId)];
+          delete state.captionBindingsByCaptionId[String(layoutId)];
+          for (const [captionId, targetIds] of Object.entries(state.captionBindingsByCaptionId)) {
+            state.captionBindingsByCaptionId[captionId] = normalizeLayoutIdList(targetIds).filter(
+              (targetId) => targetId !== layoutId,
+            );
+          }
 
           const remainingLayouts = state.layouts.filter((row) => Number(row.id) !== layoutId);
           const { layouts: compactedLayouts, shiftedIds } = compactReadingOrdersAfterDeletion(
@@ -2134,6 +2357,7 @@
 
       function renderLayouts() {
         sortLayoutsInPlace();
+        sanitizeCaptionBindingsInPlace();
         clearSelectedLayoutIfMissing();
         clearActivePointHighlightIfMissing();
         layoutsBody.innerHTML = "";
@@ -2155,8 +2379,14 @@
       async function loadLayouts() {
         const payload = await fetchJson(`/api/pages/${pageId}/layouts`);
         state.serverLayoutsById = {};
+        state.serverCaptionBindingsByCaptionId = {};
         for (const layout of payload.layouts) {
           state.serverLayoutsById[String(layout.id)] = layout;
+          if (isCaptionClass(layout.class_name)) {
+            state.serverCaptionBindingsByCaptionId[String(layout.id)] = normalizeLayoutIdList(
+              layout.bound_target_ids,
+            );
+          }
         }
 
         const mergedLayouts = [];
@@ -2191,6 +2421,7 @@
         }
 
         state.layouts = mergedLayouts;
+        state.layoutsLoaded = true;
         persistLayoutDraftState();
         renderLayouts();
       }
@@ -2361,6 +2592,29 @@
         }
       }
 
+      function buildCaptionBindingsRequestPayload() {
+        sanitizeCaptionBindingsInPlace();
+        const unboundCaptionIds = findUnboundCaptionIds();
+        if (unboundCaptionIds.length > 0) {
+          throw new Error(
+            "Each caption must be bound to at least one table, picture, or formula before review.",
+          );
+        }
+        const bindings = state.layouts
+          .filter((layout) => isCaptionClass(layout.class_name))
+          .map((layout) => {
+            const captionLayoutId = Number(layout.id);
+            const targetLayoutIds = normalizeLayoutIdList(
+              state.captionBindingsByCaptionId[String(captionLayoutId)],
+            );
+            return {
+              caption_layout_id: captionLayoutId,
+              target_layout_ids: targetLayoutIds,
+            };
+          });
+        return { bindings };
+      }
+
       async function markReviewed() {
         state.reviewSubmitInProgress = true;
         updateReviewUiState();
@@ -2384,6 +2638,13 @@
               body: JSON.stringify(draft),
             });
           }
+
+          const captionBindingsPayload = buildCaptionBindingsRequestPayload();
+          await fetchJson(`/api/pages/${pageId}/caption-bindings`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(captionBindingsPayload),
+          });
 
           const payload = await fetchJson(`/api/pages/${pageId}/layouts/review-complete`, {
             method: "POST",

@@ -19,10 +19,12 @@ from .layouts import (
     get_page,
     list_layouts,
     mark_layout_reviewed,
+    replace_caption_bindings,
     update_layout,
 )
 from .pipeline_runtime import (
     emit_event,
+    enqueue_job,
     enqueue_layout_detection_for_new_pages,
     get_activity_snapshot,
     register_default_handlers,
@@ -143,6 +145,15 @@ class UpdateLayoutRequest(BaseModel):
 class WipeStateRequest(BaseModel):
     confirm: bool = False
     rescan: bool = True
+
+
+class CaptionBindingPayload(BaseModel):
+    caption_layout_id: int = Field(ge=1)
+    target_layout_ids: list[int] = Field(default_factory=list)
+
+
+class ReplaceCaptionBindingsRequest(BaseModel):
+    bindings: list[CaptionBindingPayload] = Field(default_factory=list)
 
 
 @app.get("/")
@@ -496,6 +507,34 @@ def create_page_layout(page_id: int, payload: CreateLayoutRequest) -> dict[str, 
     return {"layout": layout}
 
 
+@app.put("/api/pages/{page_id}/caption-bindings")
+def put_page_caption_bindings(
+    page_id: int, payload: ReplaceCaptionBindingsRequest
+) -> dict[str, object]:
+    bindings_by_caption_id: dict[int, list[int]] = {}
+    for binding in payload.bindings:
+        caption_layout_id = int(binding.caption_layout_id)
+        target_layout_ids = [int(target_id) for target_id in binding.target_layout_ids]
+        current = bindings_by_caption_id.setdefault(caption_layout_id, [])
+        current.extend(target_layout_ids)
+
+    for caption_layout_id, target_layout_ids in list(bindings_by_caption_id.items()):
+        deduplicated_ids: list[int] = []
+        seen_target_ids: set[int] = set()
+        for target_layout_id in target_layout_ids:
+            if target_layout_id in seen_target_ids:
+                continue
+            seen_target_ids.add(target_layout_id)
+            deduplicated_ids.append(target_layout_id)
+        bindings_by_caption_id[caption_layout_id] = deduplicated_ids
+
+    try:
+        result = replace_caption_bindings(page_id, bindings_by_caption_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return result
+
+
 @app.patch("/api/layouts/{layout_id}")
 def patch_layout(layout_id: int, payload: UpdateLayoutRequest) -> dict[str, object]:
     class_name = None if payload.class_name is None else payload.class_name.strip()
@@ -553,6 +592,24 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
         message="Layout review completed.",
         data={"layout_count": result["layout_count"]},
     )
+    if settings.enable_background_jobs:
+        enqueued = enqueue_job("ocr_extract", page_id=page_id, payload={"trigger": "layout_review_complete"})
+        if enqueued:
+            emit_event(
+                stage="ocr_extract",
+                event_type="job_enqueued",
+                page_id=page_id,
+                message="Queued OCR extraction after layout review completion.",
+                data={"trigger": "layout_review_complete"},
+            )
+        else:
+            emit_event(
+                stage="ocr_extract",
+                event_type="job_enqueue_skipped",
+                page_id=page_id,
+                message="Skipped queuing OCR extraction because a job is already queued or running.",
+                data={"trigger": "layout_review_complete"},
+            )
     return result
 
 

@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from .db import get_connection
 from .layouts import detect_layouts_for_page
+from .ocr_extract import extract_ocr_for_page
 
 JobHandler = Callable[[dict[str, Any]], dict[str, Any] | None]
 
@@ -73,6 +74,7 @@ def register_default_handlers() -> None:
     if _DEFAULT_HANDLERS_REGISTERED:
         return
     register_stage_handler("layout_detect", _layout_detect_handler)
+    register_stage_handler("ocr_extract", _ocr_extract_handler)
     _DEFAULT_HANDLERS_REGISTERED = True
 
 
@@ -163,6 +165,11 @@ def _completion_message(stage: str, result: dict[str, Any] | None) -> str:
     if stage == "layout_detect":
         created = int(result.get("created", 0))
         return f"Completed layout detection, created {created} regions."
+    if stage == "ocr_extract":
+        extracted = int(result.get("extracted_count", 0))
+        skipped = int(result.get("skipped_count", 0))
+        requests = int(result.get("requests_count", 0))
+        return f"Completed OCR extraction, extracted {extracted}, skipped {skipped}, Gemini requests {requests}."
     return f"Completed {_stage_label(stage)}."
 
 
@@ -343,6 +350,41 @@ def _layout_detect_handler(job: dict[str, Any]) -> dict[str, Any]:
         with get_connection() as conn:
             conn.execute(
                 "UPDATE pages SET status = 'new', updated_at = ? WHERE id = ? AND is_missing = 0",
+                (_utc_now(), page_id),
+            )
+        raise
+
+
+def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
+    page_id = job["page_id"]
+    if page_id is None:
+        raise ValueError("ocr_extract job requires page_id.")
+
+    with get_connection() as conn:
+        page_row = conn.execute(
+            "SELECT id, status, is_missing FROM pages WHERE id = ?",
+            (page_id,),
+        ).fetchone()
+        if page_row is None:
+            raise ValueError("Page not found.")
+        if int(page_row["is_missing"]) == 1:
+            return {"skipped": True, "reason": "page is missing"}
+
+        current_status = str(page_row["status"])
+        if current_status not in {"layout_reviewed", "ocr_extracting", "ocr_failed"}:
+            return {"skipped": True, "reason": f"page status is {current_status}"}
+
+        conn.execute(
+            "UPDATE pages SET status = 'ocr_extracting', updated_at = ? WHERE id = ?",
+            (_utc_now(), page_id),
+        )
+
+    try:
+        return extract_ocr_for_page(page_id)
+    except Exception:
+        with get_connection() as conn:
+            conn.execute(
+                "UPDATE pages SET status = 'ocr_failed', updated_at = ? WHERE id = ? AND is_missing = 0",
                 (_utc_now(), page_id),
             )
         raise

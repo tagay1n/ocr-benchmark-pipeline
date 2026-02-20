@@ -37,6 +37,7 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 - DB: SQLite by default.
 - Frontend: server-hosted static pages (incrementally evolving UI).
 - Config: `config.yaml` with optional environment overrides.
+- Gemini key source: `config.yaml` (`gemini_keys`) with optional `GEMINI_KEYS` override.
 - Discovery defaults:
   - source folder: `input`
   - deep recursive scan: enabled
@@ -146,12 +147,32 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - layout review content area now stretches to viewport height:
     - image panel fills remaining page height under header/actions
     - removes large blank area under the image panel
+  - caption binding for layout review:
+    - captions must be explicitly bound to `table` / `picture` / `formula` targets before review completion
+    - multi-target caption binding supported
+    - binding labels follow `<class> [id:<id>]` format
+- OCR Extraction V1 backend:
+  - background `ocr_extract` stage handler is registered in pipeline runtime
+  - `Mark Reviewed` now auto-enqueues OCR extraction job (when background jobs are enabled)
+  - per-layout OCR extraction now runs via Gemini model `gemini-3-flash-preview`
+  - extraction class routing:
+    - markdown: `title`, `section_header`, `text`, `list_item`, `page_header`, `page_footer`, `caption`, `footnote`
+    - html: `table`
+    - latex: `formula`
+    - skipped: `picture`
+  - OCR crop extraction is bbox-based (per reviewed layout region)
+  - Gemini key rotation and usage persistence:
+    - keys loaded from `config.yaml` `gemini_keys`
+    - usage persisted at fixed path `_artifacts/gemini_usage.json`
+    - successful requests increment per-key counter (max `20` per key)
+    - quota/rate-limit responses mark key exhausted and rotate to next key
+  - OCR outputs are persisted in SQLite `ocr_outputs` table
+  - page status progression now includes `ocr_extracting`, `ocr_done`, `ocr_failed`
 
 ### Not Completed Yet
 
-- OCR extraction stage (Gemini) and post-processing.
+- OCR post-processing orchestration beyond per-layout extraction (document-level assembly, header hierarchy reconciliation, caption placement in final output).
 - OCR review page with markdown raw/rendered dual mode.
-- Job queue for long-running tasks.
 - Migrations with Alembic.
 
 ## API Snapshot (As Of 2026-02-16)
@@ -179,6 +200,8 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 - `pages`: discovered source images and pipeline status.
 - `duplicate_files`: duplicate source-path tracking by content hash.
 - `layouts`: region boxes/classes/order per page.
+- `caption_bindings`: required links from caption layouts to target layouts (`table`/`picture`/`formula`).
+- `ocr_outputs`: extracted OCR payload per layout (`markdown`/`html`/`latex`/`skip`) with model/key metadata.
 
 ## Conventions For Future Updates
 
@@ -189,6 +212,14 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-20:
+  - Gemini key utilization + OCR extraction wiring:
+    - `config.yaml` `gemini_keys` are now parsed and used by backend OCR extraction
+    - added key-usage state file at `_artifacts/gemini_usage.json` (success-count based; quota failures mark key exhausted)
+    - added OCR extractor module (`app/ocr_extract.py`) using `gemini-3-flash-preview` on bbox crops
+    - added pipeline runtime handler for `ocr_extract` and status transitions `layout_reviewed -> ocr_extracting -> ocr_done/ocr_failed`
+    - `Mark Reviewed` now auto-queues OCR extraction job when background jobs are enabled
+    - added SQLite table `ocr_outputs` for per-layout extraction artifacts
+    - added backend tests for OCR enqueue + key-usage flow
   - Layout review status clarity update:
     - added header review-state badge (`Needs review` / `Reviewed`) driven by page status
     - main review action now auto-switches between active `Mark Reviewed` and disabled `Reviewed` based on status+draft edits

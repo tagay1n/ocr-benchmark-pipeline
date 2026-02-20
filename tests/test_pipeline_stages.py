@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from app import config, db, discovery, layouts, main
+from app import config, db, discovery, layouts, main, ocr_extract, pipeline_runtime
 from app.config import DEFAULT_EXTENSIONS, Settings
 
 
@@ -29,6 +31,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
         db.init_db()
 
     def tearDown(self) -> None:
@@ -70,6 +73,40 @@ class PipelineStagesTests(unittest.TestCase):
         duplicate = duplicates_payload["duplicates"][0]
         self.assertEqual(duplicate["duplicate_rel_path"], "dup/a-copy.png")
         self.assertEqual(duplicate["canonical_rel_path"], "a.png")
+
+    def test_settings_loads_gemini_keys_from_yaml_map(self) -> None:
+        config_path = self.project_root / "config.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "source_dir: input",
+                    "db_path: data/test.db",
+                    "enable_background_jobs: false",
+                    "gemini_keys:",
+                    "  a:",
+                    "    - key-1",
+                    "    - key-2",
+                    "  b:",
+                    "    - key-2",
+                    "    - key-3",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PROJECT_ROOT": str(self.project_root),
+                "APP_CONFIG_PATH": str(config_path),
+            },
+            clear=False,
+        ):
+            loaded = config.load_settings()
+
+        self.assertEqual(loaded.gemini_keys, ("key-1", "key-2", "key-3"))
+        self.assertEqual(loaded.gemini_usage_path, self.project_root / "_artifacts" / "gemini_usage.json")
 
     def test_layout_detection_stage_creates_layouts(self) -> None:
         self._write_image("page.png", b"fake-image")
@@ -146,6 +183,138 @@ class PipelineStagesTests(unittest.TestCase):
 
         page_payload = main.page_details(page_id)
         self.assertEqual(page_payload["page"]["status"], "layout_reviewed")
+
+    def test_layout_review_enqueues_ocr_when_background_jobs_enabled(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=True,
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        db.init_db()
+
+        self._write_image("review-queue.png", b"review-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.25),
+            ),
+        )
+
+        with patch.object(main, "enqueue_job", return_value=True) as enqueue_mock:
+            main.complete_layout_review(page_id)
+
+        enqueue_mock.assert_called_once_with(
+            "ocr_extract",
+            page_id=page_id,
+            payload={"trigger": "layout_review_complete"},
+        )
+
+    def test_layout_review_requires_caption_bindings(self) -> None:
+        self._write_image("caption.png", b"caption-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+
+        caption_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="caption",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.7, x2=0.9, y2=0.8),
+            ),
+        )["layout"]
+        table_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="table",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.2, x2=0.9, y2=0.65),
+            ),
+        )["layout"]
+
+        with self.assertRaises(main.HTTPException) as review_error:
+            main.complete_layout_review(page_id)
+        self.assertEqual(review_error.exception.status_code, 400)
+        self.assertIn("caption layouts must be bound", str(review_error.exception.detail))
+
+        bindings_result = main.put_page_caption_bindings(
+            page_id,
+            main.ReplaceCaptionBindingsRequest(
+                bindings=[
+                    main.CaptionBindingPayload(
+                        caption_layout_id=int(caption_layout["id"]),
+                        target_layout_ids=[int(table_layout["id"])],
+                    )
+                ]
+            ),
+        )
+        self.assertEqual(bindings_result["binding_count"], 1)
+
+        reviewed = main.complete_layout_review(page_id)
+        self.assertEqual(reviewed["status"], "layout_reviewed")
+
+    def test_ocr_extract_handler_uses_gemini_keys(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=False,
+            gemini_keys=("k1", "k2"),
+            gemini_usage_path=self.project_root / "_artifacts" / "gemini_usage.json",
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        db.init_db()
+
+        self._write_image("ocr.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", return_value="Extracted text"
+        ) as gemini_mock:
+            result = pipeline_runtime._ocr_extract_handler({"page_id": page_id, "payload": {}, "id": 1, "stage": "ocr_extract"})
+
+        self.assertEqual(result["status"], "ocr_done")
+        self.assertEqual(result["extracted_count"], 1)
+        self.assertEqual(result["requests_count"], 1)
+        gemini_mock.assert_called_once()
+
+        usage_payload = json.loads(self.test_settings.gemini_usage_path.read_text(encoding="utf-8"))
+        self.assertEqual(usage_payload["requests_per_key"]["k1"], 1)
+        self.assertEqual(usage_payload["last_key"], "k1")
+
+        page_payload = main.page_details(page_id)
+        self.assertEqual(page_payload["page"]["status"], "ocr_done")
 
     def test_pipeline_activity_endpoint_shape(self) -> None:
         self._write_image("activity.png", b"activity")

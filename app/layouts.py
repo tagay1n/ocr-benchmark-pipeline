@@ -18,6 +18,8 @@ DOC_LAYOUTNET_DEFAULT_CONF = 0.25
 DOC_LAYOUTNET_DEFAULT_IOU = 0.45
 DOC_LAYOUTNET_DEFAULT_MAX_DET = 300
 DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS = False
+CAPTION_CLASS_NAME = "caption"
+CAPTION_TARGET_CLASS_NAMES = {"table", "picture", "formula"}
 
 _DOC_LAYOUTNET_MODEL = None
 _DOC_LAYOUTNET_MODEL_LOCK = Lock()
@@ -189,6 +191,24 @@ def list_layouts(page_id: int) -> list[dict[str, Any]]:
             """,
             (page_id,),
         ).fetchall()
+        binding_rows = conn.execute(
+            """
+            SELECT cb.caption_layout_id, cb.target_layout_id
+            FROM caption_bindings cb
+            JOIN layouts caption_layout ON caption_layout.id = cb.caption_layout_id
+            JOIN layouts target_layout ON target_layout.id = cb.target_layout_id
+            WHERE caption_layout.page_id = ?
+              AND target_layout.page_id = ?
+            ORDER BY cb.caption_layout_id ASC, cb.target_layout_id ASC
+            """,
+            (page_id, page_id),
+        ).fetchall()
+
+    bindings_by_caption_id: dict[int, list[int]] = {}
+    for row in binding_rows:
+        caption_layout_id = int(row["caption_layout_id"])
+        target_layout_id = int(row["target_layout_id"])
+        bindings_by_caption_id.setdefault(caption_layout_id, []).append(target_layout_id)
 
     return [
         {
@@ -206,6 +226,7 @@ def list_layouts(page_id: int) -> list[dict[str, Any]]:
             "source": row["source"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "bound_target_ids": bindings_by_caption_id.get(int(row["id"]), []),
         }
         for row in rows
     ]
@@ -325,6 +346,7 @@ def create_layout(
     reading_order: int | None,
 ) -> dict[str, Any]:
     validate_bbox(x1, y1, x2, y2)
+    class_name = _normalize_class_name(class_name)
     now = _utc_now()
 
     with get_connection() as conn:
@@ -409,6 +431,7 @@ def update_layout(
     y2: float | None,
 ) -> dict[str, Any]:
     now = _utc_now()
+    next_class_name_input = None if class_name is None else _normalize_class_name(class_name)
     with get_connection() as conn:
         row = conn.execute(
             """
@@ -421,7 +444,7 @@ def update_layout(
         if row is None:
             raise ValueError("Layout not found.")
 
-        next_class_name = row["class_name"] if class_name is None else class_name
+        next_class_name = row["class_name"] if next_class_name_input is None else next_class_name_input
         next_reading_order = int(row["reading_order"]) if reading_order is None else reading_order
         next_x1 = float(row["x1"]) if x1 is None else x1
         next_y1 = float(row["y1"]) if y1 is None else y1
@@ -496,6 +519,104 @@ def delete_layout(layout_id: int) -> None:
         )
 
 
+def replace_caption_bindings(page_id: int, bindings_by_caption_id: dict[int, list[int]]) -> dict[str, Any]:
+    now = _utc_now()
+    with get_connection() as conn:
+        page_row = _get_page_row(conn, page_id)
+        if page_row is None:
+            raise ValueError("Page not found.")
+        if int(page_row["is_missing"]) == 1:
+            raise ValueError("Page is marked as missing and cannot be edited.")
+
+        layout_rows = conn.execute(
+            """
+            SELECT id, class_name
+            FROM layouts
+            WHERE page_id = ?
+            """,
+            (page_id,),
+        ).fetchall()
+
+        layout_class_by_id = {int(row["id"]): _normalize_class_name(str(row["class_name"])) for row in layout_rows}
+        caption_ids = {
+            layout_id
+            for layout_id, class_name in layout_class_by_id.items()
+            if class_name == CAPTION_CLASS_NAME
+        }
+        target_ids = {
+            layout_id
+            for layout_id, class_name in layout_class_by_id.items()
+            if class_name in CAPTION_TARGET_CLASS_NAMES
+        }
+
+        normalized_bindings: dict[int, list[int]] = {}
+        for raw_caption_id, raw_target_ids in bindings_by_caption_id.items():
+            caption_id = int(raw_caption_id)
+            if caption_id not in caption_ids:
+                raise ValueError(
+                    "Caption bindings can be assigned only for caption layouts on the same page."
+                )
+
+            target_ids_normalized: list[int] = []
+            seen_target_ids: set[int] = set()
+            for raw_target_id in raw_target_ids:
+                target_id = int(raw_target_id)
+                if target_id in seen_target_ids:
+                    continue
+                seen_target_ids.add(target_id)
+                if target_id not in target_ids:
+                    raise ValueError(
+                        "Caption targets must be table, picture, or formula layouts on the same page."
+                    )
+                target_ids_normalized.append(target_id)
+            target_ids_normalized.sort()
+            normalized_bindings[caption_id] = target_ids_normalized
+
+        unbound_caption_ids = [caption_id for caption_id in sorted(caption_ids) if not normalized_bindings.get(caption_id)]
+        if unbound_caption_ids:
+            raise ValueError(
+                "All caption layouts must be bound to at least one table, picture, or formula before review."
+            )
+
+        conn.execute(
+            """
+            DELETE FROM caption_bindings
+            WHERE caption_layout_id IN (
+                SELECT id
+                FROM layouts
+                WHERE page_id = ?
+            )
+            """,
+            (page_id,),
+        )
+
+        binding_count = 0
+        for caption_id, target_id_list in normalized_bindings.items():
+            for target_id in target_id_list:
+                conn.execute(
+                    """
+                    INSERT INTO caption_bindings(caption_layout_id, target_layout_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (caption_id, target_id, now, now),
+                )
+                binding_count += 1
+
+        conn.execute(
+            "UPDATE pages SET updated_at = ? WHERE id = ?",
+            (now, page_id),
+        )
+
+    return {
+        "page_id": page_id,
+        "binding_count": binding_count,
+        "bindings": [
+            {"caption_layout_id": caption_id, "target_layout_ids": target_ids}
+            for caption_id, target_ids in sorted(normalized_bindings.items())
+        ],
+    }
+
+
 def mark_layout_reviewed(page_id: int) -> dict[str, Any]:
     now = _utc_now()
     with get_connection() as conn:
@@ -513,6 +634,29 @@ def mark_layout_reviewed(page_id: int) -> dict[str, Any]:
         )
         if layout_count == 0:
             raise ValueError("No layouts found for this page.")
+
+        caption_needing_bindings = conn.execute(
+            f"""
+            SELECT caption_layout.id
+            FROM layouts caption_layout
+            WHERE caption_layout.page_id = ?
+              AND caption_layout.class_name = ?
+              AND NOT EXISTS (
+                SELECT 1
+                FROM caption_bindings cb
+                JOIN layouts target_layout ON target_layout.id = cb.target_layout_id
+                WHERE cb.caption_layout_id = caption_layout.id
+                  AND target_layout.page_id = caption_layout.page_id
+                  AND target_layout.class_name IN ({",".join("?" for _ in CAPTION_TARGET_CLASS_NAMES)})
+              )
+            LIMIT 1
+            """,
+            (page_id, CAPTION_CLASS_NAME, *sorted(CAPTION_TARGET_CLASS_NAMES)),
+        ).fetchone()
+        if caption_needing_bindings is not None:
+            raise ValueError(
+                "All caption layouts must be bound to at least one table, picture, or formula before review."
+            )
 
         conn.execute(
             "UPDATE pages SET status = 'layout_reviewed', updated_at = ? WHERE id = ?",

@@ -75,6 +75,20 @@ def init_db() -> None:
 
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS caption_bindings (
+                caption_layout_id INTEGER NOT NULL,
+                target_layout_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(caption_layout_id, target_layout_id),
+                FOREIGN KEY(caption_layout_id) REFERENCES layouts(id) ON DELETE CASCADE,
+                FOREIGN KEY(target_layout_id) REFERENCES layouts(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_pages_status
             ON pages(status)
             """
@@ -91,6 +105,45 @@ def init_db() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_layouts_page_order
             ON layouts(page_id, reading_order)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_caption_bindings_caption
+            ON caption_bindings(caption_layout_id)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_caption_bindings_target
+            ON caption_bindings(target_layout_id)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ocr_outputs (
+                layout_id INTEGER PRIMARY KEY,
+                page_id INTEGER NOT NULL,
+                class_name TEXT NOT NULL,
+                output_format TEXT NOT NULL,
+                content TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                key_alias TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE,
+                FOREIGN KEY(layout_id) REFERENCES layouts(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_ocr_outputs_page
+            ON ocr_outputs(page_id)
             """
         )
 
