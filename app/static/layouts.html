@@ -23,6 +23,7 @@
 
       body {
         margin: 0;
+        min-height: 100vh;
         font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
         color: var(--ink);
         background:
@@ -35,6 +36,9 @@
         position: relative;
         width: 100%;
         padding: 24px;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
       }
 
       .nav-strip {
@@ -104,12 +108,47 @@
         position: relative;
       }
 
-      .zoom-trigger {
+      .zoom-combo {
         display: inline-flex;
-        align-items: center;
-        min-width: 86px;
-        justify-content: space-between;
-        gap: 8px;
+        position: relative;
+        height: 38px;
+        border: 1px solid #9aa99f;
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--surface);
+      }
+
+      .zoom-percent-input {
+        width: 58px;
+        height: 100%;
+        border: 0;
+        padding: 0 8px;
+        text-align: right;
+        background: transparent;
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .zoom-percent-input:focus {
+        outline: none;
+      }
+
+      .zoom-caret-btn {
+        width: 30px;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        border-left: 1px solid var(--border);
+        border-radius: 0;
+        background: #ece8df;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 1;
+        align-items: stretch;
+      }
+
+      .zoom-caret-btn:hover {
+        background: #e3ddd1;
       }
 
       .zoom-caret {
@@ -120,7 +159,7 @@
         position: absolute;
         top: calc(100% + 6px);
         left: 0;
-        min-width: 136px;
+        min-width: 172px;
         padding: 8px 0;
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -219,8 +258,11 @@
         margin-top: 16px;
         display: grid;
         grid-template-columns: minmax(0, 1fr) fit-content(100%);
+        grid-template-rows: minmax(0, 1fr);
         gap: 16px;
-        align-items: start;
+        align-items: stretch;
+        flex: 1 1 auto;
+        min-height: 0;
       }
 
       .panel {
@@ -228,6 +270,13 @@
         border: 1px solid var(--border);
         border-radius: 14px;
         padding: 14px;
+      }
+
+      .image-panel {
+        padding: 0;
+        overflow: hidden;
+        min-height: 0;
+        display: flex;
       }
 
       .layouts-panel {
@@ -298,11 +347,8 @@
       .image-viewport {
         position: relative;
         width: 100%;
-        height: calc(100vh - 220px);
-        min-height: 460px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        height: 100%;
+        max-height: none;
         border: 1px solid var(--border);
         border-radius: 10px;
         overflow: auto;
@@ -312,7 +358,7 @@
       .image-wrap {
         position: relative;
         width: max-content;
-        flex: 0 0 auto;
+        margin: 0 auto;
       }
 
       #page-image {
@@ -585,8 +631,7 @@
         }
 
         .image-viewport {
-          height: 68vh;
-          min-height: 320px;
+          max-height: 68vh;
         }
 
         .modal-grid {
@@ -615,10 +660,12 @@
         </div>
         <div class="actions">
           <div class="zoom-control">
-            <button id="zoom-trigger" class="secondary zoom-trigger" type="button" aria-haspopup="true" aria-expanded="false">
-              <span id="zoom-trigger-label">100%</span>
-              <span class="zoom-caret">▾</span>
-            </button>
+            <div class="zoom-combo">
+              <input id="zoom-percent-input" class="zoom-percent-input" type="number" min="1" max="400" step="1" value="100" aria-label="Zoom percent" />
+              <button id="zoom-trigger" class="zoom-caret-btn" type="button" aria-label="Open zoom presets" aria-haspopup="true" aria-expanded="false">
+                <span class="zoom-caret">▾</span>
+              </button>
+            </div>
             <div id="zoom-menu" class="zoom-menu" hidden>
               <button class="zoom-option" type="button" data-zoom-mode="fit-page">Fit Page</button>
               <button class="zoom-option" type="button" data-zoom-mode="fit-width">Fit Width</button>
@@ -643,7 +690,7 @@
       </section>
 
       <section class="grid">
-        <article class="panel">
+        <article class="panel image-panel">
           <div id="image-viewport" class="image-viewport">
             <div id="image-wrap" class="image-wrap">
               <img id="page-image" alt="Page for layout review" />
@@ -720,9 +767,8 @@
       import {
         clampZoomPercent,
         compactReadingOrdersAfterDeletion,
-        computeViewportScrollToCenterBBox,
+        computeViewportScrollTargetForLayoutId,
         computeZoomScale,
-        formatZoomPercent,
         normalizeReviewHistory,
         nextLayoutReviewUrl,
         pointHandleForCoordinateKey,
@@ -772,9 +818,9 @@
       const statusLine = document.getElementById("status-line");
       const layoutsBody = document.getElementById("layouts-body");
       const zoomTrigger = document.getElementById("zoom-trigger");
-      const zoomTriggerLabel = document.getElementById("zoom-trigger-label");
       const zoomMenu = document.getElementById("zoom-menu");
       const zoomOptions = Array.from(document.querySelectorAll(".zoom-option"));
+      const zoomPercentInput = document.getElementById("zoom-percent-input");
 
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
@@ -808,20 +854,13 @@
       };
 
       function applyStoredZoomSettings() {
-        const storedMode = readStorage(STORAGE_KEYS.zoomMode);
-        if (storedMode === "fit-page" || storedMode === "fit-width" || storedMode === "automatic" || storedMode === "custom") {
-          state.zoomMode = storedMode;
-        }
+        state.zoomMode = "automatic";
         const storedPercent = readStorage(STORAGE_KEYS.zoomPercent);
         if (storedPercent !== null) {
           state.zoomPercent = clampZoomPercent(storedPercent);
         }
-        if (state.zoomMode === "custom") {
-          state.zoomAppliedPercent = Math.round(state.zoomPercent * 10) / 10;
-        } else {
-          state.zoomAppliedPercent = 100;
-        }
-        setZoomLabelFromApplied();
+        state.zoomAppliedPercent = 100;
+        setZoomInputFromApplied();
         updateZoomMenuSelection();
       }
 
@@ -848,8 +887,8 @@
         }
       }
 
-      function setZoomLabelFromApplied() {
-        zoomTriggerLabel.textContent = formatZoomPercent(state.zoomAppliedPercent);
+      function setZoomInputFromApplied() {
+        zoomPercentInput.value = String(Math.round(state.zoomAppliedPercent));
       }
 
       function centerImageInViewport() {
@@ -891,7 +930,7 @@
         imageWrap.style.height = `${displayHeight}px`;
 
         state.zoomAppliedPercent = Math.round(scale * 1000) / 10;
-        setZoomLabelFromApplied();
+        setZoomInputFromApplied();
         updateZoomMenuSelection();
         requestAnimationFrame(() => {
           centerImageInViewport();
@@ -917,6 +956,15 @@
         state.zoomPercent = clampZoomPercent(percent);
         applyZoom();
         persistZoomSettings();
+      }
+
+      function applyCustomZoomFromInput() {
+        const raw = Number(zoomPercentInput.value);
+        if (!Number.isFinite(raw)) {
+          setZoomInputFromApplied();
+          return;
+        }
+        setCustomZoomPercent(raw);
       }
 
       function persistReviewHistory() {
@@ -966,12 +1014,9 @@
       }
 
       function scrollImageViewportToLayout(layoutId) {
-        const layout = findLayoutById(layoutId);
-        if (!layout) {
-          return;
-        }
-        const target = computeViewportScrollToCenterBBox({
-          bbox: layout.bbox,
+        const target = computeViewportScrollTargetForLayoutId({
+          layoutId,
+          layouts: state.layouts,
           contentWidth: imageWrap.offsetWidth,
           contentHeight: imageWrap.offsetHeight,
           viewportWidth: imageViewport.clientWidth,
@@ -1576,6 +1621,12 @@
         const classInput = buildClassSelect(layout.class_name);
         classInput.classList.add("layout-class-select");
         applyClassColorToSelect(classInput, layout.class_name);
+        classInput.addEventListener("focus", () => {
+          selectLayout(layoutId, { scrollImageToLayout: true });
+        });
+        classInput.addEventListener("pointerdown", () => {
+          selectLayout(layoutId, { scrollImageToLayout: true });
+        });
         classTd.appendChild(classInput);
         tr.appendChild(classTd);
 
@@ -1587,6 +1638,12 @@
         orderInput.step = "1";
         orderInput.className = "layout-order-input";
         orderInput.value = layout.reading_order === null ? "" : String(layout.reading_order);
+        orderInput.addEventListener("focus", () => {
+          selectLayout(layoutId, { scrollImageToLayout: true });
+        });
+        orderInput.addEventListener("pointerdown", () => {
+          selectLayout(layoutId, { scrollImageToLayout: true });
+        });
         orderTd.appendChild(orderInput);
         tr.appendChild(orderTd);
 
@@ -1626,11 +1683,11 @@
             continue;
           }
           input.addEventListener("focus", () => {
-            selectLayout(layoutId, { scrollRowIntoView: true });
+            selectLayout(layoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
             setActivePointHighlight(layoutId, pointHandle);
           });
           input.addEventListener("pointerdown", () => {
-            selectLayout(layoutId, { scrollRowIntoView: true });
+            selectLayout(layoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
             setActivePointHighlight(layoutId, pointHandle);
           });
           input.addEventListener("blur", () => {
@@ -2120,6 +2177,15 @@
           setCustomZoomPercent(Number(percent));
         }
         closeZoomMenu();
+      });
+      zoomPercentInput.addEventListener("change", () => {
+        applyCustomZoomFromInput();
+      });
+      zoomPercentInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          applyCustomZoomFromInput();
+          zoomPercentInput.blur();
+        }
       });
       document.addEventListener("pointerdown", (event) => {
         if (!(event.target instanceof Element)) {

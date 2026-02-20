@@ -1,4 +1,4 @@
-export function clampZoomPercent(value, { min = 10, max = 400, fallback = 100 } = {}) {
+export function clampZoomPercent(value, { min = 1, max = 400, fallback = 100 } = {}) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
     return fallback;
@@ -105,6 +105,58 @@ export function computeViewportScrollToCenterBBox({
     left: Math.round(targetLeft),
     top: Math.round(targetTop),
   };
+}
+
+export function computeViewportScrollTargetForLayoutId({
+  layoutId,
+  layouts,
+  contentWidth,
+  contentHeight,
+  viewportWidth,
+  viewportHeight,
+}) {
+  const normalizedLayoutId = Number(layoutId);
+  if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+    return null;
+  }
+
+  if (!Array.isArray(layouts)) {
+    return null;
+  }
+
+  const layout = layouts.find((candidate) => Number(candidate?.id) === normalizedLayoutId);
+  if (!layout || !layout.bbox) {
+    return null;
+  }
+
+  return computeViewportScrollToCenterBBox({
+    bbox: layout.bbox,
+    contentWidth,
+    contentHeight,
+    viewportWidth,
+    viewportHeight,
+  });
+}
+
+export function computeViewportCenterPadding({
+  contentWidth,
+  contentHeight,
+  viewportWidth,
+  viewportHeight,
+}) {
+  if (!Number.isFinite(contentWidth) || !Number.isFinite(contentHeight)) {
+    return { x: 0, y: 0 };
+  }
+  if (!Number.isFinite(viewportWidth) || !Number.isFinite(viewportHeight)) {
+    return { x: 0, y: 0 };
+  }
+  if (contentWidth <= 0 || contentHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const x = Math.max(0, Math.floor((viewportWidth - contentWidth) / 2));
+  const y = Math.max(0, Math.floor((viewportHeight - contentHeight) / 2));
+  return { x, y };
 }
 
 export function nextLayoutReviewUrl(nextPayload) {

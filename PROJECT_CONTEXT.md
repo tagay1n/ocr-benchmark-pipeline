@@ -1,6 +1,6 @@
 # PROJECT CONTEXT
 
-Last updated: 2026-02-19
+Last updated: 2026-02-20
 
 ## Mission
 
@@ -87,14 +87,18 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - `Layouts` panel stays visible while scrolling image content (desktop sticky panel)
   - selecting a bbox on canvas highlights its row in `Layouts`, and selecting a row highlights its bbox on canvas
   - clicking a row in `Layouts` auto-scrolls/jumps the image viewport to that layout bbox
+  - focusing controls inside a layout row (`Class`, `Order`, `BBox`) also forces image jump to that layout bbox
   - clicking/focusing bbox coordinate inputs highlights matching bbox corner point on overlay (`x1/y1` -> top-left, `x2/y2` -> bottom-right)
   - deleting a layout compacts reading order of subsequent layouts (e.g. delete `1` -> old `2` becomes `1`)
   - bbox border/corner handle emphasis is shown only for the currently selected/focused bbox
   - page image zoom control added on layout review page:
     - dropdown with `Fit Page`, `Fit Width`, `Automatic`, and preset percentages (`50%`..`400%`)
+    - compact combined zoom control supports direct percent input plus dropdown presets (PDF-viewer style)
+    - zoom numeric input uses `1%` step increments
     - scrollable viewport with real image/overlay scaling
     - image viewport keeps page centered (both on load and when zoom changes)
-    - zoom choice persisted in local storage
+    - custom zoom percent retained in local storage; mode defaults to `Automatic` on load
+    - fixed large-zoom vertical clipping: top of page remains reachable via normal scroll
   - removed visible status row from layout review page (no `Ready`/inline status text bar)
   - layout review `Back to Dashboard` text button replaced with isolated top-right back glyph button
   - layout review page meta line no longer renders `status: ...` label (keeps page id and path labels)
@@ -114,6 +118,13 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
     - modal includes direct links to official Ultralytics docs for parameter meanings
   - backend detection API/schema now accepts and validates the same inference params
   - `Mark Reviewed` now automatically opens the next available page waiting for layout review
+  - layout review image panel spacing tightened:
+    - removed extra card padding around image viewport
+    - removed dynamic viewport side/top/bottom padding that created large empty margins
+    - image wrap remains horizontally centered without artificial bottom gap
+  - layout review content area now stretches to viewport height:
+    - image panel fills remaining page height under header/actions
+    - removes large blank area under the image panel
 
 ### Not Completed Yet
 
@@ -156,7 +167,27 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 
 ## Change Log
 
+- 2026-02-20:
+  - Layout review row-focus jump hardening:
+    - selecting/focusing row controls now explicitly triggers image jump-to-bbox
+    - extracted shared helper `computeViewportScrollTargetForLayoutId` for deterministic selection->scroll mapping
+    - added frontend unit tests for selected-layout scroll target resolution and invalid-selection handling
+  - Layout review image viewport spacing refinement:
+    - image panel now uses zero-padding container (`image-panel`)
+    - removed JS-injected viewport center padding (`paddingLeft/Right/Top/Bottom`)
+    - preserved horizontal centering via `image-wrap` auto side margins
+  - Layout review page vertical layout refinement:
+    - `main` + grid switched to viewport-height flex/grid composition
+    - left image panel now stretches to available height (no oversized bottom blank region)
 - 2026-02-19:
+  - Fixed layout-review large-zoom viewport clipping issue:
+    - replaced flex-based viewport centering with padding-based centering
+    - ensures zoomed content remains fully scrollable (including top area)
+  - Added frontend unit test for viewport center-padding calculation.
+  - Layout review zoom controls expanded:
+    - switched to compact combined zoom input + dropdown control (PDF-viewer style)
+    - kept numeric zoom input with `1%` step increments
+    - default zoom mode on page load set to `Automatic`
   - Layout review navigation updated:
     - removed header `Review` button
     - added top-left `Back`/`Forth` glyph buttons next to dashboard-back control

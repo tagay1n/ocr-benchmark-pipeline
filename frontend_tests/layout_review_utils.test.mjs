@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {
   clampZoomPercent,
   compactReadingOrdersAfterDeletion,
+  computeViewportCenterPadding,
+  computeViewportScrollTargetForLayoutId,
   computeViewportScrollToCenterBBox,
   computeZoomScale,
   formatZoomPercent,
@@ -16,7 +18,7 @@ import {
 
 test("clampZoomPercent clamps and falls back for invalid values", () => {
   assert.equal(clampZoomPercent("abc"), 100);
-  assert.equal(clampZoomPercent(1), 10);
+  assert.equal(clampZoomPercent(1), 1);
   assert.equal(clampZoomPercent(95), 95);
   assert.equal(clampZoomPercent(999), 400);
 });
@@ -130,6 +132,64 @@ test("computeViewportScrollToCenterBBox centers target and clamps at edges", () 
     viewportHeight: 500,
   });
   assert.deepEqual(nearBottomRight, { left: 1000, top: 500 });
+});
+
+test("computeViewportScrollTargetForLayoutId resolves scroll target for selected layout", () => {
+  const target = computeViewportScrollTargetForLayoutId({
+    layoutId: 7,
+    layouts: [
+      { id: 6, bbox: { x1: 0.05, y1: 0.05, x2: 0.1, y2: 0.1 } },
+      { id: 7, bbox: { x1: 0.45, y1: 0.45, x2: 0.55, y2: 0.55 } },
+    ],
+    contentWidth: 2000,
+    contentHeight: 1000,
+    viewportWidth: 1000,
+    viewportHeight: 500,
+  });
+  assert.deepEqual(target, { left: 500, top: 250 });
+});
+
+test("computeViewportScrollTargetForLayoutId returns null for missing/invalid selection", () => {
+  assert.equal(
+    computeViewportScrollTargetForLayoutId({
+      layoutId: "x",
+      layouts: [{ id: 1, bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } }],
+      contentWidth: 1000,
+      contentHeight: 800,
+      viewportWidth: 500,
+      viewportHeight: 400,
+    }),
+    null,
+  );
+  assert.equal(
+    computeViewportScrollTargetForLayoutId({
+      layoutId: 2,
+      layouts: [{ id: 1, bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } }],
+      contentWidth: 1000,
+      contentHeight: 800,
+      viewportWidth: 500,
+      viewportHeight: 400,
+    }),
+    null,
+  );
+});
+
+test("computeViewportCenterPadding centers only when content is smaller than viewport", () => {
+  const padded = computeViewportCenterPadding({
+    contentWidth: 600,
+    contentHeight: 300,
+    viewportWidth: 1000,
+    viewportHeight: 700,
+  });
+  assert.deepEqual(padded, { x: 200, y: 200 });
+
+  const none = computeViewportCenterPadding({
+    contentWidth: 1600,
+    contentHeight: 900,
+    viewportWidth: 1000,
+    viewportHeight: 700,
+  });
+  assert.deepEqual(none, { x: 0, y: 0 });
 });
 
 test("nextLayoutReviewUrl resolves only valid next-page payloads", () => {
