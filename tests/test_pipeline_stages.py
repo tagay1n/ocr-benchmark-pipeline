@@ -316,6 +316,69 @@ class PipelineStagesTests(unittest.TestCase):
         page_payload = main.page_details(page_id)
         self.assertEqual(page_payload["page"]["status"], "ocr_done")
 
+        outputs_payload = main.page_ocr_outputs(page_id)
+        self.assertEqual(outputs_payload["count"], 1)
+        self.assertEqual(outputs_payload["outputs"][0]["output_format"], "markdown")
+        self.assertEqual(outputs_payload["outputs"][0]["content"], "Extracted text")
+
+    def test_ocr_review_flow_updates_output_and_marks_reviewed(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=False,
+            gemini_keys=("k1",),
+            gemini_usage_path=self.project_root / "_artifacts" / "gemini_usage.json",
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        db.init_db()
+
+        self._write_image("ocr-review.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", return_value="Extracted text"
+        ):
+            pipeline_runtime._ocr_extract_handler({"page_id": page_id, "payload": {}, "id": 1, "stage": "ocr_extract"})
+
+        next_payload = main.next_ocr_review_page_global()
+        self.assertTrue(next_payload["has_next"])
+        self.assertEqual(next_payload["next_page_id"], page_id)
+
+        outputs_payload = main.page_ocr_outputs(page_id)
+        self.assertEqual(outputs_payload["count"], 1)
+        layout_id = int(outputs_payload["outputs"][0]["layout_id"])
+
+        updated = main.patch_ocr_output(layout_id, main.UpdateOcrOutputRequest(content="Corrected text"))
+        self.assertEqual(updated["output"]["content"], "Corrected text")
+
+        reviewed = main.complete_ocr_review(page_id)
+        self.assertEqual(reviewed["status"], "ocr_reviewed")
+
+        page_payload = main.page_details(page_id)
+        self.assertEqual(page_payload["page"]["status"], "ocr_reviewed")
+
+        next_after = main.next_ocr_review_page_global()
+        self.assertFalse(next_after["has_next"])
+
     def test_pipeline_activity_endpoint_shape(self) -> None:
         self._write_image("activity.png", b"activity")
         main.scan_images()

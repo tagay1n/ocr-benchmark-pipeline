@@ -29,6 +29,7 @@ from .pipeline_runtime import (
     get_activity_snapshot,
     register_default_handlers,
 )
+from .ocr_review import list_ocr_outputs, mark_ocr_reviewed, update_ocr_output
 
 
 @asynccontextmanager
@@ -154,6 +155,10 @@ class CaptionBindingPayload(BaseModel):
 
 class ReplaceCaptionBindingsRequest(BaseModel):
     bindings: list[CaptionBindingPayload] = Field(default_factory=list)
+
+
+class UpdateOcrOutputRequest(BaseModel):
+    content: str = ""
 
 
 @app.get("/")
@@ -404,6 +409,34 @@ def next_layout_review_page_global() -> dict[str, object]:
     }
 
 
+@app.get("/api/ocr-review/next")
+def next_ocr_review_page_global() -> dict[str, object]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, rel_path
+            FROM pages
+            WHERE is_missing = 0
+              AND status = 'ocr_done'
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+
+    if row is None:
+        return {
+            "has_next": False,
+            "next_page_id": None,
+            "next_page_rel_path": None,
+        }
+
+    return {
+        "has_next": True,
+        "next_page_id": int(row["id"]),
+        "next_page_rel_path": row["rel_path"],
+    }
+
+
 @app.get("/api/pages/{page_id}/layout-review-next")
 def next_layout_review_page(page_id: int) -> dict[str, object]:
     page = get_page(page_id)
@@ -430,6 +463,53 @@ def next_layout_review_page(page_id: int) -> dict[str, object]:
                 FROM pages
                 WHERE is_missing = 0
                   AND status = 'layout_detected'
+                  AND id < ?
+                ORDER BY id ASC
+                LIMIT 1
+                """,
+                (page_id,),
+            ).fetchone()
+
+    if row is None:
+        return {
+            "has_next": False,
+            "next_page_id": None,
+            "next_page_rel_path": None,
+        }
+
+    return {
+        "has_next": True,
+        "next_page_id": int(row["id"]),
+        "next_page_rel_path": row["rel_path"],
+    }
+
+
+@app.get("/api/pages/{page_id}/ocr-review-next")
+def next_ocr_review_page(page_id: int) -> dict[str, object]:
+    page = get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, rel_path
+            FROM pages
+            WHERE is_missing = 0
+              AND status = 'ocr_done'
+              AND id > ?
+            ORDER BY id ASC
+            LIMIT 1
+            """,
+            (page_id,),
+        ).fetchone()
+        if row is None:
+            row = conn.execute(
+                """
+                SELECT id, rel_path
+                FROM pages
+                WHERE is_missing = 0
+                  AND status = 'ocr_done'
                   AND id < ?
                 ORDER BY id ASC
                 LIMIT 1
@@ -610,6 +690,58 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
                 message="Skipped queuing OCR extraction because a job is already queued or running.",
                 data={"trigger": "layout_review_complete"},
             )
+    return result
+
+
+@app.get("/api/pages/{page_id}/ocr-outputs")
+def page_ocr_outputs(page_id: int) -> dict[str, object]:
+    page = get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+    try:
+        outputs = list_ocr_outputs(page_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    return {"page_id": page_id, "count": len(outputs), "outputs": outputs}
+
+
+@app.patch("/api/ocr-outputs/{layout_id}")
+def patch_ocr_output(layout_id: int, payload: UpdateOcrOutputRequest) -> dict[str, object]:
+    try:
+        output = update_ocr_output(layout_id, content=payload.content)
+    except ValueError as error:
+        message = str(error)
+        if message == "OCR output not found.":
+            raise HTTPException(status_code=404, detail=message) from error
+        raise HTTPException(status_code=400, detail=message) from error
+    return {"output": output}
+
+
+@app.post("/api/pages/{page_id}/ocr/review-complete")
+def complete_ocr_review(page_id: int) -> dict[str, object]:
+    emit_event(
+        stage="ocr_review",
+        event_type="manual_review_complete_started",
+        page_id=page_id,
+        message="OCR review completion requested.",
+    )
+    try:
+        result = mark_ocr_reviewed(page_id)
+    except ValueError as error:
+        emit_event(
+            stage="ocr_review",
+            event_type="manual_review_complete_failed",
+            page_id=page_id,
+            message=f"OCR review completion failed: {error}",
+        )
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    emit_event(
+        stage="ocr_review",
+        event_type="manual_review_completed",
+        page_id=page_id,
+        message="OCR review completed.",
+        data={"output_count": result["output_count"]},
+    )
     return result
 
 

@@ -147,6 +147,21 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - layout review content area now stretches to viewport height:
     - image panel fills remaining page height under header/actions
     - removes large blank area under the image panel
+ - OCR Review V1 backend+UI scaffold:
+  - backend OCR review endpoints:
+    - `GET /api/ocr-review/next`
+    - `GET /api/pages/{page_id}/ocr-review-next`
+    - `GET /api/pages/{page_id}/ocr-outputs`
+    - `PATCH /api/ocr-outputs/{layout_id}`
+    - `POST /api/pages/{page_id}/ocr/review-complete`
+  - new OCR review page `app/static/ocr_review.html` with:
+    - back/history navigation controls consistent with layout review
+    - image panel with OCR-output bbox overlays
+    - extracted-content table (order/class/format/content)
+    - bidirectional linking between content rows and image bboxes (select/highlight/jump)
+    - local draft persistence + per-row restore + single `Mark reviewed` submit flow
+  - dashboard pipeline actions now include `Review OCR` with auto-disable when no `ocr_done` pages
+  - dashboard status inference now includes `ocr_review` completion events
   - caption binding for layout review:
     - captions must be explicitly bound to `table` / `picture` / `formula` targets before review completion
     - multi-target caption binding supported
@@ -182,14 +197,19 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 - `GET /api/pages`
 - `GET /api/pages/{page_id}`
 - `GET /api/layout-review/next`
+- `GET /api/ocr-review/next`
 - `GET /api/pages/{page_id}/layout-review-next`
+- `GET /api/pages/{page_id}/ocr-review-next`
 - `GET /api/pages/{page_id}/image`
 - `GET /api/pages/{page_id}/layouts`
+- `GET /api/pages/{page_id}/ocr-outputs`
 - `POST /api/pages/{page_id}/layouts/detect`
 - `POST /api/pages/{page_id}/layouts`
 - `PATCH /api/layouts/{layout_id}`
+- `PATCH /api/ocr-outputs/{layout_id}`
 - `DELETE /api/layouts/{layout_id}`
 - `POST /api/pages/{page_id}/layouts/review-complete`
+- `POST /api/pages/{page_id}/ocr/review-complete`
 - `GET /api/pipeline/activity`
 - `GET /api/pipeline/activity/stream`
 - `GET /api/duplicates`
@@ -212,6 +232,17 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-20:
+  - OCR review stage implementation:
+    - added backend OCR review APIs for listing/editing outputs and marking page `ocr_reviewed`
+    - added OCR review global/next navigation APIs (`ocr_done` pages)
+    - added `app/static/ocr_review.html` with synchronized bbox/content review workflow
+    - added dashboard `Review OCR` action with next-page enable/disable logic
+    - added backend tests for OCR review flow (output patch + status transition)
+  - Dashboard live status updates:
+    - pages table statuses are now updated in-place from pipeline SSE events (no manual page refresh required)
+    - status badge text is updated immediately when relevant backend events are received
+    - `Review layouts` button availability is recalculated from in-memory page statuses after live updates
+    - after initial page load, live status state is driven by SSE events (no dashboard polling loop)
   - UI text casing update:
     - switched dynamic status/stage/class labels from Title Case to sentence case on dashboard and layout review
     - updated stage metadata names to sentence case for consistency in future stage UIs

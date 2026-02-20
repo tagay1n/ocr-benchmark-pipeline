@@ -331,6 +331,13 @@
                 </svg>
               </span>
               <button id="review-layouts-btn" type="button" disabled>Review layouts</button>
+              <span class="pipeline-separator" aria-hidden="true">
+                <svg class="pipeline-separator-icon" viewBox="0 0 24 24" focusable="false">
+                  <path d="m6 7 5 5-5 5"></path>
+                  <path d="m13 7 5 5-5 5"></path>
+                </svg>
+              </span>
+              <button id="review-ocr-btn" type="button" disabled>Review OCR</button>
             </div>
           </div>
         </div>
@@ -424,6 +431,7 @@
 
       const scanBtn = document.getElementById("scan-btn");
       const reviewLayoutsBtn = document.getElementById("review-layouts-btn");
+      const reviewOcrBtn = document.getElementById("review-ocr-btn");
       const wipeBtn = document.getElementById("wipe-btn");
       const wipeModal = document.getElementById("wipe-modal");
       const wipeConfirmInput = document.getElementById("wipe-confirm-input");
@@ -442,10 +450,12 @@
       const pipelineEvents = document.getElementById("pipeline-events");
 
       let nextReviewPageId = null;
+      let nextOcrReviewPageId = null;
+      let currentPages = [];
       let pipelinePanelExpanded = false;
       let activityStream = null;
       let streamReconnectTimer = null;
-      let activityPollingTimer = null;
+      let lastProcessedEventId = 0;
       const DATE_LOCALE = "en-GB";
       const DATE_TIME_FORMAT = {
         year: "numeric",
@@ -501,6 +511,7 @@
       }
 
       function renderPages(pages) {
+        currentPages = pages.map((page) => ({ ...page }));
         pagesBody.innerHTML = "";
         if (pages.length === 0) {
           const tr = document.createElement("tr");
@@ -511,6 +522,7 @@
 
         for (const page of pages) {
           const tr = document.createElement("tr");
+          tr.dataset.pageId = String(page.id);
           tr.innerHTML = `
             <td>${page.id}</td>
             <td>${page.rel_path}</td>
@@ -529,6 +541,42 @@
           }
           pagesBody.appendChild(tr);
         }
+      }
+
+      function syncNextReviewFromPages() {
+        const pending = currentPages
+          .filter((page) => !page.is_missing && page.status === "layout_detected")
+          .sort((a, b) => Number(a.id) - Number(b.id));
+        if (pending.length > 0) {
+          const next = pending[0];
+          nextReviewPageId = Number(next.id);
+          reviewLayoutsBtn.disabled = false;
+          reviewLayoutsBtn.title = next.rel_path
+            ? `Open next page: ${next.rel_path}`
+            : "Open next layout review page";
+          return;
+        }
+        nextReviewPageId = null;
+        reviewLayoutsBtn.disabled = true;
+        reviewLayoutsBtn.title = "No images available for layout review.";
+      }
+
+      function syncNextOcrReviewFromPages() {
+        const pending = currentPages
+          .filter((page) => !page.is_missing && page.status === "ocr_done")
+          .sort((a, b) => Number(a.id) - Number(b.id));
+        if (pending.length > 0) {
+          const next = pending[0];
+          nextOcrReviewPageId = Number(next.id);
+          reviewOcrBtn.disabled = false;
+          reviewOcrBtn.title = next.rel_path
+            ? `Open next page: ${next.rel_path}`
+            : "Open next OCR review page";
+          return;
+        }
+        nextOcrReviewPageId = null;
+        reviewOcrBtn.disabled = true;
+        reviewOcrBtn.title = "No images available for OCR review.";
       }
 
       function renderDuplicates(duplicates) {
@@ -553,6 +601,7 @@
         if (!stage) return "Pipeline";
         if (stage === "layout_detect") return "Layout detection";
         if (stage === "ocr_extract") return "OCR extraction";
+        if (stage === "ocr_review") return "OCR review";
         return toSentenceCaseLabel(stage);
       }
 
@@ -615,27 +664,138 @@
         reviewLayoutsBtn.title = "No images available for layout review.";
       }
 
+      function applyNextOcrReviewState(payload) {
+        if (payload && payload.has_next && Number.isInteger(payload.next_page_id) && payload.next_page_id > 0) {
+          nextOcrReviewPageId = payload.next_page_id;
+          reviewOcrBtn.disabled = false;
+          reviewOcrBtn.title = payload.next_page_rel_path
+            ? `Open next page: ${payload.next_page_rel_path}`
+            : "Open next OCR review page";
+          return;
+        }
+        nextOcrReviewPageId = null;
+        reviewOcrBtn.disabled = true;
+        reviewOcrBtn.title = "No images available for OCR review.";
+      }
+
+      function syncLastProcessedEventId(events) {
+        if (!Array.isArray(events) || events.length === 0) {
+          lastProcessedEventId = 0;
+          return;
+        }
+        let maxId = 0;
+        for (const event of events) {
+          const eventId = Number(event?.id);
+          if (Number.isInteger(eventId) && eventId > maxId) {
+            maxId = eventId;
+          }
+        }
+        lastProcessedEventId = maxId;
+      }
+
+      function inferPageStatusFromEvent(event) {
+        const stage = String(event?.stage || "");
+        const eventType = String(event?.event_type || "");
+        const result = event?.data && typeof event.data === "object" ? event.data.result : null;
+        if (stage === "layout_detect") {
+          if (eventType === "job_started") return "layout_detecting";
+          if (eventType === "job_completed" && !(result && result.skipped)) return "layout_detected";
+          if (eventType === "job_failed") return "new";
+          if (eventType === "manual_detect_completed") return "layout_detected";
+          return null;
+        }
+        if (stage === "layout_review") {
+          if (eventType === "manual_review_completed") return "layout_reviewed";
+          return null;
+        }
+        if (stage === "ocr_extract") {
+          if (eventType === "job_started") return "ocr_extracting";
+          if (eventType === "job_completed" && !(result && result.skipped)) return "ocr_done";
+          if (eventType === "job_failed") return "ocr_failed";
+          return null;
+        }
+        if (stage === "ocr_review") {
+          if (eventType === "manual_review_completed") return "ocr_reviewed";
+          return null;
+        }
+        return null;
+      }
+
+      function applyPageStatusUpdate(pageId, status) {
+        const page = currentPages.find((row) => Number(row.id) === Number(pageId));
+        if (!page) {
+          return false;
+        }
+        if (page.is_missing || page.status === status) {
+          return false;
+        }
+        page.status = status;
+        const row = pagesBody.querySelector(`tr[data-page-id="${pageId}"]`);
+        const badge = row ? row.querySelector(".status") : null;
+        if (badge) {
+          badge.classList.toggle("missing", Boolean(page.is_missing));
+          badge.textContent = toSentenceCaseLabel(status);
+        }
+        return true;
+      }
+
+      function applyStatusUpdatesFromEvents(events) {
+        if (!Array.isArray(events) || events.length === 0) {
+          return;
+        }
+        let maxId = 0;
+        for (const event of events) {
+          const eventId = Number(event?.id);
+          if (Number.isInteger(eventId) && eventId > maxId) {
+            maxId = eventId;
+          }
+        }
+        if (maxId > 0 && maxId < lastProcessedEventId) {
+          // Event IDs can reset after wipe + sqlite_sequence reset.
+          lastProcessedEventId = 0;
+        }
+
+        let changed = false;
+        for (const event of events) {
+          const eventId = Number(event?.id);
+          if (!Number.isInteger(eventId) || eventId <= lastProcessedEventId) {
+            continue;
+          }
+          lastProcessedEventId = eventId;
+
+          const pageId = Number(event?.page_id);
+          if (!Number.isInteger(pageId) || pageId <= 0) {
+            continue;
+          }
+          const nextStatus = inferPageStatusFromEvent(event);
+          if (!nextStatus) {
+            continue;
+          }
+          if (applyPageStatusUpdate(pageId, nextStatus)) {
+            changed = true;
+          }
+        }
+        if (changed) {
+          syncNextReviewFromPages();
+          syncNextOcrReviewFromPages();
+        }
+      }
+
       async function reloadDashboard() {
-        const [pagesPayload, duplicatesPayload, activityPayload, nextReviewPayload] = await Promise.all([
+        const [pagesPayload, duplicatesPayload, activityPayload, nextReviewPayload, nextOcrPayload] = await Promise.all([
           fetchJson("/api/pages"),
           fetchJson("/api/duplicates"),
           fetchJson("/api/pipeline/activity"),
           fetchJson("/api/layout-review/next"),
+          fetchJson("/api/ocr-review/next"),
         ]);
 
         renderPages(pagesPayload.pages);
         renderDuplicates(duplicatesPayload.duplicates);
         renderActivity(activityPayload);
         applyNextReviewState(nextReviewPayload);
-      }
-
-      async function refreshActivityOnly() {
-        try {
-          const payload = await fetchJson("/api/pipeline/activity");
-          renderActivity(payload);
-        } catch {
-          // Keep existing UI state on transient failures.
-        }
+        applyNextOcrReviewState(nextOcrPayload);
+        syncLastProcessedEventId(activityPayload.recent_events);
       }
 
       function closeActivityStream() {
@@ -659,9 +819,6 @@
         closeActivityStream();
 
         if (!("EventSource" in window)) {
-          if (activityPollingTimer === null) {
-            activityPollingTimer = window.setInterval(refreshActivityOnly, 3000);
-          }
           return;
         }
 
@@ -670,13 +827,13 @@
           try {
             const payload = JSON.parse(event.data);
             renderActivity(payload);
+            applyStatusUpdatesFromEvents(payload.recent_events);
           } catch {
             // Ignore malformed events.
           }
         };
         activityStream.onerror = () => {
           closeActivityStream();
-          refreshActivityOnly();
           scheduleActivityReconnect();
         };
       }
@@ -684,6 +841,7 @@
       async function runScan({ silent = false } = {}) {
         scanBtn.disabled = true;
         reviewLayoutsBtn.disabled = true;
+        reviewOcrBtn.disabled = true;
         wipeBtn.disabled = true;
         if (!silent) {
           lastScan.textContent = "Scanning source folder...";
@@ -717,6 +875,7 @@
         closeWipeModal();
         scanBtn.disabled = true;
         reviewLayoutsBtn.disabled = true;
+        reviewOcrBtn.disabled = true;
         wipeBtn.disabled = true;
         lastScan.textContent = "Wiping database state...";
 
@@ -749,6 +908,11 @@
       reviewLayoutsBtn.addEventListener("click", () => {
         if (Number.isInteger(nextReviewPageId) && nextReviewPageId > 0) {
           window.location.href = `/static/layouts.html?page_id=${nextReviewPageId}`;
+        }
+      });
+      reviewOcrBtn.addEventListener("click", () => {
+        if (Number.isInteger(nextOcrReviewPageId) && nextOcrReviewPageId > 0) {
+          window.location.href = `/static/ocr_review.html?page_id=${nextOcrReviewPageId}`;
         }
       });
       wipeBtn.addEventListener("click", openWipeModal);

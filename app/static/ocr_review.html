@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OCR review</title>
+    <style>
+      :root {
+        --bg: #f3f1eb;
+        --surface: #fffdf7;
+        --ink: #1e1f1c;
+        --muted: #63635f;
+        --accent: #0b7a75;
+        --danger: #a52222;
+        --border: #e0dccf;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 100% 0, #d6ebe7 0, transparent 30%),
+          radial-gradient(circle at 0 100%, #f7e3cf 0, transparent 32%),
+          var(--bg);
+      }
+
+      main {
+        position: relative;
+        width: 100%;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        padding: 24px;
+      }
+
+      .nav-strip {
+        position: absolute;
+        top: 24px;
+        left: 24px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .back-nav,
+      .history-nav-btn {
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: var(--surface);
+        color: var(--ink);
+        text-decoration: none;
+        box-shadow: 0 8px 20px rgba(31, 35, 41, 0.08);
+      }
+
+      .history-nav-btn {
+        cursor: pointer;
+      }
+
+      .history-nav-btn:hover:not(:disabled),
+      .back-nav:hover {
+        background: #f5f1e6;
+      }
+
+      .history-nav-btn:disabled {
+        opacity: 0.42;
+        cursor: default;
+      }
+
+      .nav-icon {
+        width: 20px;
+        height: 20px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding-left: 172px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 26px;
+      }
+
+      .subline {
+        color: var(--muted);
+      }
+
+      .meta-strip {
+        margin-top: 4px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .review-state-badge {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.35;
+        color: var(--muted);
+        background: #ece9df;
+      }
+
+      .review-state-badge.needs-review {
+        color: #7a5a1d;
+        border-color: #dfcba2;
+        background: #f4ead2;
+      }
+
+      .review-state-badge.reviewed {
+        color: #1c5e4f;
+        border-color: #b9d8cc;
+        background: #deeee7;
+      }
+
+      .review-state-badge.unknown {
+        color: #4e4f49;
+        border-color: #cfc8b7;
+        background: #ece8df;
+      }
+
+      .actions {
+        display: inline-flex;
+        gap: 8px;
+      }
+
+      button {
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+
+      .status-line {
+        margin-top: 10px;
+        color: var(--muted);
+      }
+
+      .status-line.error {
+        color: var(--danger);
+      }
+
+      .grid {
+        margin-top: 14px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(420px, 48%);
+        gap: 16px;
+        align-items: stretch;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px;
+      }
+
+      .image-panel {
+        padding: 0;
+        overflow: hidden;
+        min-height: 0;
+        display: flex;
+      }
+
+      .outputs-panel {
+        min-height: 0;
+        overflow: auto;
+      }
+
+      .image-viewport {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: auto;
+        background: #f7f5ef;
+      }
+
+      .image-wrap {
+        position: relative;
+        width: max-content;
+        margin: 0 auto;
+      }
+
+      #page-image {
+        display: block;
+        width: auto;
+        height: auto;
+        max-width: none;
+      }
+
+      #overlay {
+        position: absolute;
+        inset: 0;
+      }
+
+      .box {
+        position: absolute;
+        border: 1px solid #0b7a75;
+        background: rgba(11, 122, 117, 0.12);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .box.layout-selected {
+        border-width: 2px;
+        box-shadow: 0 0 0 2px rgba(11, 122, 117, 0.2);
+      }
+
+      .box-label {
+        position: absolute;
+        top: -20px;
+        left: 0;
+        font-size: 12px;
+        background: rgba(255, 253, 247, 0.92);
+        color: #1e1f1c;
+        border: 1px solid #cfc8b7;
+        border-radius: 6px;
+        padding: 2px 6px;
+        white-space: nowrap;
+        max-width: 240px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .outputs-header {
+        margin-bottom: 8px;
+      }
+
+      .outputs-header h2 {
+        margin: 0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 8px;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+
+      th {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .outputs-table tr.output-selected {
+        background: #f1f7f6;
+      }
+
+      .order-col {
+        width: 7ch;
+      }
+
+      .class-col {
+        width: 18ch;
+      }
+
+      .format-col {
+        width: 10ch;
+      }
+
+      .actions-col {
+        width: 7ch;
+      }
+
+      .format-badge {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--muted);
+        background: #f1eee5;
+        text-transform: lowercase;
+      }
+
+      .content-input {
+        width: 100%;
+        min-height: 96px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px;
+        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.4;
+        resize: vertical;
+      }
+
+      .content-input:disabled {
+        background: #f2efe6;
+        color: #7a7770;
+      }
+
+      .icon-btn {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        padding: 0;
+        line-height: 1;
+        font-size: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .empty-state {
+        color: var(--muted);
+      }
+
+      @media (max-width: 1120px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 980px) {
+        .header {
+          padding-left: 0;
+          margin-top: 56px;
+          flex-direction: column;
+          align-items: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav class="nav-strip" aria-label="Navigation">
+        <a class="back-nav" href="/" aria-label="Back to dashboard" title="Back to dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" focusable="false">
+            <path d="m14 6-6 6 6 6"></path>
+            <path d="M20 12H8"></path>
+          </svg>
+        </a>
+        <button id="history-back-btn" class="history-nav-btn" type="button" aria-label="Previous reviewed page" title="Previous reviewed page" disabled>
+          <svg class="nav-icon" viewBox="0 0 24 24" focusable="false">
+            <path d="m14 6-6 6 6 6"></path>
+            <path d="M20 12H8"></path>
+          </svg>
+        </button>
+        <button id="history-forth-btn" class="history-nav-btn" type="button" aria-label="Next page for OCR review" title="Next page for OCR review" disabled>
+          <svg class="nav-icon" viewBox="0 0 24 24" focusable="false">
+            <path d="m10 6 6 6-6 6"></path>
+            <path d="M4 12h12"></path>
+          </svg>
+        </button>
+      </nav>
+
+      <section class="header">
+        <div>
+          <h1>OCR review</h1>
+          <div class="meta-strip">
+            <span id="review-state-badge" class="review-state-badge unknown" hidden></span>
+            <span id="page-meta" class="subline"></span>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="review-btn" type="button">Mark reviewed</button>
+        </div>
+      </section>
+
+      <p id="status-line" class="status-line"></p>
+
+      <section class="grid">
+        <section class="panel image-panel">
+          <div id="image-viewport" class="image-viewport">
+            <div id="image-wrap" class="image-wrap">
+              <img id="page-image" alt="Source page image" />
+              <div id="overlay"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel outputs-panel">
+          <div class="outputs-header">
+            <h2>Extracted content</h2>
+          </div>
+          <table class="outputs-table">
+            <thead>
+              <tr>
+                <th class="order-col">Order</th>
+                <th class="class-col">Class</th>
+                <th class="format-col">Format</th>
+                <th>Content</th>
+                <th class="actions-col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="outputs-body"></tbody>
+          </table>
+        </section>
+      </section>
+    </main>
+
+    <script type="module">
+      import {
+        computeViewportScrollTargetForLayoutId,
+        normalizeReviewHistory,
+        previousHistoryPageId,
+        updateReviewHistoryOnVisit,
+      } from "./js/layout_review_utils.mjs";
+
+      const STORAGE_KEYS = {
+        draftPrefix: "ocrReview.drafts",
+        history: "ocrReview.history",
+        historyIndex: "ocrReview.history.index",
+      };
+
+      const CLASS_COLORS = {
+        title: "#8f4b63",
+        section_header: "#355fa8",
+        text: "#4f5d69",
+        list_item: "#2f6f5f",
+        table: "#6f7d2f",
+        picture: "#8a6831",
+        caption: "#496f98",
+        footnote: "#7a6030",
+        formula: "#7b5a95",
+        page_header: "#3f6e69",
+        page_footer: "#8b5949",
+      };
+
+      const FALLBACK_COLORS = ["#4e6f8f", "#7c5f90", "#3f7b69", "#8d6a3b", "#82605b", "#537987", "#6e6b3f"];
+
+      const reviewBtn = document.getElementById("review-btn");
+      const outputsBody = document.getElementById("outputs-body");
+      const pageImage = document.getElementById("page-image");
+      const overlay = document.getElementById("overlay");
+      const imageViewport = document.getElementById("image-viewport");
+      const imageWrap = document.getElementById("image-wrap");
+      const pageMeta = document.getElementById("page-meta");
+      const statusLine = document.getElementById("status-line");
+      const reviewStateBadge = document.getElementById("review-state-badge");
+      const historyBackBtn = document.getElementById("history-back-btn");
+      const historyForthBtn = document.getElementById("history-forth-btn");
+
+      const state = {
+        pageId: null,
+        page: null,
+        outputs: [],
+        serverOutputsByLayoutId: {},
+        localEditsByLayoutId: {},
+        selectedLayoutId: null,
+        reviewSubmitInProgress: false,
+        history: [],
+        historyIndex: -1,
+      };
+
+      function readStorage(key) {
+        try {
+          return window.localStorage.getItem(key);
+        } catch {
+          return null;
+        }
+      }
+
+      function writeStorage(key, value) {
+        try {
+          window.localStorage.setItem(key, value);
+        } catch {
+          // Ignore storage failures.
+        }
+      }
+
+      function removeStorage(key) {
+        try {
+          window.localStorage.removeItem(key);
+        } catch {
+          // Ignore storage failures.
+        }
+      }
+
+      function setStatus(message, { isError = false } = {}) {
+        statusLine.textContent = message;
+        statusLine.classList.toggle("error", isError);
+      }
+
+      function draftStorageKey() {
+        return `${STORAGE_KEYS.draftPrefix}:${state.pageId}`;
+      }
+
+      function normalizeClassName(className) {
+        return String(className || "")
+          .trim()
+          .toLowerCase()
+          .replace(/[-/\s]+/g, "_");
+      }
+
+      function formatClassLabel(value) {
+        const normalized = String(value || "")
+          .replace(/_/g, " ")
+          .trim()
+          .toLowerCase();
+        if (!normalized) return "";
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      }
+
+      function hashString(value) {
+        let hash = 0;
+        for (let i = 0; i < value.length; i += 1) {
+          hash = (hash << 5) - hash + value.charCodeAt(i);
+          hash |= 0;
+        }
+        return Math.abs(hash);
+      }
+
+      function colorForClass(className) {
+        const normalized = normalizeClassName(className);
+        if (CLASS_COLORS[normalized]) return CLASS_COLORS[normalized];
+        return FALLBACK_COLORS[hashString(normalized) % FALLBACK_COLORS.length];
+      }
+
+      function hexToRgba(hex, alpha) {
+        const clean = hex.replace("#", "");
+        const r = Number.parseInt(clean.slice(0, 2), 16);
+        const g = Number.parseInt(clean.slice(2, 4), 16);
+        const b = Number.parseInt(clean.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      }
+
+      function hasDraftChanges() {
+        return Object.keys(state.localEditsByLayoutId).length > 0;
+      }
+
+      function updateReviewBadge() {
+        reviewStateBadge.classList.remove("needs-review", "reviewed", "unknown");
+        const status = String(state.page?.status || "").trim();
+        if (!status) {
+          reviewStateBadge.hidden = true;
+          reviewStateBadge.textContent = "";
+          return;
+        }
+        reviewStateBadge.hidden = false;
+        if (status === "ocr_done") {
+          reviewStateBadge.textContent = "Needs review";
+          reviewStateBadge.classList.add("needs-review");
+          return;
+        }
+        if (status === "ocr_reviewed") {
+          reviewStateBadge.textContent = "Reviewed";
+          reviewStateBadge.classList.add("reviewed");
+          return;
+        }
+        reviewStateBadge.textContent = formatClassLabel(status);
+        reviewStateBadge.classList.add("unknown");
+      }
+
+      function updateReviewButtonState() {
+        const alreadyReviewed = state.page?.status === "ocr_reviewed";
+        if (state.reviewSubmitInProgress) {
+          reviewBtn.textContent = "Saving...";
+          reviewBtn.disabled = true;
+          return;
+        }
+        if (alreadyReviewed && !hasDraftChanges()) {
+          reviewBtn.textContent = "Reviewed";
+          reviewBtn.disabled = true;
+          return;
+        }
+        reviewBtn.textContent = "Mark reviewed";
+        reviewBtn.disabled = false;
+      }
+
+      function updateReviewUiState() {
+        updateReviewBadge();
+        updateReviewButtonState();
+      }
+
+      function toDraftShape(output) {
+        return {
+          content: String(output.content ?? ""),
+        };
+      }
+
+      function sameDraft(a, b) {
+        return String(a.content) === String(b.content);
+      }
+
+      function loadDraftState() {
+        state.localEditsByLayoutId = {};
+        const raw = readStorage(draftStorageKey());
+        if (!raw) {
+          return;
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (!parsed || typeof parsed !== "object") return;
+        const edits = parsed.edits;
+        if (!edits || typeof edits !== "object") return;
+        for (const [layoutIdRaw, value] of Object.entries(edits)) {
+          const layoutId = Number(layoutIdRaw);
+          if (!Number.isInteger(layoutId) || layoutId <= 0) continue;
+          if (!value || typeof value !== "object") continue;
+          state.localEditsByLayoutId[String(layoutId)] = {
+            content: String(value.content ?? ""),
+          };
+        }
+      }
+
+      function persistDraftState() {
+        const payload = { edits: state.localEditsByLayoutId };
+        writeStorage(draftStorageKey(), JSON.stringify(payload));
+        updateReviewUiState();
+      }
+
+      function clearDraftState() {
+        state.localEditsByLayoutId = {};
+        removeStorage(draftStorageKey());
+        updateReviewUiState();
+      }
+
+      function applyDraftsToOutputs() {
+        state.outputs = state.outputs.map((output) => {
+          const draft = state.localEditsByLayoutId[String(output.layout_id)];
+          if (!draft) return output;
+          return { ...output, content: String(draft.content ?? "") };
+        });
+      }
+
+      function sortOutputsInPlace() {
+        state.outputs.sort((a, b) => {
+          const orderCmp = Number(a.reading_order) - Number(b.reading_order);
+          if (orderCmp !== 0) return orderCmp;
+          return Number(a.layout_id) - Number(b.layout_id);
+        });
+      }
+
+      function outputByLayoutId(layoutId) {
+        return state.outputs.find((output) => Number(output.layout_id) === Number(layoutId)) || null;
+      }
+
+      function applySelectedStyles() {
+        const selectedId = Number(state.selectedLayoutId);
+        for (const row of outputsBody.querySelectorAll("tr[data-layout-id]")) {
+          row.classList.toggle("output-selected", Number(row.dataset.layoutId) === selectedId);
+        }
+        for (const box of overlay.querySelectorAll(".box[data-layout-id]")) {
+          box.classList.toggle("layout-selected", Number(box.dataset.layoutId) === selectedId);
+        }
+      }
+
+      function scrollImageViewportToLayout(layoutId) {
+        const target = computeViewportScrollTargetForLayoutId({
+          layoutId,
+          layouts: state.outputs.map((output) => ({ id: output.layout_id, bbox: output.bbox })),
+          contentWidth: imageWrap.clientWidth,
+          contentHeight: imageWrap.clientHeight,
+          viewportWidth: imageViewport.clientWidth,
+          viewportHeight: imageViewport.clientHeight,
+        });
+        if (!target) return false;
+        imageViewport.scrollLeft = target.left;
+        imageViewport.scrollTop = target.top;
+        return true;
+      }
+
+      function ensureLayoutVisible(layoutId, retries = 8) {
+        if (scrollImageViewportToLayout(layoutId)) return;
+        if (retries <= 0) return;
+        requestAnimationFrame(() => {
+          ensureLayoutVisible(layoutId, retries - 1);
+        });
+      }
+
+      function selectOutput(layoutId, { scrollRowIntoView = false, scrollImageToLayout = false } = {}) {
+        const normalized = Number(layoutId);
+        if (!Number.isInteger(normalized) || normalized <= 0) return;
+        if (!outputByLayoutId(normalized)) return;
+        state.selectedLayoutId = normalized;
+        applySelectedStyles();
+        if (scrollRowIntoView) {
+          const row = outputsBody.querySelector(`tr[data-layout-id="${normalized}"]`);
+          row?.scrollIntoView({ block: "nearest" });
+        }
+        if (scrollImageToLayout) {
+          ensureLayoutVisible(normalized);
+        }
+      }
+
+      function boxStyle(bbox) {
+        return {
+          left: `${Number(bbox.x1) * 100}%`,
+          top: `${Number(bbox.y1) * 100}%`,
+          width: `${(Number(bbox.x2) - Number(bbox.x1)) * 100}%`,
+          height: `${(Number(bbox.y2) - Number(bbox.y1)) * 100}%`,
+        };
+      }
+
+      function renderOverlay() {
+        overlay.innerHTML = "";
+        for (const output of state.outputs) {
+          const color = colorForClass(output.class_name);
+          const box = document.createElement("div");
+          box.className = "box";
+          box.dataset.layoutId = String(output.layout_id);
+          const style = boxStyle(output.bbox);
+          box.style.left = style.left;
+          box.style.top = style.top;
+          box.style.width = style.width;
+          box.style.height = style.height;
+          box.style.borderColor = color;
+          box.style.background = hexToRgba(color, 0.16);
+          box.addEventListener("pointerdown", (event) => {
+            if (event.button !== 0) return;
+            selectOutput(output.layout_id, { scrollRowIntoView: true });
+          });
+
+          const label = document.createElement("div");
+          label.className = "box-label";
+          label.style.color = color;
+          label.style.borderColor = hexToRgba(color, 0.62);
+          label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}`;
+          box.appendChild(label);
+          overlay.appendChild(box);
+        }
+        applySelectedStyles();
+      }
+
+      function updateOutputFromInput(layoutId, textarea) {
+        const output = outputByLayoutId(layoutId);
+        if (!output) return;
+        const nextDraft = { content: String(textarea.value ?? "") };
+        output.content = nextDraft.content;
+        const baseline = state.serverOutputsByLayoutId[String(layoutId)]
+          ? toDraftShape(state.serverOutputsByLayoutId[String(layoutId)])
+          : toDraftShape(output);
+        if (sameDraft(nextDraft, baseline)) {
+          delete state.localEditsByLayoutId[String(layoutId)];
+          setStatus("Draft cleared (matches extracted value).");
+        } else {
+          state.localEditsByLayoutId[String(layoutId)] = nextDraft;
+          setStatus("Draft saved locally.");
+        }
+        persistDraftState();
+      }
+
+      function renderOutputs() {
+        sortOutputsInPlace();
+        outputsBody.innerHTML = "";
+        if (state.outputs.length === 0) {
+          const row = document.createElement("tr");
+          const cell = document.createElement("td");
+          cell.colSpan = 5;
+          cell.className = "empty-state";
+          cell.textContent = "No OCR outputs found for this page.";
+          row.appendChild(cell);
+          outputsBody.appendChild(row);
+          return;
+        }
+
+        for (const output of state.outputs) {
+          const row = document.createElement("tr");
+          row.dataset.layoutId = String(output.layout_id);
+          row.addEventListener("pointerdown", () => {
+            selectOutput(output.layout_id, { scrollImageToLayout: true });
+          });
+
+          const orderTd = document.createElement("td");
+          orderTd.className = "order-col";
+          orderTd.textContent = String(output.reading_order);
+          row.appendChild(orderTd);
+
+          const classTd = document.createElement("td");
+          classTd.className = "class-col";
+          classTd.textContent = formatClassLabel(output.class_name);
+          row.appendChild(classTd);
+
+          const formatTd = document.createElement("td");
+          formatTd.className = "format-col";
+          const formatBadge = document.createElement("span");
+          formatBadge.className = "format-badge";
+          formatBadge.textContent = output.output_format;
+          formatTd.appendChild(formatBadge);
+          row.appendChild(formatTd);
+
+          const contentTd = document.createElement("td");
+          const textarea = document.createElement("textarea");
+          textarea.className = "content-input";
+          textarea.value = String(output.content ?? "");
+          textarea.disabled = output.output_format === "skip";
+          textarea.addEventListener("focus", () => {
+            selectOutput(output.layout_id, { scrollImageToLayout: true });
+          });
+          textarea.addEventListener("input", () => {
+            updateOutputFromInput(output.layout_id, textarea);
+          });
+          contentTd.appendChild(textarea);
+          row.appendChild(contentTd);
+
+          const actionsTd = document.createElement("td");
+          actionsTd.className = "actions-col";
+          const restoreBtn = document.createElement("button");
+          restoreBtn.className = "secondary icon-btn";
+          restoreBtn.type = "button";
+          restoreBtn.textContent = "↺";
+          restoreBtn.title = "Restore value";
+          restoreBtn.setAttribute("aria-label", "Restore value");
+          restoreBtn.disabled = output.output_format === "skip";
+          restoreBtn.addEventListener("click", () => {
+            const baselineOutput = state.serverOutputsByLayoutId[String(output.layout_id)];
+            const baseline = baselineOutput ? toDraftShape(baselineOutput) : { content: "" };
+            textarea.value = baseline.content;
+            updateOutputFromInput(output.layout_id, textarea);
+          });
+          actionsTd.appendChild(restoreBtn);
+          row.appendChild(actionsTd);
+
+          outputsBody.appendChild(row);
+        }
+
+        applySelectedStyles();
+      }
+
+      function updateHistoryControls() {
+        const prevPageId = previousHistoryPageId(state.history, state.historyIndex);
+        historyBackBtn.disabled = !Number.isInteger(prevPageId) || prevPageId <= 0;
+        historyBackBtn.title = historyBackBtn.disabled
+          ? "No previous reviewed page in history."
+          : "Open previous reviewed page";
+      }
+
+      function storeHistoryState() {
+        writeStorage(STORAGE_KEYS.history, JSON.stringify(state.history));
+        writeStorage(STORAGE_KEYS.historyIndex, String(state.historyIndex));
+      }
+
+      function loadHistoryState() {
+        let parsedHistory = [];
+        const rawHistory = readStorage(STORAGE_KEYS.history);
+        if (rawHistory) {
+          try {
+            parsedHistory = JSON.parse(rawHistory);
+          } catch {
+            parsedHistory = [];
+          }
+        }
+        const rawIndex = readStorage(STORAGE_KEYS.historyIndex);
+        const normalized = normalizeReviewHistory(parsedHistory, rawIndex);
+        state.history = normalized.history;
+        state.historyIndex = normalized.index;
+      }
+
+      function updateHistoryOnVisit() {
+        const next = updateReviewHistoryOnVisit(state.history, state.historyIndex, state.pageId);
+        state.history = next.history;
+        state.historyIndex = next.index;
+        storeHistoryState();
+        updateHistoryControls();
+      }
+
+      async function fetchJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const detail = payload && payload.detail ? payload.detail : `Request failed: ${response.status}`;
+          throw new Error(detail);
+        }
+        return payload;
+      }
+
+      async function loadPageData() {
+        const [pagePayload, outputsPayload] = await Promise.all([
+          fetchJson(`/api/pages/${state.pageId}`),
+          fetchJson(`/api/pages/${state.pageId}/ocr-outputs`),
+        ]);
+        state.page = pagePayload.page;
+        pageImage.src = pagePayload.image_url;
+        state.outputs = outputsPayload.outputs || [];
+        state.serverOutputsByLayoutId = Object.fromEntries(
+          state.outputs.map((output) => [String(output.layout_id), { ...output }]),
+        );
+        loadDraftState();
+        applyDraftsToOutputs();
+      }
+
+      async function loadForthAvailability() {
+        try {
+          const payload = await fetchJson(`/api/pages/${state.pageId}/ocr-review-next`);
+          const hasForth = Boolean(payload?.has_next) && Number.isInteger(payload?.next_page_id);
+          historyForthBtn.disabled = !hasForth;
+          historyForthBtn.title = hasForth ? "Open next page for OCR review" : "No next page for OCR review.";
+        } catch {
+          historyForthBtn.disabled = true;
+          historyForthBtn.title = "Cannot load next page now.";
+        }
+      }
+
+      async function markReviewed() {
+        if (state.reviewSubmitInProgress) return;
+        state.reviewSubmitInProgress = true;
+        updateReviewButtonState();
+        try {
+          const changedLayoutIds = Object.keys(state.localEditsByLayoutId)
+            .map((value) => Number(value))
+            .filter((value) => Number.isInteger(value) && value > 0);
+          for (const layoutId of changedLayoutIds) {
+            const draft = state.localEditsByLayoutId[String(layoutId)];
+            await fetchJson(`/api/ocr-outputs/${layoutId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ content: String(draft.content ?? "") }),
+            });
+          }
+
+          const result = await fetchJson(`/api/pages/${state.pageId}/ocr/review-complete`, {
+            method: "POST",
+          });
+          clearDraftState();
+          if (state.page) {
+            state.page.status = result.status;
+          }
+          updateReviewUiState();
+          setStatus("OCR review saved.");
+
+          const nextPayload = await fetchJson(`/api/pages/${state.pageId}/ocr-review-next`);
+          if (nextPayload && nextPayload.has_next && Number.isInteger(nextPayload.next_page_id)) {
+            window.location.href = `/static/ocr_review.html?page_id=${nextPayload.next_page_id}`;
+            return;
+          }
+          setStatus("OCR review saved. No next page for OCR review.");
+        } catch (error) {
+          setStatus(`OCR review failed: ${error.message}`, { isError: true });
+        } finally {
+          state.reviewSubmitInProgress = false;
+          updateReviewButtonState();
+        }
+      }
+
+      function parsePageIdFromUrl() {
+        const search = new URLSearchParams(window.location.search);
+        const parsed = Number(search.get("page_id"));
+        return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+      }
+
+      function renderHeaderMeta() {
+        if (!state.page) {
+          pageMeta.textContent = "";
+          return;
+        }
+        pageMeta.textContent = `Page #${state.page.id} | ${state.page.rel_path}`;
+      }
+
+      async function init() {
+        const pageId = parsePageIdFromUrl();
+        if (!pageId) {
+          setStatus("Missing page_id query parameter.", { isError: true });
+          reviewBtn.disabled = true;
+          return;
+        }
+
+        state.pageId = pageId;
+        loadHistoryState();
+        updateHistoryOnVisit();
+
+        try {
+          await loadPageData();
+        } catch (error) {
+          setStatus(`Failed to load OCR review page: ${error.message}`, { isError: true });
+          reviewBtn.disabled = true;
+          return;
+        }
+
+        renderHeaderMeta();
+        renderOutputs();
+        renderOverlay();
+        if (state.outputs.length > 0) {
+          selectOutput(state.outputs[0].layout_id, { scrollImageToLayout: false });
+        }
+        updateReviewUiState();
+        setStatus("Ready.");
+        await loadForthAvailability();
+      }
+
+      historyBackBtn.addEventListener("click", () => {
+        const prevPageId = previousHistoryPageId(state.history, state.historyIndex);
+        if (!Number.isInteger(prevPageId) || prevPageId <= 0) return;
+        state.historyIndex -= 1;
+        storeHistoryState();
+        window.location.href = `/static/ocr_review.html?page_id=${prevPageId}`;
+      });
+
+      historyForthBtn.addEventListener("click", async () => {
+        try {
+          const payload = await fetchJson(`/api/pages/${state.pageId}/ocr-review-next`);
+          if (!payload || !payload.has_next || !Number.isInteger(payload.next_page_id)) {
+            historyForthBtn.disabled = true;
+            historyForthBtn.title = "No next page for OCR review.";
+            return;
+          }
+          window.location.href = `/static/ocr_review.html?page_id=${payload.next_page_id}`;
+        } catch (error) {
+          setStatus(`Failed to open next page: ${error.message}`, { isError: true });
+        }
+      });
+
+      reviewBtn.addEventListener("click", markReviewed);
+
+      pageImage.addEventListener("load", () => {
+        if (state.selectedLayoutId !== null) {
+          ensureLayoutVisible(state.selectedLayoutId);
+        }
+      });
+
+      init().catch((error) => {
+        setStatus(`Initialization failed: ${error.message}`, { isError: true });
+      });
+    </script>
+  </body>
+</html>
