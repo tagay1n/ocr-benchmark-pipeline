@@ -7,8 +7,11 @@ import {
   computeViewportScrollToCenterBBox,
   computeZoomScale,
   formatZoomPercent,
+  normalizeReviewHistory,
   nextLayoutReviewUrl,
   pointHandleForCoordinateKey,
+  previousHistoryPageId,
+  updateReviewHistoryOnVisit,
 } from "../app/static/js/layout_review_utils.mjs";
 
 test("clampZoomPercent clamps and falls back for invalid values", () => {
@@ -138,4 +141,25 @@ test("nextLayoutReviewUrl resolves only valid next-page payloads", () => {
     nextLayoutReviewUrl({ has_next: true, next_page_id: 42 }),
     "/static/layouts.html?page_id=42",
   );
+});
+
+test("review history visit appends current page and trims forward branch", () => {
+  const state = updateReviewHistoryOnVisit([10, 11, 12], 1, 20, 10);
+  assert.deepEqual(state, { history: [10, 11, 20], index: 2 });
+});
+
+test("review history visit keeps current page without duplicate push", () => {
+  const state = updateReviewHistoryOnVisit([31, 32], 1, 32, 10);
+  assert.deepEqual(state, { history: [31, 32], index: 1 });
+});
+
+test("normalizeReviewHistory sanitizes invalid payload", () => {
+  const state = normalizeReviewHistory(["x", 7, -1, 8], 99);
+  assert.deepEqual(state, { history: [7, 8], index: 1 });
+});
+
+test("previousHistoryPageId returns previous page only when available", () => {
+  assert.equal(previousHistoryPageId([100, 101, 102], 2), 101);
+  assert.equal(previousHistoryPageId([100], 0), null);
+  assert.equal(previousHistoryPageId([], -1), null);
 });

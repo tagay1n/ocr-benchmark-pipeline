@@ -37,10 +37,17 @@
         padding: 24px;
       }
 
-      .back-nav {
+      .nav-strip {
         position: absolute;
         top: 24px;
         left: 24px;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .back-nav,
+      .history-nav-btn {
         width: 44px;
         height: 44px;
         display: inline-flex;
@@ -56,8 +63,18 @@
         box-shadow: 0 8px 20px rgba(31, 35, 41, 0.08);
       }
 
-      .back-nav:hover {
+      .back-nav:hover,
+      .history-nav-btn:hover:not(:disabled) {
         background: #f5f1e6;
+      }
+
+      .history-nav-btn {
+        cursor: pointer;
+      }
+
+      .history-nav-btn:disabled {
+        opacity: 0.42;
+        cursor: default;
       }
 
       .header {
@@ -65,7 +82,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        padding-left: 64px;
+        padding-left: 172px;
       }
 
       h1 {
@@ -550,16 +567,21 @@
           grid-template-columns: 1fr;
         }
 
-        .back-nav {
+        .nav-strip {
           top: 16px;
           left: 16px;
+          gap: 6px;
+        }
+
+        .back-nav,
+        .history-nav-btn {
           width: 40px;
           height: 40px;
           font-size: 22px;
         }
 
         .header {
-          padding-left: 52px;
+          padding-left: 136px;
         }
 
         .image-viewport {
@@ -581,7 +603,11 @@
   </head>
   <body>
     <main>
-      <a class="back-nav" href="/" aria-label="Back to Dashboard" title="Back to Dashboard">↩</a>
+      <div class="nav-strip">
+        <a class="back-nav" href="/" aria-label="Back to Dashboard" title="Back to Dashboard">↩</a>
+        <button id="history-back-btn" class="history-nav-btn" type="button" aria-label="Previous reviewed page" title="Previous reviewed page" disabled>←</button>
+        <button id="history-forth-btn" class="history-nav-btn" type="button" aria-label="Next page for review" title="Next page for review" disabled>→</button>
+      </div>
       <section class="header">
         <div>
           <h1>Layout Review</h1>
@@ -613,7 +639,6 @@
           <button id="detect-btn" type="button">Redetect Layouts</button>
           <button id="add-btn" class="secondary" type="button">Add Box</button>
           <button id="review-btn" type="button">Mark Reviewed</button>
-          <button id="review-next-btn" class="secondary" type="button" disabled>Review</button>
         </div>
       </section>
 
@@ -698,8 +723,11 @@
         computeViewportScrollToCenterBBox,
         computeZoomScale,
         formatZoomPercent,
+        normalizeReviewHistory,
         nextLayoutReviewUrl,
         pointHandleForCoordinateKey,
+        previousHistoryPageId,
+        updateReviewHistoryOnVisit,
       } from "/static/js/layout_review_utils.mjs";
 
       const params = new URLSearchParams(window.location.search);
@@ -708,6 +736,8 @@
         layoutDraftPrefix: "layout.draft.page",
         zoomMode: "layout.zoom.mode",
         zoomPercent: "layout.zoom.percent",
+        reviewNavHistory: "layout.review_nav.history",
+        reviewNavIndex: "layout.review_nav.index",
       };
 
       function readStorage(key) {
@@ -749,7 +779,8 @@
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
       const reviewBtn = document.getElementById("review-btn");
-      const reviewNextBtn = document.getElementById("review-next-btn");
+      const historyBackBtn = document.getElementById("history-back-btn");
+      const historyForthBtn = document.getElementById("history-forth-btn");
       const detectModal = document.getElementById("detect-modal");
       const detectModalRunBtn = document.getElementById("detect-modal-run-btn");
       const detectModalCancelBtn = document.getElementById("detect-modal-cancel-btn");
@@ -771,6 +802,9 @@
         zoomMode: "automatic",
         zoomPercent: 100,
         zoomAppliedPercent: 100,
+        reviewHistory: [],
+        reviewHistoryIndex: -1,
+        nextReviewPageId: null,
       };
 
       function applyStoredZoomSettings() {
@@ -883,6 +917,52 @@
         state.zoomPercent = clampZoomPercent(percent);
         applyZoom();
         persistZoomSettings();
+      }
+
+      function persistReviewHistory() {
+        writeStorage(STORAGE_KEYS.reviewNavHistory, JSON.stringify(state.reviewHistory));
+        writeStorage(STORAGE_KEYS.reviewNavIndex, String(state.reviewHistoryIndex));
+      }
+
+      function updateHistoryNavButtons() {
+        const backTarget = previousHistoryPageId(state.reviewHistory, state.reviewHistoryIndex);
+        historyBackBtn.disabled = backTarget === null;
+        historyBackBtn.title =
+          backTarget === null ? "No previously reviewed page in this session history." : "Previous reviewed page";
+
+        const hasForth = Number.isInteger(state.nextReviewPageId) && state.nextReviewPageId > 0;
+        historyForthBtn.disabled = !hasForth;
+        historyForthBtn.title = hasForth
+          ? "Open next page waiting for layout review."
+          : "No next page waiting for layout review.";
+      }
+
+      function loadReviewHistory() {
+        const rawHistory = readStorage(STORAGE_KEYS.reviewNavHistory);
+        const rawIndex = readStorage(STORAGE_KEYS.reviewNavIndex);
+        let parsedHistory = [];
+        if (rawHistory) {
+          try {
+            parsedHistory = JSON.parse(rawHistory);
+          } catch {
+            parsedHistory = [];
+          }
+        }
+        const normalized = normalizeReviewHistory(parsedHistory, rawIndex);
+        state.reviewHistory = normalized.history;
+        state.reviewHistoryIndex = normalized.index;
+      }
+
+      function registerCurrentPageInHistory() {
+        const updated = updateReviewHistoryOnVisit(
+          state.reviewHistory,
+          state.reviewHistoryIndex,
+          pageId,
+        );
+        state.reviewHistory = updated.history;
+        state.reviewHistoryIndex = updated.index;
+        persistReviewHistory();
+        updateHistoryNavButtons();
       }
 
       function scrollImageViewportToLayout(layoutId) {
@@ -1835,20 +1915,14 @@
       async function refreshNextReviewButton() {
         try {
           const payload = await fetchJson(`/api/pages/${pageId}/layout-review-next`);
-          if (payload.has_next && Number.isInteger(payload.next_page_id) && payload.next_page_id > 0) {
-            reviewNextBtn.disabled = false;
-            reviewNextBtn.dataset.nextPageId = String(payload.next_page_id);
-            reviewNextBtn.title = `Open next page: ${payload.next_page_rel_path}`;
-          } else {
-            reviewNextBtn.disabled = true;
-            reviewNextBtn.dataset.nextPageId = "";
-            reviewNextBtn.title = "No pages are waiting for layout review.";
-          }
+          const nextUrl = nextLayoutReviewUrl(payload);
+          const candidate = nextUrl ? Number(payload.next_page_id) : null;
+          state.nextReviewPageId =
+            Number.isInteger(candidate) && candidate > 0 && candidate !== pageId ? candidate : null;
         } catch {
-          reviewNextBtn.disabled = true;
-          reviewNextBtn.dataset.nextPageId = "";
-          reviewNextBtn.title = "Failed to load next page for review.";
+          state.nextReviewPageId = null;
         }
+        updateHistoryNavButtons();
       }
 
       function openDetectModal() {
@@ -1988,11 +2062,21 @@
       });
       addBtn.addEventListener("click", addLayout);
       reviewBtn.addEventListener("click", markReviewed);
-      reviewNextBtn.addEventListener("click", () => {
-        const nextPageId = Number.parseInt(reviewNextBtn.dataset.nextPageId || "", 10);
-        if (Number.isInteger(nextPageId) && nextPageId > 0) {
-          window.location.href = `/static/layouts.html?page_id=${nextPageId}`;
+      historyBackBtn.addEventListener("click", () => {
+        const targetPageId = previousHistoryPageId(state.reviewHistory, state.reviewHistoryIndex);
+        if (!Number.isInteger(targetPageId) || targetPageId <= 0) {
+          return;
         }
+        state.reviewHistoryIndex = Math.max(0, state.reviewHistoryIndex - 1);
+        persistReviewHistory();
+        window.location.href = `/static/layouts.html?page_id=${targetPageId}`;
+      });
+      historyForthBtn.addEventListener("click", () => {
+        const nextPageId = Number(state.nextReviewPageId);
+        if (!Number.isInteger(nextPageId) || nextPageId <= 0) {
+          return;
+        }
+        window.location.href = `/static/layouts.html?page_id=${nextPageId}`;
       });
       detectModalRunBtn.addEventListener("click", async () => {
         let payloadBody;
@@ -2078,6 +2162,8 @@
         }
         try {
           applyStoredZoomSettings();
+          loadReviewHistory();
+          registerCurrentPageInHistory();
           loadLayoutDraftState();
           await loadPage();
           await loadLayouts();

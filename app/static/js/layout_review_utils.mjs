@@ -117,3 +117,61 @@ export function nextLayoutReviewUrl(nextPayload) {
   }
   return `/static/layouts.html?page_id=${nextPageId}`;
 }
+
+export function normalizeReviewHistory(rawHistory, rawIndex) {
+  const validHistory = Array.isArray(rawHistory)
+    ? rawHistory
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+  if (validHistory.length === 0) {
+    return { history: [], index: -1 };
+  }
+  const parsedIndex = Number(rawIndex);
+  if (!Number.isInteger(parsedIndex)) {
+    return { history: validHistory, index: validHistory.length - 1 };
+  }
+  const safeIndex = Math.max(0, Math.min(parsedIndex, validHistory.length - 1));
+  return { history: validHistory, index: safeIndex };
+}
+
+export function updateReviewHistoryOnVisit(rawHistory, rawIndex, currentPageId, maxLength = 200) {
+  const pageId = Number(currentPageId);
+  if (!Number.isInteger(pageId) || pageId <= 0) {
+    return normalizeReviewHistory(rawHistory, rawIndex);
+  }
+
+  const normalized = normalizeReviewHistory(rawHistory, rawIndex);
+  let history = [...normalized.history];
+  let index = normalized.index;
+
+  if (history.length === 0) {
+    return { history: [pageId], index: 0 };
+  }
+  if (index >= 0 && history[index] === pageId) {
+    return { history, index };
+  }
+
+  if (index < history.length - 1) {
+    history = history.slice(0, index + 1);
+  }
+
+  history.push(pageId);
+  index = history.length - 1;
+
+  if (history.length > maxLength) {
+    const overflow = history.length - maxLength;
+    history = history.slice(overflow);
+    index = Math.max(0, index - overflow);
+  }
+
+  return { history, index };
+}
+
+export function previousHistoryPageId(rawHistory, rawIndex) {
+  const { history, index } = normalizeReviewHistory(rawHistory, rawIndex);
+  if (history.length === 0 || index <= 0) {
+    return null;
+  }
+  return history[index - 1];
+}

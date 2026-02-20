@@ -98,6 +98,12 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - removed visible status row from layout review page (no `Ready`/inline status text bar)
   - layout review `Back to Dashboard` text button replaced with isolated top-right back glyph button
   - layout review page meta line no longer renders `status: ...` label (keeps page id and path labels)
+  - replaced standalone `Review` action with top-left navigation controls:
+    - `Back` button goes to previous page from persistent review history
+    - `Forth` button opens next page waiting for layout review
+    - `Back` disables when there is no prior page in history
+    - `Forth` disables when there is no next page pending review
+    - review navigation history is persisted across page refreshes
   - `Redetect Layouts` now opens a modal with explicit Ultralytics/YOLO inference params:
     - `confidence_threshold (conf)`
     - `iou_threshold (iou)`
@@ -151,6 +157,12 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-19:
+  - Layout review navigation updated:
+    - removed header `Review` button
+    - added top-left `Back`/`Forth` glyph buttons next to dashboard-back control
+    - `Back` uses persisted in-browser review history
+    - `Forth` navigates to next `layout_detected` page and auto-disables when unavailable
+  - Added frontend helper/test coverage for persisted review-history behavior.
   - Layout review completion flow updated:
     - after `Mark Reviewed`, UI automatically redirects to next `layout_detected` page when available
     - if no pending review page remains, current page stays open in reviewed state
