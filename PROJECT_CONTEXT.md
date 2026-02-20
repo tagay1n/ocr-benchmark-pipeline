@@ -81,6 +81,11 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - per-row restore button (`↺`) reverts class/order/bbox to backend baseline
   - per-row delete uses trash icon button
   - `Add Box` action moved into `Layouts` panel header and switched to icon-only plus glyph button
+  - `Add Box` now supports draw-to-create workflow:
+    - click plus button to enter draw mode
+    - draw mode uses crosshair cursor (no extra marker glyph near cursor)
+    - click+drag to define bbox; releasing creates a new layout from dragged rectangle
+    - tiny drags are rejected to avoid accidental boxes
   - layout ID column hidden in review table UI
   - page-level `Review` button to jump to the next pending review page
   - stage sidebar removed from layout review page for a consistent no-bar UX
@@ -174,6 +179,14 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-20:
+  - Layout review draw-mode cursor simplification:
+    - removed extra inline plus marker rendering near pointer
+    - retained native crosshair cursor + drag preview rectangle
+  - Layout review draw-to-create added:
+    - introduced dedicated drawing layer over image with crosshair cursor and live drag preview rectangle
+    - plus button toggles draw mode (`aria-pressed`), with `Esc` and detect-modal open cancelling draw mode
+    - new shared utility `computeDraggedBBox` added for drag-pixels -> normalized bbox conversion
+    - added frontend unit tests for bbox conversion (normalization/clamping + tiny-drag rejection)
   - Layout review controls polish:
     - moved `Add Box` button from top action bar into `Layouts` panel header
     - replaced text label with commonly-used plus glyph icon button

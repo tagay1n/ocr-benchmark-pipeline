@@ -138,6 +138,43 @@ export function computeViewportScrollTargetForLayoutId({
   });
 }
 
+export function computeDraggedBBox({
+  startX,
+  startY,
+  endX,
+  endY,
+  contentWidth,
+  contentHeight,
+  minPixels = 6,
+}) {
+  const values = [startX, startY, endX, endY, contentWidth, contentHeight, minPixels];
+  if (values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+  if (contentWidth <= 0 || contentHeight <= 0 || minPixels < 0) {
+    return null;
+  }
+
+  const clampX = (value) => Math.max(0, Math.min(contentWidth, value));
+  const clampY = (value) => Math.max(0, Math.min(contentHeight, value));
+
+  const x1px = Math.min(clampX(startX), clampX(endX));
+  const x2px = Math.max(clampX(startX), clampX(endX));
+  const y1px = Math.min(clampY(startY), clampY(endY));
+  const y2px = Math.max(clampY(startY), clampY(endY));
+
+  if (x2px - x1px < minPixels || y2px - y1px < minPixels) {
+    return null;
+  }
+
+  return {
+    x1: x1px / contentWidth,
+    y1: y1px / contentHeight,
+    x2: x2px / contentWidth,
+    y2: y2px / contentHeight,
+  };
+}
+
 export function computeViewportCenterPadding({
   contentWidth,
   contentHeight,

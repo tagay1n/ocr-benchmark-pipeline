@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   clampZoomPercent,
   compactReadingOrdersAfterDeletion,
+  computeDraggedBBox,
   computeViewportCenterPadding,
   computeViewportScrollTargetForLayoutId,
   computeViewportScrollToCenterBBox,
@@ -169,6 +170,52 @@ test("computeViewportScrollTargetForLayoutId returns null for missing/invalid se
       contentHeight: 800,
       viewportWidth: 500,
       viewportHeight: 400,
+    }),
+    null,
+  );
+});
+
+test("computeDraggedBBox normalizes drag rectangle and clamps to bounds", () => {
+  const bbox = computeDraggedBBox({
+    startX: -20,
+    startY: 40,
+    endX: 210,
+    endY: 160,
+    contentWidth: 200,
+    contentHeight: 100,
+    minPixels: 5,
+  });
+  assert.deepEqual(bbox, {
+    x1: 0,
+    y1: 0.4,
+    x2: 1,
+    y2: 1,
+  });
+});
+
+test("computeDraggedBBox rejects tiny drags and invalid inputs", () => {
+  assert.equal(
+    computeDraggedBBox({
+      startX: 10,
+      startY: 10,
+      endX: 12,
+      endY: 40,
+      contentWidth: 500,
+      contentHeight: 500,
+      minPixels: 5,
+    }),
+    null,
+  );
+
+  assert.equal(
+    computeDraggedBBox({
+      startX: 10,
+      startY: 10,
+      endX: 50,
+      endY: 50,
+      contentWidth: 0,
+      contentHeight: 500,
+      minPixels: 5,
     }),
     null,
   );

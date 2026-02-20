@@ -319,6 +319,11 @@
         justify-content: center;
       }
 
+      .layouts-add-btn.active {
+        background: #0a6d68;
+        border-color: #0a6d68;
+      }
+
       .layouts-add-btn-icon {
         width: 16px;
         height: 16px;
@@ -412,6 +417,30 @@
       #overlay {
         position: absolute;
         inset: 0;
+      }
+
+      .draw-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        pointer-events: none;
+      }
+
+      .draw-layer[hidden] {
+        display: none;
+      }
+
+      .draw-layer.active {
+        pointer-events: auto;
+        cursor: crosshair;
+      }
+
+      .draw-preview-box {
+        position: absolute;
+        border: 2px dashed var(--accent);
+        background: rgba(11, 122, 117, 0.12);
+        border-radius: 4px;
+        pointer-events: none;
       }
 
       .box {
@@ -752,6 +781,9 @@
             <div id="image-wrap" class="image-wrap">
               <img id="page-image" alt="Page for layout review" />
               <div id="overlay"></div>
+              <div id="draw-layer" class="draw-layer" hidden>
+                <div id="draw-preview-box" class="draw-preview-box" hidden></div>
+              </div>
             </div>
           </div>
         </article>
@@ -832,6 +864,7 @@
       import {
         clampZoomPercent,
         compactReadingOrdersAfterDeletion,
+        computeDraggedBBox,
         computeViewportScrollTargetForLayoutId,
         computeZoomScale,
         normalizeReviewHistory,
@@ -880,6 +913,8 @@
       const imageWrap = document.getElementById("image-wrap");
       const pageImage = document.getElementById("page-image");
       const overlay = document.getElementById("overlay");
+      const drawLayer = document.getElementById("draw-layer");
+      const drawPreviewBox = document.getElementById("draw-preview-box");
       const statusLine = document.getElementById("status-line");
       const layoutsBody = document.getElementById("layouts-body");
       const zoomTrigger = document.getElementById("zoom-trigger");
@@ -916,6 +951,9 @@
         reviewHistory: [],
         reviewHistoryIndex: -1,
         nextReviewPageId: null,
+        drawModeActive: false,
+        drawPointerId: null,
+        drawStartPoint: null,
       };
 
       function applyStoredZoomSettings() {
@@ -2118,22 +2156,91 @@
         }
       }
 
-      async function addLayout() {
+      function setDrawModeActive(active) {
+        state.drawModeActive = active;
+        drawLayer.hidden = !active;
+        drawLayer.classList.toggle("active", active);
+        addBtn.classList.toggle("active", active);
+        addBtn.setAttribute("aria-pressed", active ? "true" : "false");
+      }
+
+      function clearDrawPreview() {
+        drawPreviewBox.hidden = true;
+      }
+
+      function resetDrawInteraction() {
+        state.drawPointerId = null;
+        state.drawStartPoint = null;
+        clearDrawPreview();
+      }
+
+      function exitDrawMode() {
+        resetDrawInteraction();
+        setDrawModeActive(false);
+      }
+
+      function enterDrawMode() {
+        if (addBtn.disabled) {
+          return;
+        }
+        setDrawModeActive(true);
+      }
+
+      function toggleDrawMode() {
+        if (state.drawModeActive) {
+          exitDrawMode();
+        } else {
+          enterDrawMode();
+        }
+      }
+
+      function drawLayerPointFromEvent(event) {
+        const rect = drawLayer.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+          return null;
+        }
+        const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+        const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+        return {
+          x,
+          y,
+          width: rect.width,
+          height: rect.height,
+        };
+      }
+
+      function renderDrawPreview(startPoint, endPoint) {
+        const left = Math.min(startPoint.x, endPoint.x);
+        const top = Math.min(startPoint.y, endPoint.y);
+        const width = Math.abs(endPoint.x - startPoint.x);
+        const height = Math.abs(endPoint.y - startPoint.y);
+        drawPreviewBox.style.left = `${left}px`;
+        drawPreviewBox.style.top = `${top}px`;
+        drawPreviewBox.style.width = `${width}px`;
+        drawPreviewBox.style.height = `${height}px`;
+        drawPreviewBox.hidden = false;
+      }
+
+      async function createLayoutFromBBox(bbox) {
         addBtn.disabled = true;
         try {
-          await fetchJson(`/api/pages/${pageId}/layouts`, {
+          const payload = await fetchJson(`/api/pages/${pageId}/layouts`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               class_name: "text",
               reading_order: null,
-              bbox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.2 },
+              bbox,
             }),
           });
           setStatus("Manual layout added.");
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();
+          const createdLayoutId = Number(payload?.layout?.id);
+          if (Number.isInteger(createdLayoutId) && createdLayoutId > 0) {
+            selectLayout(createdLayoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
+          }
         } catch (error) {
           setStatus(`Add failed: ${error.message}`, { isError: true });
         } finally {
@@ -2189,10 +2296,90 @@
         }
       }
 
+      drawLayer.addEventListener("pointermove", (event) => {
+        if (!state.drawModeActive) {
+          return;
+        }
+        const point = drawLayerPointFromEvent(event);
+        if (
+          state.drawPointerId !== null &&
+          state.drawPointerId === event.pointerId &&
+          state.drawStartPoint &&
+          point
+        ) {
+          renderDrawPreview(state.drawStartPoint, point);
+        }
+      });
+
+      drawLayer.addEventListener("pointerdown", (event) => {
+        if (!state.drawModeActive || event.button !== 0) {
+          return;
+        }
+        const point = drawLayerPointFromEvent(event);
+        if (!point) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        state.drawPointerId = event.pointerId;
+        state.drawStartPoint = point;
+        drawLayer.setPointerCapture?.(event.pointerId);
+        renderDrawPreview(point, point);
+      });
+
+      drawLayer.addEventListener("pointerup", async (event) => {
+        if (!state.drawModeActive || state.drawPointerId !== event.pointerId) {
+          return;
+        }
+        const startPoint = state.drawStartPoint;
+        const endPoint = drawLayerPointFromEvent(event);
+        drawLayer.releasePointerCapture?.(event.pointerId);
+        resetDrawInteraction();
+        if (!startPoint || !endPoint) {
+          exitDrawMode();
+          return;
+        }
+
+        const rawBBox = computeDraggedBBox({
+          startX: startPoint.x,
+          startY: startPoint.y,
+          endX: endPoint.x,
+          endY: endPoint.y,
+          contentWidth: startPoint.width,
+          contentHeight: startPoint.height,
+          minPixels: 8,
+        });
+        if (!rawBBox) {
+          setStatus("Draw a larger box to create a layout.");
+          return;
+        }
+
+        exitDrawMode();
+        await createLayoutFromBBox({
+          x1: roundTo4(rawBBox.x1),
+          y1: roundTo4(rawBBox.y1),
+          x2: roundTo4(rawBBox.x2),
+          y2: roundTo4(rawBBox.y2),
+        });
+      });
+
+      drawLayer.addEventListener("pointercancel", (event) => {
+        if (state.drawPointerId !== event.pointerId) {
+          return;
+        }
+        drawLayer.releasePointerCapture?.(event.pointerId);
+        resetDrawInteraction();
+      });
+
       detectBtn.addEventListener("click", () => {
+        if (state.drawModeActive) {
+          exitDrawMode();
+        }
         openDetectModal();
       });
-      addBtn.addEventListener("click", addLayout);
+      addBtn.addEventListener("click", () => {
+        toggleDrawMode();
+      });
       reviewBtn.addEventListener("click", markReviewed);
       historyBackBtn.addEventListener("click", () => {
         const targetPageId = previousHistoryPageId(state.reviewHistory, state.reviewHistoryIndex);
@@ -2299,6 +2486,9 @@
         if (event.key === "Escape") {
           closeZoomMenu();
           closeDetectModal();
+          if (state.drawModeActive) {
+            exitDrawMode();
+          }
         }
       });
       pageImage.addEventListener("load", () => {
@@ -2326,6 +2516,7 @@
           return;
         }
         try {
+          setDrawModeActive(false);
           applyStoredZoomSettings();
           loadReviewHistory();
           registerCurrentPageInHistory();
