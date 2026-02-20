@@ -281,8 +281,11 @@
         position: absolute;
         border: 1px dashed #9ca8a2;
         border-radius: 4px;
-        padding: 4px;
+        padding: 0;
         overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         font-size: 11px;
         line-height: 1.25;
         color: #1e1f1c;
@@ -300,6 +303,12 @@
         white-space: pre-wrap;
         word-break: break-word;
         overflow-wrap: anywhere;
+        max-width: 100%;
+        max-height: 100%;
+        overflow: hidden;
+        font-size: 12px;
+        line-height: 1.25;
+        text-align: center;
       }
 
       .recon-item-content.markdown {
@@ -318,13 +327,15 @@
       .recon-item-content table {
         width: 100%;
         border-collapse: collapse;
+        margin: 0 auto;
       }
 
       .recon-item-content th,
       .recon-item-content td {
         border: 1px solid #d0cbc0;
         padding: 2px 4px;
-        font-size: 10px;
+        font-size: inherit;
+        text-align: left;
       }
 
       #source-overlay {
@@ -392,19 +403,23 @@
       }
 
       .order-col {
-        width: 7ch;
+        width: 1%;
+        white-space: nowrap;
       }
 
       .class-col {
-        width: 18ch;
+        width: 1%;
+        white-space: nowrap;
       }
 
       .format-col {
-        width: 10ch;
+        width: 1%;
+        white-space: nowrap;
       }
 
       .actions-col {
-        width: 7ch;
+        width: 1%;
+        white-space: nowrap;
       }
 
       .format-badge {
@@ -953,6 +968,7 @@
         block.className = `recon-item-content ${className}`;
         block.textContent = String(content ?? "");
         container.appendChild(block);
+        return block;
       }
 
       function cloneAllowedTableNode(node) {
@@ -987,8 +1003,7 @@
         const format = String(output.output_format || "").toLowerCase();
         const content = String(output.content ?? "");
         if (format === "skip") {
-          appendPlainContent(container, "Skipped region (no text extraction).", "skip");
-          return;
+          return appendPlainContent(container, "Skipped region (no text extraction).", "skip");
         }
         if (format === "html") {
           const parser = new DOMParser();
@@ -1001,17 +1016,80 @@
             if (safeTable) {
               wrapper.appendChild(safeTable);
               container.appendChild(wrapper);
-              return;
+              return wrapper;
             }
           }
-          appendPlainContent(container, content, "html");
-          return;
+          return appendPlainContent(container, content, "html");
         }
         if (format === "latex") {
-          appendPlainContent(container, content, "latex");
+          return appendPlainContent(container, content, "latex");
+        }
+        return appendPlainContent(container, content, "markdown");
+      }
+
+      function estimateLineCount(text, availableWidthPx) {
+        const width = Number(availableWidthPx);
+        if (!Number.isFinite(width) || width <= 0) {
+          return 1;
+        }
+        const approxCharsPerLine = Math.max(8, Math.floor(width / 7));
+        const lines = String(text ?? "").split(/\r?\n/);
+        let count = 0;
+        for (const line of lines) {
+          const length = line.length;
+          count += Math.max(1, Math.ceil(length / approxCharsPerLine));
+        }
+        return Math.max(1, count);
+      }
+
+      function contentFitsInItem(contentNode, availableWidth, availableHeight) {
+        const maxWidth = Math.ceil(availableWidth + 1);
+        const maxHeight = Math.ceil(availableHeight + 1);
+        return contentNode.scrollWidth <= maxWidth && contentNode.scrollHeight <= maxHeight;
+      }
+
+      function fitReconstructedContent(item, contentNode, output) {
+        if (!item || !contentNode || !output) {
           return;
         }
-        appendPlainContent(container, content, "markdown");
+        const format = String(output.output_format || "").toLowerCase();
+        if (format === "skip") {
+          return;
+        }
+
+        const availableWidth = item.clientWidth;
+        const availableHeight = item.clientHeight;
+        if (availableWidth <= 6 || availableHeight <= 6) {
+          return;
+        }
+
+        const rawText = String(output.content ?? "");
+        const estimatedLines = estimateLineCount(rawText, availableWidth);
+        let high = Math.min(42, Math.max(8, availableHeight));
+        const estimatedByHeight = Math.floor((availableHeight / Math.max(1, estimatedLines)) * 1.35);
+        high = Math.min(high, Math.max(8, estimatedByHeight));
+        if (format === "html") {
+          high = Math.min(18, Math.max(9, high));
+        }
+        let low = 6;
+        let best = low;
+        const lineHeight = format === "latex" ? 1.2 : 1.25;
+
+        for (let i = 0; i < 10; i += 1) {
+          const mid = (low + high) / 2;
+          contentNode.style.fontSize = `${mid}px`;
+          contentNode.style.lineHeight = String(lineHeight);
+          if (contentFitsInItem(contentNode, availableWidth, availableHeight)) {
+            best = mid;
+            low = mid + 0.35;
+          } else {
+            high = mid - 0.35;
+          }
+        }
+
+        const finalSize = Math.max(6, Math.min(best, high > 0 ? high : best));
+        contentNode.style.fontSize = `${finalSize}px`;
+        contentNode.style.lineHeight = String(lineHeight);
       }
 
       function syncPreviewSurfaceSize() {
@@ -1046,8 +1124,9 @@
             selectOutput(output.layout_id, { scrollRowIntoView: true });
           });
 
-          appendStructuredContent(item, output);
+          const contentNode = appendStructuredContent(item, output);
           reconstructionSurface.appendChild(item);
+          fitReconstructedContent(item, contentNode, output);
         }
         applySelectedStyles();
       }
