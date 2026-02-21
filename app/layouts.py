@@ -4,12 +4,14 @@ from collections import Counter
 from datetime import UTC, datetime
 import json
 from pathlib import Path
-import sqlite3
 from threading import Lock
 from typing import Any
 
+from sqlalchemy import delete, func, select
+
 from .config import settings
-from .db import get_connection
+from .db import get_session
+from .models import CaptionBinding, Layout, Page
 
 DOC_LAYOUTNET_REPO_ID = "hantian/yolo-doclaynet"
 DOC_LAYOUTNET_CHECKPOINT = "yolov10b-doclaynet.pt"
@@ -160,75 +162,68 @@ def validate_bbox(x1: float, y1: float, x2: float, y2: float) -> None:
         raise ValueError("BBox must satisfy x2 > x1 and y2 > y1.")
 
 
-def _get_page_row(conn: sqlite3.Connection, page_id: int) -> sqlite3.Row | None:
-    return conn.execute(
-        "SELECT id, rel_path, status, is_missing FROM pages WHERE id = ?",
-        (page_id,),
-    ).fetchone()
+def _page_to_dict(page_row: Page) -> dict[str, Any]:
+    return {
+        "id": int(page_row.id),
+        "rel_path": page_row.rel_path,
+        "status": page_row.status,
+        "is_missing": bool(page_row.is_missing),
+    }
+
+
+def _layout_to_dict(layout: Layout, *, bound_target_ids: list[int] | None = None) -> dict[str, Any]:
+    return {
+        "id": int(layout.id),
+        "page_id": int(layout.page_id),
+        "class_name": layout.class_name,
+        "bbox": {
+            "x1": float(layout.x1),
+            "y1": float(layout.y1),
+            "x2": float(layout.x2),
+            "y2": float(layout.y2),
+        },
+        "reading_order": int(layout.reading_order),
+        "confidence": layout.confidence,
+        "source": layout.source,
+        "created_at": layout.created_at,
+        "updated_at": layout.updated_at,
+        "bound_target_ids": [] if bound_target_ids is None else bound_target_ids,
+    }
 
 
 def get_page(page_id: int) -> dict[str, Any] | None:
-    with get_connection() as conn:
-        row = _get_page_row(conn, page_id)
-        if row is None:
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
+        if page_row is None:
             return None
-        return {
-            "id": int(row["id"]),
-            "rel_path": row["rel_path"],
-            "status": row["status"],
-            "is_missing": bool(row["is_missing"]),
-        }
+        return _page_to_dict(page_row)
 
 
 def list_layouts(page_id: int) -> list[dict[str, Any]]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
-            FROM layouts
-            WHERE page_id = ?
-            ORDER BY reading_order ASC, id ASC
-            """,
-            (page_id,),
-        ).fetchall()
-        binding_rows = conn.execute(
-            """
-            SELECT cb.caption_layout_id, cb.target_layout_id
-            FROM caption_bindings cb
-            JOIN layouts caption_layout ON caption_layout.id = cb.caption_layout_id
-            JOIN layouts target_layout ON target_layout.id = cb.target_layout_id
-            WHERE caption_layout.page_id = ?
-              AND target_layout.page_id = ?
-            ORDER BY cb.caption_layout_id ASC, cb.target_layout_id ASC
-            """,
-            (page_id, page_id),
-        ).fetchall()
+    with get_session() as session:
+        layouts = session.execute(
+            select(Layout)
+            .where(Layout.page_id == page_id)
+            .order_by(Layout.reading_order.asc(), Layout.id.asc())
+        ).scalars().all()
 
-    bindings_by_caption_id: dict[int, list[int]] = {}
-    for row in binding_rows:
-        caption_layout_id = int(row["caption_layout_id"])
-        target_layout_id = int(row["target_layout_id"])
-        bindings_by_caption_id.setdefault(caption_layout_id, []).append(target_layout_id)
+        layout_ids = [int(layout.id) for layout in layouts]
+        bindings_by_caption_id: dict[int, list[int]] = {}
+        if layout_ids:
+            binding_rows = session.execute(
+                select(CaptionBinding.caption_layout_id, CaptionBinding.target_layout_id, Layout.page_id)
+                .join(Layout, Layout.id == CaptionBinding.target_layout_id)
+                .where(CaptionBinding.caption_layout_id.in_(layout_ids))
+                .where(Layout.page_id == page_id)
+                .order_by(CaptionBinding.caption_layout_id.asc(), CaptionBinding.target_layout_id.asc())
+            ).all()
+            for caption_layout_id, target_layout_id, _target_page_id in binding_rows:
+                caption_id = int(caption_layout_id)
+                bindings_by_caption_id.setdefault(caption_id, []).append(int(target_layout_id))
 
     return [
-        {
-            "id": int(row["id"]),
-            "page_id": int(row["page_id"]),
-            "class_name": row["class_name"],
-            "bbox": {
-                "x1": float(row["x1"]),
-                "y1": float(row["y1"]),
-                "x2": float(row["x2"]),
-                "y2": float(row["y2"]),
-            },
-            "reading_order": int(row["reading_order"]),
-            "confidence": row["confidence"],
-            "source": row["source"],
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            "bound_target_ids": bindings_by_caption_id.get(int(row["id"]), []),
-        }
-        for row in rows
+        _layout_to_dict(layout, bound_target_ids=bindings_by_caption_id.get(int(layout.id), []))
+        for layout in layouts
     ]
 
 
@@ -243,14 +238,15 @@ def detect_layouts_for_page(
     agnostic_nms: bool | None = None,
 ) -> dict[str, Any]:
     now = _utc_now()
-    with get_connection() as conn:
-        page_row = _get_page_row(conn, page_id)
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
         if page_row is None:
             raise ValueError("Page not found.")
-        if int(page_row["is_missing"]) == 1:
+        if bool(page_row.is_missing):
             raise ValueError("Page is marked as missing and cannot be detected.")
+        rel_path = str(page_row.rel_path)
 
-    image_path = (settings.source_dir / str(page_row["rel_path"])).resolve()
+    image_path = (settings.source_dir / rel_path).resolve()
     source_root = settings.source_dir.resolve()
     if source_root not in image_path.parents:
         raise ValueError("Invalid page image path for detection.")
@@ -277,43 +273,40 @@ def detect_layouts_for_page(
     detector_source = f"detector:{DOC_LAYOUTNET_REPO_ID}:{json.dumps(detector_params, separators=(',', ':'))}"
 
     created_count = 0
-    with get_connection() as conn:
+    with get_session() as session:
         if replace_existing:
-            conn.execute("DELETE FROM layouts WHERE page_id = ?", (page_id,))
+            session.execute(delete(Layout).where(Layout.page_id == page_id))
 
         existing_count = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM layouts WHERE page_id = ?",
-                (page_id,),
-            ).fetchone()[0]
+            session.execute(
+                select(func.coalesce(func.max(Layout.reading_order), 0)).where(Layout.page_id == page_id)
+            ).scalar_one()
+            or 0
         )
+
         for idx, row in enumerate(detected_rows, start=1):
-            conn.execute(
-                """
-                INSERT INTO layouts(
-                    page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
+            session.add(
+                Layout(
+                    page_id=page_id,
+                    class_name=row["class_name"],
+                    x1=row["x1"],
+                    y1=row["y1"],
+                    x2=row["x2"],
+                    y2=row["y2"],
+                    reading_order=existing_count + idx,
+                    confidence=row["confidence"],
+                    source=detector_source,
+                    created_at=now,
+                    updated_at=now,
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    page_id,
-                    row["class_name"],
-                    row["x1"],
-                    row["y1"],
-                    row["x2"],
-                    row["y2"],
-                    existing_count + idx,
-                    row["confidence"],
-                    detector_source,
-                    now,
-                    now,
-                ),
             )
             created_count += 1
-        conn.execute(
-            "UPDATE pages SET status = 'layout_detected', updated_at = ? WHERE id = ?",
-            (now, page_id),
-        )
+
+        page_row = session.get(Page, page_id)
+        if page_row is None:
+            raise ValueError("Page not found.")
+        page_row.status = "layout_detected"
+        page_row.updated_at = now
 
     class_counts = dict(Counter(row["class_name"] for row in detected_rows))
     return {
@@ -349,75 +342,38 @@ def create_layout(
     class_name = _normalize_class_name(class_name)
     now = _utc_now()
 
-    with get_connection() as conn:
-        page_row = _get_page_row(conn, page_id)
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
         if page_row is None:
             raise ValueError("Page not found.")
-        if int(page_row["is_missing"]) == 1:
+        if bool(page_row.is_missing):
             raise ValueError("Page is marked as missing and cannot be edited.")
 
         if reading_order is None:
-            current_max = conn.execute(
-                "SELECT COALESCE(MAX(reading_order), 0) FROM layouts WHERE page_id = ?",
-                (page_id,),
-            ).fetchone()[0]
-            reading_order = int(current_max) + 1
+            current_max = session.execute(
+                select(func.coalesce(func.max(Layout.reading_order), 0)).where(Layout.page_id == page_id)
+            ).scalar_one()
+            reading_order = int(current_max or 0) + 1
 
-        cursor = conn.execute(
-            """
-            INSERT INTO layouts(
-                page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)
-            """,
-            (
-                page_id,
-                class_name,
-                x1,
-                y1,
-                x2,
-                y2,
-                reading_order,
-                None,
-                now,
-                now,
-            ),
+        layout = Layout(
+            page_id=page_id,
+            class_name=class_name,
+            x1=x1,
+            y1=y1,
+            x2=x2,
+            y2=y2,
+            reading_order=reading_order,
+            confidence=None,
+            source="manual",
+            created_at=now,
+            updated_at=now,
         )
-        layout_id = int(cursor.lastrowid)
+        session.add(layout)
+        session.flush()
 
-        conn.execute(
-            "UPDATE pages SET status = 'layout_detected', updated_at = ? WHERE id = ?",
-            (now, page_id),
-        )
-
-        row = conn.execute(
-            """
-            SELECT id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
-            FROM layouts
-            WHERE id = ?
-            """,
-            (layout_id,),
-        ).fetchone()
-
-    if row is None:
-        raise ValueError("Layout was not created.")
-
-    return {
-        "id": int(row["id"]),
-        "page_id": int(row["page_id"]),
-        "class_name": row["class_name"],
-        "bbox": {
-            "x1": float(row["x1"]),
-            "y1": float(row["y1"]),
-            "x2": float(row["x2"]),
-            "y2": float(row["y2"]),
-        },
-        "reading_order": int(row["reading_order"]),
-        "confidence": row["confidence"],
-        "source": row["source"],
-        "created_at": row["created_at"],
-        "updated_at": row["updated_at"],
-    }
+        page_row.status = "layout_detected"
+        page_row.updated_at = now
+        return _layout_to_dict(layout)
 
 
 def update_layout(
@@ -432,130 +388,71 @@ def update_layout(
 ) -> dict[str, Any]:
     now = _utc_now()
     next_class_name_input = None if class_name is None else _normalize_class_name(class_name)
-    with get_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
-            FROM layouts
-            WHERE id = ?
-            """,
-            (layout_id,),
-        ).fetchone()
-        if row is None:
+    with get_session() as session:
+        layout = session.get(Layout, layout_id)
+        if layout is None:
             raise ValueError("Layout not found.")
 
-        next_class_name = row["class_name"] if next_class_name_input is None else next_class_name_input
-        next_reading_order = int(row["reading_order"]) if reading_order is None else reading_order
-        next_x1 = float(row["x1"]) if x1 is None else x1
-        next_y1 = float(row["y1"]) if y1 is None else y1
-        next_x2 = float(row["x2"]) if x2 is None else x2
-        next_y2 = float(row["y2"]) if y2 is None else y2
+        next_class_name = layout.class_name if next_class_name_input is None else next_class_name_input
+        next_reading_order = int(layout.reading_order) if reading_order is None else reading_order
+        next_x1 = float(layout.x1) if x1 is None else x1
+        next_y1 = float(layout.y1) if y1 is None else y1
+        next_x2 = float(layout.x2) if x2 is None else x2
+        next_y2 = float(layout.y2) if y2 is None else y2
 
         validate_bbox(next_x1, next_y1, next_x2, next_y2)
 
-        conn.execute(
-            """
-            UPDATE layouts
-            SET class_name = ?, reading_order = ?, x1 = ?, y1 = ?, x2 = ?, y2 = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                next_class_name,
-                next_reading_order,
-                next_x1,
-                next_y1,
-                next_x2,
-                next_y2,
-                now,
-                layout_id,
-            ),
-        )
+        layout.class_name = next_class_name
+        layout.reading_order = next_reading_order
+        layout.x1 = next_x1
+        layout.y1 = next_y1
+        layout.x2 = next_x2
+        layout.y2 = next_y2
+        layout.updated_at = now
 
-        conn.execute(
-            "UPDATE pages SET updated_at = ? WHERE id = ?",
-            (now, int(row["page_id"])),
-        )
+        page_row = session.get(Page, int(layout.page_id))
+        if page_row is not None:
+            page_row.updated_at = now
 
-        updated = conn.execute(
-            """
-            SELECT id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
-            FROM layouts
-            WHERE id = ?
-            """,
-            (layout_id,),
-        ).fetchone()
-
-    if updated is None:
-        raise ValueError("Layout not found after update.")
-
-    return {
-        "id": int(updated["id"]),
-        "page_id": int(updated["page_id"]),
-        "class_name": updated["class_name"],
-        "bbox": {
-            "x1": float(updated["x1"]),
-            "y1": float(updated["y1"]),
-            "x2": float(updated["x2"]),
-            "y2": float(updated["y2"]),
-        },
-        "reading_order": int(updated["reading_order"]),
-        "confidence": updated["confidence"],
-        "source": updated["source"],
-        "created_at": updated["created_at"],
-        "updated_at": updated["updated_at"],
-    }
+        return _layout_to_dict(layout)
 
 
 def delete_layout(layout_id: int) -> None:
     now = _utc_now()
-    with get_connection() as conn:
-        row = conn.execute("SELECT page_id FROM layouts WHERE id = ?", (layout_id,)).fetchone()
-        if row is None:
+    with get_session() as session:
+        layout = session.get(Layout, layout_id)
+        if layout is None:
             raise ValueError("Layout not found.")
-        conn.execute("DELETE FROM layouts WHERE id = ?", (layout_id,))
-        conn.execute(
-            "UPDATE pages SET updated_at = ? WHERE id = ?",
-            (now, int(row["page_id"])),
-        )
+        page_id = int(layout.page_id)
+        session.delete(layout)
+        page_row = session.get(Page, page_id)
+        if page_row is not None:
+            page_row.updated_at = now
 
 
 def replace_caption_bindings(page_id: int, bindings_by_caption_id: dict[int, list[int]]) -> dict[str, Any]:
     now = _utc_now()
-    with get_connection() as conn:
-        page_row = _get_page_row(conn, page_id)
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
         if page_row is None:
             raise ValueError("Page not found.")
-        if int(page_row["is_missing"]) == 1:
+        if bool(page_row.is_missing):
             raise ValueError("Page is marked as missing and cannot be edited.")
 
-        layout_rows = conn.execute(
-            """
-            SELECT id, class_name
-            FROM layouts
-            WHERE page_id = ?
-            """,
-            (page_id,),
-        ).fetchall()
-
-        layout_class_by_id = {int(row["id"]): _normalize_class_name(str(row["class_name"])) for row in layout_rows}
+        layouts = session.execute(select(Layout).where(Layout.page_id == page_id)).scalars().all()
+        layout_class_by_id = {int(layout.id): _normalize_class_name(str(layout.class_name)) for layout in layouts}
         caption_ids = {
-            layout_id
-            for layout_id, class_name in layout_class_by_id.items()
-            if class_name == CAPTION_CLASS_NAME
+            layout_id for layout_id, class_name in layout_class_by_id.items() if class_name == CAPTION_CLASS_NAME
         }
         target_ids = {
-            layout_id
-            for layout_id, class_name in layout_class_by_id.items()
-            if class_name in CAPTION_TARGET_CLASS_NAMES
+            layout_id for layout_id, class_name in layout_class_by_id.items() if class_name in CAPTION_TARGET_CLASS_NAMES
         }
 
         normalized_bindings: dict[int, list[int]] = {}
         for raw_caption_id, raw_target_ids in bindings_by_caption_id.items():
             caption_id = int(raw_caption_id)
             if caption_id not in caption_ids:
-                raise ValueError(
-                    "Caption bindings can be assigned only for caption layouts on the same page."
-                )
+                raise ValueError("Caption bindings can be assigned only for caption layouts on the same page.")
 
             target_ids_normalized: list[int] = []
             seen_target_ids: set[int] = set()
@@ -565,9 +462,7 @@ def replace_caption_bindings(page_id: int, bindings_by_caption_id: dict[int, lis
                     continue
                 seen_target_ids.add(target_id)
                 if target_id not in target_ids:
-                    raise ValueError(
-                        "Caption targets must be table, picture, or formula layouts on the same page."
-                    )
+                    raise ValueError("Caption targets must be table, picture, or formula layouts on the same page.")
                 target_ids_normalized.append(target_id)
             target_ids_normalized.sort()
             normalized_bindings[caption_id] = target_ids_normalized
@@ -578,34 +473,23 @@ def replace_caption_bindings(page_id: int, bindings_by_caption_id: dict[int, lis
                 "All caption layouts must be bound to at least one table, picture, or formula before review."
             )
 
-        conn.execute(
-            """
-            DELETE FROM caption_bindings
-            WHERE caption_layout_id IN (
-                SELECT id
-                FROM layouts
-                WHERE page_id = ?
-            )
-            """,
-            (page_id,),
-        )
+        if caption_ids:
+            session.execute(delete(CaptionBinding).where(CaptionBinding.caption_layout_id.in_(caption_ids)))
 
         binding_count = 0
         for caption_id, target_id_list in normalized_bindings.items():
             for target_id in target_id_list:
-                conn.execute(
-                    """
-                    INSERT INTO caption_bindings(caption_layout_id, target_layout_id, created_at, updated_at)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (caption_id, target_id, now, now),
+                session.add(
+                    CaptionBinding(
+                        caption_layout_id=caption_id,
+                        target_layout_id=target_id,
+                        created_at=now,
+                        updated_at=now,
+                    )
                 )
                 binding_count += 1
 
-        conn.execute(
-            "UPDATE pages SET updated_at = ? WHERE id = ?",
-            (now, page_id),
-        )
+        page_row.updated_at = now
 
     return {
         "page_id": page_id,
@@ -619,48 +503,40 @@ def replace_caption_bindings(page_id: int, bindings_by_caption_id: dict[int, lis
 
 def mark_layout_reviewed(page_id: int) -> dict[str, Any]:
     now = _utc_now()
-    with get_connection() as conn:
-        page_row = _get_page_row(conn, page_id)
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
         if page_row is None:
             raise ValueError("Page not found.")
-        if int(page_row["is_missing"]) == 1:
+        if bool(page_row.is_missing):
             raise ValueError("Page is marked as missing and cannot be reviewed.")
 
-        layout_count = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM layouts WHERE page_id = ?",
-                (page_id,),
-            ).fetchone()[0]
-        )
+        layouts = session.execute(select(Layout).where(Layout.page_id == page_id)).scalars().all()
+        layout_count = len(layouts)
         if layout_count == 0:
             raise ValueError("No layouts found for this page.")
 
-        caption_needing_bindings = conn.execute(
-            f"""
-            SELECT caption_layout.id
-            FROM layouts caption_layout
-            WHERE caption_layout.page_id = ?
-              AND caption_layout.class_name = ?
-              AND NOT EXISTS (
-                SELECT 1
-                FROM caption_bindings cb
-                JOIN layouts target_layout ON target_layout.id = cb.target_layout_id
-                WHERE cb.caption_layout_id = caption_layout.id
-                  AND target_layout.page_id = caption_layout.page_id
-                  AND target_layout.class_name IN ({",".join("?" for _ in CAPTION_TARGET_CLASS_NAMES)})
-              )
-            LIMIT 1
-            """,
-            (page_id, CAPTION_CLASS_NAME, *sorted(CAPTION_TARGET_CLASS_NAMES)),
-        ).fetchone()
-        if caption_needing_bindings is not None:
-            raise ValueError(
-                "All caption layouts must be bound to at least one table, picture, or formula before review."
-            )
+        class_by_id = {int(layout.id): str(layout.class_name) for layout in layouts}
+        caption_ids = {layout_id for layout_id, class_name in class_by_id.items() if class_name == CAPTION_CLASS_NAME}
+        target_ids = {
+            layout_id
+            for layout_id, class_name in class_by_id.items()
+            if class_name in CAPTION_TARGET_CLASS_NAMES
+        }
+        if caption_ids:
+            bound_rows = session.execute(
+                select(CaptionBinding.caption_layout_id, CaptionBinding.target_layout_id)
+                .where(CaptionBinding.caption_layout_id.in_(caption_ids))
+            ).all()
+            bound_caption_ids: set[int] = set()
+            for caption_layout_id, target_layout_id in bound_rows:
+                if int(target_layout_id) in target_ids:
+                    bound_caption_ids.add(int(caption_layout_id))
+            if any(caption_id not in bound_caption_ids for caption_id in sorted(caption_ids)):
+                raise ValueError(
+                    "All caption layouts must be bound to at least one table, picture, or formula before review."
+                )
 
-        conn.execute(
-            "UPDATE pages SET status = 'layout_reviewed', updated_at = ? WHERE id = ?",
-            (now, page_id),
-        )
+        page_row.status = "layout_reviewed"
+        page_row.updated_at = now
 
     return {"page_id": page_id, "status": "layout_reviewed", "layout_count": layout_count}

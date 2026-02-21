@@ -10,8 +10,11 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
+from sqlalchemy import delete, select
+
 from .config import settings
-from .db import get_connection
+from .db import get_session
+from .models import CaptionBinding, Layout, OcrOutput, Page
 
 GEMINI_MODEL = "gemini-3-flash-preview"
 MAX_RETRIES_PER_LAYOUT = 3
@@ -66,19 +69,12 @@ def _load_usage_state() -> list[str]:
     except (OSError, json.JSONDecodeError):
         return []
 
-    exhausted_keys_raw: list[object]
-    if isinstance(payload, list):
-        exhausted_keys_raw = payload
-    elif isinstance(payload, dict):
-        exhausted_keys_raw = payload.get("exhausted_keys", [])
-        if not isinstance(exhausted_keys_raw, list):
-            return []
-    else:
+    if not isinstance(payload, list):
         return []
 
     exhausted_keys: list[str] = []
     seen: set[str] = set()
-    for value in exhausted_keys_raw:
+    for value in payload:
         key = str(value).strip()
         if not key or key in seen:
             continue
@@ -248,98 +244,59 @@ def _crop_layout_png_bytes(image_path: Path, bbox: dict[str, float]) -> bytes:
 
 
 def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, class_name, x1, y1, x2, y2, reading_order
-            FROM layouts
-            WHERE page_id = ?
-            ORDER BY reading_order ASC, id ASC
-            """,
-            (page_id,),
-        ).fetchall()
+    with get_session() as session:
+        layouts = session.execute(
+            select(Layout)
+            .where(Layout.page_id == page_id)
+            .order_by(Layout.reading_order.asc(), Layout.id.asc())
+        ).scalars().all()
 
-        binding_rows = conn.execute(
-            """
-            SELECT cb.caption_layout_id, cb.target_layout_id, target.class_name
-            FROM caption_bindings cb
-            JOIN layouts target ON target.id = cb.target_layout_id
-            JOIN layouts caption ON caption.id = cb.caption_layout_id
-            WHERE caption.page_id = ?
-              AND target.page_id = ?
-            ORDER BY cb.caption_layout_id ASC, cb.target_layout_id ASC
-            """,
-            (page_id, page_id),
-        ).fetchall()
+        caption_layout_ids = [int(layout.id) for layout in layouts]
+        if caption_layout_ids:
+            binding_rows = session.execute(
+                select(CaptionBinding.caption_layout_id, CaptionBinding.target_layout_id, Layout.class_name)
+                .join(Layout, Layout.id == CaptionBinding.target_layout_id)
+                .where(CaptionBinding.caption_layout_id.in_(caption_layout_ids))
+                .where(Layout.page_id == page_id)
+                .order_by(CaptionBinding.caption_layout_id.asc(), CaptionBinding.target_layout_id.asc())
+            ).all()
+        else:
+            binding_rows = []
 
     caption_targets_by_layout_id: dict[int, list[str]] = {}
-    for row in binding_rows:
-        caption_layout_id = int(row["caption_layout_id"])
-        target_layout_id = int(row["target_layout_id"])
-        target_class_name = _normalize_class_name(str(row["class_name"]))
+    for caption_layout_id_raw, target_layout_id_raw, target_class_name_raw in binding_rows:
+        caption_layout_id = int(caption_layout_id_raw)
+        target_layout_id = int(target_layout_id_raw)
+        target_class_name = _normalize_class_name(str(target_class_name_raw))
         label = f"{target_class_name} [id:{target_layout_id}]"
         caption_targets_by_layout_id.setdefault(caption_layout_id, []).append(label)
 
     return [
         {
-            "id": int(row["id"]),
-            "class_name": _normalize_class_name(str(row["class_name"])),
+            "id": int(layout.id),
+            "class_name": _normalize_class_name(str(layout.class_name)),
             "bbox": {
-                "x1": float(row["x1"]),
-                "y1": float(row["y1"]),
-                "x2": float(row["x2"]),
-                "y2": float(row["y2"]),
+                "x1": float(layout.x1),
+                "y1": float(layout.y1),
+                "x2": float(layout.x2),
+                "y2": float(layout.y2),
             },
-            "reading_order": int(row["reading_order"]),
-            "caption_targets": caption_targets_by_layout_id.get(int(row["id"]), []),
+            "reading_order": int(layout.reading_order),
+            "caption_targets": caption_targets_by_layout_id.get(int(layout.id), []),
         }
-        for row in rows
+        for layout in layouts
     ]
 
 
-def _store_ocr_output(
-    *,
-    page_id: int,
-    layout_id: int,
-    class_name: str,
-    output_format: str,
-    content: str,
-    key_alias: str | None,
-) -> None:
-    now = _utc_now()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO ocr_outputs(
-                page_id, layout_id, class_name, output_format, content, model_name, key_alias, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(layout_id) DO UPDATE SET
-                class_name = excluded.class_name,
-                output_format = excluded.output_format,
-                content = excluded.content,
-                model_name = excluded.model_name,
-                key_alias = excluded.key_alias,
-                updated_at = excluded.updated_at
-            """,
-            (page_id, layout_id, class_name, output_format, content, GEMINI_MODEL, key_alias, now, now),
-        )
-
-
 def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
-    with get_connection() as conn:
-        page = conn.execute(
-            "SELECT id, rel_path, status, is_missing FROM pages WHERE id = ?",
-            (page_id,),
-        ).fetchone()
+    with get_session() as session:
+        page = session.get(Page, page_id)
         if page is None:
             raise ValueError("Page not found.")
-        if int(page["is_missing"]) == 1:
+        if bool(page.is_missing):
             raise ValueError("Page is marked as missing.")
 
-        conn.execute("DELETE FROM ocr_outputs WHERE page_id = ?", (page_id,))
-
-    image_path = (settings.source_dir / str(page["rel_path"])).resolve()
+    image_path = (settings.source_dir / str(page.rel_path)).resolve()
     source_root = settings.source_dir.resolve()
     if source_root not in image_path.parents:
         raise ValueError("Invalid page image path for OCR extraction.")
@@ -352,19 +309,21 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
 
     exhausted_keys = _load_usage_state()
 
+    pending_outputs: list[dict[str, Any]] = []
     extracted_count = 0
     skipped_count = 0
     request_count = 0
     for layout in layouts:
         prompt, output_format = _prompt_for_layout(layout, layout["caption_targets"])
         if output_format == "skip":
-            _store_ocr_output(
-                page_id=page_id,
-                layout_id=int(layout["id"]),
-                class_name=str(layout["class_name"]),
-                output_format="skip",
-                content="",
-                key_alias=None,
+            pending_outputs.append(
+                {
+                    "layout_id": int(layout["id"]),
+                    "class_name": str(layout["class_name"]),
+                    "output_format": "skip",
+                    "content": "",
+                    "key_alias": None,
+                }
             )
             skipped_count += 1
             continue
@@ -391,21 +350,39 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
         if last_error is not None:
             raise RuntimeError(f"OCR extraction failed for layout {layout['id']}: {last_error}")
 
-        _store_ocr_output(
-            page_id=page_id,
-            layout_id=int(layout["id"]),
-            class_name=str(layout["class_name"]),
-            output_format=output_format,
-            content=response_text,
-            key_alias=_key_alias(used_key),
+        pending_outputs.append(
+            {
+                "layout_id": int(layout["id"]),
+                "class_name": str(layout["class_name"]),
+                "output_format": output_format,
+                "content": response_text,
+                "key_alias": _key_alias(used_key),
+            }
         )
         extracted_count += 1
 
-    with get_connection() as conn:
-        conn.execute(
-            "UPDATE pages SET status = 'ocr_done', updated_at = ? WHERE id = ?",
-            (_utc_now(), page_id),
-        )
+    now = _utc_now()
+    with get_session() as session:
+        session.execute(delete(OcrOutput).where(OcrOutput.page_id == page_id))
+        for output in pending_outputs:
+            session.add(
+                OcrOutput(
+                    page_id=page_id,
+                    layout_id=int(output["layout_id"]),
+                    class_name=str(output["class_name"]),
+                    output_format=str(output["output_format"]),
+                    content=str(output["content"]),
+                    model_name=GEMINI_MODEL,
+                    key_alias=output["key_alias"],
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        page_row = session.get(Page, page_id)
+        if page_row is None:
+            raise ValueError("Page not found.")
+        page_row.status = "ocr_done"
+        page_row.updated_at = now
 
     return {
         "page_id": page_id,

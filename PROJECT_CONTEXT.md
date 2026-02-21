@@ -1,6 +1,6 @@
 # PROJECT CONTEXT
 
-Last updated: 2026-02-20
+Last updated: 2026-02-21
 
 ## Mission
 
@@ -47,6 +47,28 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 
 ### Completed
 
+- Final export V1:
+  - new config setting `result_dir` (default `result`)
+  - API endpoint `POST /api/final/export` with pipeline events:
+    - `manual_export_started`
+    - `manual_export_completed`
+    - `manual_export_failed`
+  - dashboard pipeline actions now include:
+    - `Scan -> Review layouts -> Review OCR -> Export final dataset`
+    - export button is enabled only when at least one page is `ocr_reviewed`
+  - export output preserves original source hierarchy relative to `input`:
+    - copied source images: `images/<original_rel_path>`
+    - regenerated reconstructed previews: `reconstructed/<original_rel_path>.png`
+  - `metadata.jsonl` is written per export folder with reviewed-page items in reading order
+  - backend test coverage added for final export hierarchy and metadata shape
+  - dashboard export button label shortened from `Export final dataset` to `Export`
+  - extended backend export coverage:
+    - picture items omit `content` and `content_format`
+    - caption items include multi-target `caption_targets`
+    - export includes only `ocr_reviewed` and non-missing pages
+    - API 400 path when no exportable pages
+    - invalid export rel-path rejection
+    - final export event emission assertions (`started`/`completed`/`failed`)
 - Discovery V1:
   - deep scan from configurable source directory
   - SHA-256 dedupe with canonical path tracking
@@ -66,7 +88,10 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
   - total/missing/active-duplicate stats are included in discovery `scan_finished` backend event messages/data
   - scan button success no longer prints verbose summary label; scan details are shown in backend activity logs
     - `Review layouts` button auto-disables when no page is ready
-    - removed per-row `Layout Review` table column/action from dashboard list
+    - dashboard table now provides per-row quick-open actions for both `Layout` review and `OCR` review pages
+    - dashboard table now includes per-row thumbnails:
+      - placeholders are shown first
+      - images are loaded with native browser lazy loading (`loading=\"lazy\"`)
     - added extra vertical spacing between `Dashboard` title and pipeline action buttons
   - wipe DB state action with typed confirmation (`wipe`) in modal
   - live pipeline activity panel is collapsed by default and persisted in local storage
@@ -153,13 +178,15 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
     - `GET /api/pages/{page_id}/ocr-review-next`
     - `GET /api/pages/{page_id}/ocr-outputs`
     - `PATCH /api/ocr-outputs/{layout_id}`
-    - `POST /api/pages/{page_id}/ocr/review-complete`
+  - `POST /api/pages/{page_id}/ocr/review-complete`
+  - `POST /api/pages/{page_id}/ocr/reextract`
   - new OCR review page `app/static/ocr_review.html` with:
     - back/history navigation controls consistent with layout review
     - image panel with OCR-output bbox overlays
     - extracted-content table (order/class/format/content)
     - bidirectional linking between content rows and image bboxes (select/highlight/jump)
     - local draft persistence + per-row restore + single `Mark reviewed` submit flow
+    - manual `Reextract content` action to rerun OCR extraction for all page layouts from the review screen
     - preview modes:
       - source image panel, reconstructed panel, and extracted-content panel can be shown together
       - each panel has an independent hide/show toggle (state persisted in local storage)
@@ -216,6 +243,7 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 - `DELETE /api/layouts/{layout_id}`
 - `POST /api/pages/{page_id}/layouts/review-complete`
 - `POST /api/pages/{page_id}/ocr/review-complete`
+- `POST /api/pages/{page_id}/ocr/reextract`
 - `GET /api/pipeline/activity`
 - `GET /api/pipeline/activity/stream`
 - `GET /api/duplicates`
@@ -237,7 +265,59 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 
 ## Change Log
 
+- 2026-02-21:
+  - Completed raw-SQL removal for active backend data flows:
+    - restored/added SQLAlchemy declarative models in `app/models.py`
+    - replaced legacy sqlite connection layer in `app/db.py` with SQLAlchemy engine/session management
+    - migrated discovery scan persistence (`app/discovery.py`) from raw SQL statements to ORM queries/updates
+    - added `SQLAlchemy==2.0.38` to `requirements.txt`
+  - Completed label renames requested for re-run actions:
+    - layout review button `Redetect layouts` -> `Detect again`
+    - OCR review button `Reextract content` -> `Detect again`
+    - aligned related progress/status copy to `Detecting...` / `Detection failed|finished`
+  - Verified after changes:
+    - backend tests: `python -m unittest discover -s tests -p 'test_pipeline_stages.py'` (pass)
+    - frontend tests: `node --test frontend_tests/*.test.mjs` (pass)
+  - OCR review page now includes a `Reextract content` button before `Mark reviewed`:
+    - triggers page-wide OCR re-extraction
+    - no confirmation dialog; reextract starts immediately on click
+    - refreshes page outputs/overlay after reextract completes
+  - Added backend endpoint `POST /api/pages/{page_id}/ocr/reextract`:
+    - sets page status to `ocr_extracting`
+    - reruns OCR extraction and updates outputs
+    - emits `ocr_extract` SSE events (`job_started`, `job_completed`, `job_failed`)
+  - Added backend test coverage for manual OCR reextract flow from `ocr_reviewed` state.
+  - Added benchmark selection template for 100-image OCR set planning:
+    - file: `docs/benchmark_selection_sheet_template.md`
+    - includes fixed type quotas, recommended difficulty split, diversity minimums, sheet columns, and spreadsheet formulas
+  - Dashboard `All indexed images` table now includes per-row quick-open buttons:
+    - `Layout` opens `/static/layouts.html?page_id=<id>`
+    - `OCR` opens `/static/ocr_review.html?page_id=<id>`
+  - Row-level review open buttons are disabled for missing pages.
+  - Dashboard now renders per-row image thumbnails with lazy viewport loading:
+    - rows show a placeholder card until image load finishes
+    - thumbnails use browser-native lazy loading
+    - failed thumbnail loads show `Preview unavailable`
+  - Fixed dashboard thumbnail lazy-load bug:
+    - removed custom `IntersectionObserver`-based loader due unreliable behavior in-browser
+    - switched to direct thumbnail source assignment + native lazy loading and explicit `complete` fallback handling
+  - Fixed dashboard thumbnail rendering issue with native lazy load:
+    - removed `hidden`-gated thumbnail image rendering (blocked fetch in some browsers)
+    - switched to overlay placeholder + opacity-based reveal after image load
+  - OCR review navigation controls were aligned with layout review page controls:
+    - same back-glyph icon
+    - same previous/next history glyphs
+    - same `Back to Dashboard` control labeling
+  - Back-to-dashboard glyph was explicitly synced to the same arrow icon on both review pages to remove visual mismatch.
+  - Back-to-dashboard glyph style was adjusted to the curved return-arrow variant and applied identically on both review pages.
 - 2026-02-20:
+  - Gemini usage state loader now accepts only the new simple JSON-array format (exhausted keys list). Legacy object format fallback was removed by request.
+  - Status labels in UI are now rendered in uppercase consistently (dashboard status badges and layout/OCR review status badges).
+  - Dashboard wipe flow UI now avoids printing verbose wipe summaries in `last-scan`; wipe details are shown via SSE backend activity events only.
+  - Applied sentence-case pass to primary UI labels on dashboard/layout review pages (buttons, section titles, modal titles, table headers).
+  - Browser tab branding refresh:
+    - updated page titles for dashboard/layout review/OCR review to neutral `OCR benchmark pipeline` naming
+    - added shared SVG favicon (`app/static/favicon.svg`) and wired it into all main UI pages
   - OCR review reconstruction preview:
     - changed OCR review preview into three simultaneous panels (source, reconstructed, extracted content)
     - added per-panel hide/show controls with persisted visibility state

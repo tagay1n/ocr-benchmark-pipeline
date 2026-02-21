@@ -14,6 +14,7 @@ class Settings:
     project_root: Path
     source_dir: Path
     db_path: Path
+    result_dir: Path
     allowed_extensions: tuple[str, ...]
     enable_background_jobs: bool
     gemini_keys: tuple[str, ...] = ()
@@ -122,6 +123,7 @@ def load_settings() -> Settings:
 
     source_dir_value = os.getenv("SOURCE_DIR", str(config.get("source_dir", "input")))
     db_path_value = os.getenv("DB_PATH", str(config.get("db_path", "data/ocr_dataset.db")))
+    result_dir_value = os.getenv("RESULT_DIR", str(config.get("result_dir", "result")))
     ext_env = os.getenv("ALLOWED_IMAGE_EXTENSIONS")
     ext_value = ext_env if ext_env is not None else _coerce_extensions(config.get("allowed_image_extensions"))
     jobs_env = os.getenv("ENABLE_BACKGROUND_JOBS")
@@ -134,6 +136,7 @@ def load_settings() -> Settings:
 
     source_dir = _resolve_path(project_root, source_dir_value)
     db_path = _resolve_path(project_root, db_path_value)
+    result_dir = _resolve_path(project_root, result_dir_value)
     allowed_extensions = _parse_extensions(ext_value)
     enable_background_jobs = _parse_bool(jobs_value, default=True)
     gemini_usage_path = _resolve_path(project_root, gemini_usage_path_value)
@@ -142,6 +145,7 @@ def load_settings() -> Settings:
         project_root=project_root,
         source_dir=source_dir,
         db_path=db_path,
+        result_dir=result_dir,
         allowed_extensions=allowed_extensions,
         enable_background_jobs=enable_background_jobs,
         gemini_keys=gemini_keys_value,

@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Layout Review</title>
+    <title>Layout review | OCR benchmark pipeline</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <style>
       :root {
         --bg: #f3f1eb;
@@ -798,7 +799,7 @@
       </div>
       <section class="header">
         <div>
-          <h1>Layout Review</h1>
+          <h1>Layout review</h1>
           <div class="meta-strip">
             <div id="page-meta" class="subline"></div>
             <span id="review-state-badge" class="review-state-badge" hidden></span>
@@ -813,8 +814,8 @@
               </button>
             </div>
             <div id="zoom-menu" class="zoom-menu" hidden>
-              <button class="zoom-option" type="button" data-zoom-mode="fit-page">Fit Page</button>
-              <button class="zoom-option" type="button" data-zoom-mode="fit-width">Fit Width</button>
+              <button class="zoom-option" type="button" data-zoom-mode="fit-page">Fit page</button>
+              <button class="zoom-option" type="button" data-zoom-mode="fit-width">Fit width</button>
               <button class="zoom-option" type="button" data-zoom-mode="automatic">Automatic</button>
               <div class="zoom-separator"></div>
               <button class="zoom-option" type="button" data-zoom-percent="50">50%</button>
@@ -829,8 +830,8 @@
               <button class="zoom-option" type="button" data-zoom-percent="400">400%</button>
             </div>
           </div>
-          <button id="detect-btn" type="button">Redetect Layouts</button>
-          <button id="review-btn" type="button">Mark Reviewed</button>
+          <button id="detect-btn" type="button">Detect again</button>
+          <button id="review-btn" type="button">Mark reviewed</button>
         </div>
       </section>
 
@@ -862,7 +863,7 @@
                 <tr>
                   <th class="layout-class-col">Class</th>
                   <th class="layout-order-col">Order</th>
-                  <th>BBox</th>
+                  <th>bbox</th>
                   <th class="layout-bind-col">Bind</th>
                   <th class="layout-actions-col">Actions</th>
                 </tr>
@@ -875,13 +876,13 @@
 
     <div id="detect-modal" class="modal-backdrop" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="detect-modal-title">
-        <h2 id="detect-modal-title">Redetect Layouts</h2>
+        <h2 id="detect-modal-title">Detect again</h2>
         <p class="modal-hint">Set Ultralytics inference parameters for DocLayNet detection.</p>
         <p class="modal-doc-links">
           Docs:
-          <a href="https://docs.ultralytics.com/modes/predict/#inference-arguments" target="_blank" rel="noreferrer noopener">Predict Inference Arguments</a>
+          <a href="https://docs.ultralytics.com/modes/predict/#inference-arguments" target="_blank" rel="noreferrer noopener">Predict inference arguments</a>
           |
-          <a href="https://docs.ultralytics.com/usage/cfg/#predict-settings" target="_blank" rel="noreferrer noopener">Predict Settings Reference</a>
+          <a href="https://docs.ultralytics.com/usage/cfg/#predict-settings" target="_blank" rel="noreferrer noopener">Predict settings reference</a>
         </p>
         <div class="modal-grid">
           <div class="modal-field">
@@ -897,7 +898,7 @@
             <input id="detect-modal-imgsz" type="number" min="32" step="32" value="1024" />
           </div>
           <div class="modal-field">
-            <label for="detect-modal-max-det">Max Detections (`max_det`)</label>
+            <label for="detect-modal-max-det">Max detections (`max_det`)</label>
             <input id="detect-modal-max-det" type="number" min="1" step="1" value="300" />
           </div>
           <div class="modal-field">
@@ -915,7 +916,7 @@
         </div>
         <div class="modal-actions">
           <button id="detect-modal-cancel-btn" class="secondary" type="button">Cancel</button>
-          <button id="detect-modal-run-btn" type="button">Run Detection</button>
+          <button id="detect-modal-run-btn" type="button">Run detection</button>
         </div>
       </div>
     </div>
@@ -1454,19 +1455,19 @@
 
         reviewStateBadge.hidden = false;
         if (status === "layout_detected") {
-          reviewStateBadge.textContent = "Needs review";
+          reviewStateBadge.textContent = "NEEDS REVIEW";
           reviewStateBadge.classList.add("needs-review");
           reviewStateBadge.title = "This page is waiting for layout review.";
           return;
         }
         if (status === "layout_reviewed") {
-          reviewStateBadge.textContent = "Reviewed";
+          reviewStateBadge.textContent = "REVIEWED";
           reviewStateBadge.classList.add("reviewed");
           reviewStateBadge.title = "This page was already marked as layout reviewed.";
           return;
         }
 
-        reviewStateBadge.textContent = formatClassLabel(status);
+        reviewStateBadge.textContent = formatStatusLabel(status);
         reviewStateBadge.classList.add("unknown");
         reviewStateBadge.title = `Current page status: ${status}.`;
       }
@@ -1482,20 +1483,20 @@
           return;
         }
         if (unboundCaptionIds.length > 0) {
-          reviewBtn.textContent = "Mark Reviewed";
+          reviewBtn.textContent = "Mark reviewed";
           reviewBtn.disabled = true;
           reviewBtn.title =
             "Each caption must be bound to at least one table, picture, or formula before review.";
           return;
         }
         if (alreadyReviewed && !hasDraftChanges) {
-          reviewBtn.textContent = "Reviewed";
+          reviewBtn.textContent = "REVIEWED";
           reviewBtn.disabled = true;
           reviewBtn.title = "This page is already reviewed.";
           return;
         }
 
-        reviewBtn.textContent = "Mark Reviewed";
+        reviewBtn.textContent = "Mark reviewed";
         reviewBtn.disabled = false;
         reviewBtn.title = alreadyReviewed
           ? "Submit current changes and keep this page reviewed."
@@ -1856,6 +1857,13 @@
           return "";
         }
         return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      }
+
+      function formatStatusLabel(status) {
+        return String(status || "")
+          .replace(/_/g, " ")
+          .trim()
+          .toUpperCase();
       }
 
       function normalizeClassName(className) {
@@ -2492,13 +2500,13 @@
           closeDetectModal();
           const params = payload.inference_params || {};
           setStatus(
-            `Redetect finished. Created ${payload.created} layouts. conf=${params.confidence_threshold}, iou=${params.iou_threshold}, imgsz=${params.image_size}, max_det=${params.max_detections}, agnostic_nms=${params.agnostic_nms}.`,
+            `Detection finished. Created ${payload.created} layouts. conf=${params.confidence_threshold}, iou=${params.iou_threshold}, imgsz=${params.image_size}, max_det=${params.max_detections}, agnostic_nms=${params.agnostic_nms}.`,
           );
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();
         } catch (error) {
-          setStatus(`Redetect failed: ${error.message}`, { isError: true });
+          setStatus(`Detection failed: ${error.message}`, { isError: true });
         } finally {
           detectBtn.disabled = false;
           detectModalRunBtn.disabled = false;
@@ -2783,7 +2791,7 @@
         try {
           payloadBody = parseDetectModalPayload();
         } catch (error) {
-          setStatus(`Redetect failed: ${error.message}`, { isError: true });
+          setStatus(`Detection failed: ${error.message}`, { isError: true });
           return;
         }
         await detectLayouts(payloadBody);

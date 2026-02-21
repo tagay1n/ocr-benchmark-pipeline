@@ -5,8 +5,11 @@ import json
 from threading import Lock, Thread
 from typing import Any, Callable
 
-from .db import get_connection
+from sqlalchemy import and_, func, or_, select, update
+
+from .db import get_session
 from .layouts import detect_layouts_for_page
+from .models import Page, PipelineEvent, PipelineJob
 from .ocr_extract import extract_ocr_for_page
 
 JobHandler = Callable[[dict[str, Any]], dict[str, Any] | None]
@@ -59,13 +62,16 @@ def emit_event(
     page_id: int | None = None,
     data: dict[str, Any] | None = None,
 ) -> None:
-    with get_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO pipeline_events(ts, stage, event_type, page_id, message, data_json)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (_utc_now(), stage, event_type, page_id, message, None if data is None else _json_dumps(data)),
+    with get_session() as session:
+        session.add(
+            PipelineEvent(
+                ts=_utc_now(),
+                stage=stage,
+                event_type=event_type,
+                page_id=page_id,
+                message=message,
+                data_json=None if data is None else _json_dumps(data),
+            )
         )
 
 
@@ -89,70 +95,65 @@ def _ensure_worker_running() -> None:
 
 def _claim_next_job() -> dict[str, Any] | None:
     while True:
-        with get_connection() as conn:
-            row = conn.execute(
-                """
-                SELECT id, stage, page_id, payload_json
-                FROM pipeline_jobs
-                WHERE status = 'queued'
-                ORDER BY id ASC
-                LIMIT 1
-                """
-            ).fetchone()
+        with get_session() as session:
+            row = session.execute(
+                select(PipelineJob)
+                .where(PipelineJob.status == "queued")
+                .order_by(PipelineJob.id.asc())
+                .limit(1)
+            ).scalar_one_or_none()
             if row is None:
                 return None
 
             now = _utc_now()
-            updated = conn.execute(
-                """
-                UPDATE pipeline_jobs
-                SET status = 'running',
-                    attempts = attempts + 1,
-                    started_at = COALESCE(started_at, ?),
-                    updated_at = ?
-                WHERE id = ? AND status = 'queued'
-                """,
-                (now, now, int(row["id"])),
+            updated = session.execute(
+                update(PipelineJob)
+                .where(PipelineJob.id == row.id)
+                .where(PipelineJob.status == "queued")
+                .values(
+                    status="running",
+                    attempts=int(row.attempts) + 1,
+                    started_at=row.started_at or now,
+                    updated_at=now,
+                )
             )
-            if updated.rowcount == 1:
+            if int(updated.rowcount or 0) == 1:
                 return {
-                    "id": int(row["id"]),
-                    "stage": row["stage"],
-                    "page_id": None if row["page_id"] is None else int(row["page_id"]),
-                    "payload": _json_loads(row["payload_json"]),
+                    "id": int(row.id),
+                    "stage": row.stage,
+                    "page_id": None if row.page_id is None else int(row.page_id),
+                    "payload": _json_loads(row.payload_json),
                 }
 
 
 def _finalize_job_success(job_id: int, result: dict[str, Any] | None) -> None:
     now = _utc_now()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            UPDATE pipeline_jobs
-            SET status = 'completed',
-                result_json = ?,
-                error = NULL,
-                finished_at = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (None if result is None else _json_dumps(result), now, now, job_id),
+    with get_session() as session:
+        session.execute(
+            update(PipelineJob)
+            .where(PipelineJob.id == job_id)
+            .values(
+                status="completed",
+                result_json=None if result is None else _json_dumps(result),
+                error=None,
+                finished_at=now,
+                updated_at=now,
+            )
         )
 
 
 def _finalize_job_failure(job_id: int, error: str) -> None:
     now = _utc_now()
-    with get_connection() as conn:
-        conn.execute(
-            """
-            UPDATE pipeline_jobs
-            SET status = 'failed',
-                error = ?,
-                finished_at = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (error, now, now, job_id),
+    with get_session() as session:
+        session.execute(
+            update(PipelineJob)
+            .where(PipelineJob.id == job_id)
+            .values(
+                status="failed",
+                error=error,
+                finished_at=now,
+                updated_at=now,
+            )
         )
 
 
@@ -230,38 +231,29 @@ def _worker_loop() -> None:
 
 def enqueue_job(stage: str, *, page_id: int | None, payload: dict[str, Any] | None = None) -> bool:
     payload_json = None if payload is None else _json_dumps(payload)
-    with get_connection() as conn:
+    with get_session() as session:
+        existing_query = select(PipelineJob.id).where(PipelineJob.stage == stage).where(
+            PipelineJob.status.in_(("queued", "running"))
+        )
         if page_id is None:
-            existing = conn.execute(
-                """
-                SELECT 1
-                FROM pipeline_jobs
-                WHERE stage = ? AND page_id IS NULL AND status IN ('queued', 'running')
-                LIMIT 1
-                """,
-                (stage,),
-            ).fetchone()
+            existing_query = existing_query.where(PipelineJob.page_id.is_(None))
         else:
-            existing = conn.execute(
-                """
-                SELECT 1
-                FROM pipeline_jobs
-                WHERE stage = ? AND page_id = ? AND status IN ('queued', 'running')
-                LIMIT 1
-                """,
-                (stage, page_id),
-            ).fetchone()
-
+            existing_query = existing_query.where(PipelineJob.page_id == page_id)
+        existing = session.execute(existing_query.limit(1)).scalar_one_or_none()
         if existing is not None:
             return False
 
         now = _utc_now()
-        conn.execute(
-            """
-            INSERT INTO pipeline_jobs(stage, page_id, status, payload_json, created_at, updated_at)
-            VALUES (?, ?, 'queued', ?, ?, ?)
-            """,
-            (stage, page_id, payload_json, now, now),
+        session.add(
+            PipelineJob(
+                stage=stage,
+                page_id=page_id,
+                status="queued",
+                payload_json=payload_json,
+                created_at=now,
+                updated_at=now,
+                attempts=0,
+            )
         )
 
     emit_event(
@@ -296,17 +288,15 @@ def enqueue_stage_for_pages(
 
 
 def enqueue_layout_detection_for_new_pages() -> dict[str, int]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id
-            FROM pages
-            WHERE is_missing = 0 AND status = 'new'
-            ORDER BY id ASC
-            """
-        ).fetchall()
+    with get_session() as session:
+        rows = session.execute(
+            select(Page.id)
+            .where(Page.is_missing.is_(False))
+            .where(Page.status == "new")
+            .order_by(Page.id.asc())
+        ).scalars().all()
 
-    page_ids = [int(row["id"]) for row in rows]
+    page_ids = [int(row) for row in rows]
     return enqueue_stage_for_pages(
         "layout_detect",
         page_ids=page_ids,
@@ -319,25 +309,20 @@ def _layout_detect_handler(job: dict[str, Any]) -> dict[str, Any]:
     if page_id is None:
         raise ValueError("layout_detect job requires page_id.")
 
-    with get_connection() as conn:
-        page_row = conn.execute(
-            "SELECT id, status, is_missing FROM pages WHERE id = ?",
-            (page_id,),
-        ).fetchone()
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
         if page_row is None:
             raise ValueError("Page not found.")
-        if int(page_row["is_missing"]) == 1:
+        if bool(page_row.is_missing):
             return {"skipped": True, "reason": "page is missing"}
 
-        current_status = str(page_row["status"])
+        current_status = str(page_row.status)
         if current_status not in {"new", "layout_detecting"}:
             return {"skipped": True, "reason": f"page status is {current_status}"}
 
         now = _utc_now()
-        conn.execute(
-            "UPDATE pages SET status = 'layout_detecting', updated_at = ? WHERE id = ?",
-            (now, page_id),
-        )
+        page_row.status = "layout_detecting"
+        page_row.updated_at = now
 
     try:
         return detect_layouts_for_page(
@@ -347,11 +332,11 @@ def _layout_detect_handler(job: dict[str, Any]) -> dict[str, Any]:
             iou_threshold=None,
         )
     except Exception:
-        with get_connection() as conn:
-            conn.execute(
-                "UPDATE pages SET status = 'new', updated_at = ? WHERE id = ? AND is_missing = 0",
-                (_utc_now(), page_id),
-            )
+        with get_session() as session:
+            page_row = session.get(Page, page_id)
+            if page_row is not None and not bool(page_row.is_missing):
+                page_row.status = "new"
+                page_row.updated_at = _utc_now()
         raise
 
 
@@ -360,117 +345,121 @@ def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
     if page_id is None:
         raise ValueError("ocr_extract job requires page_id.")
 
-    with get_connection() as conn:
-        page_row = conn.execute(
-            "SELECT id, status, is_missing FROM pages WHERE id = ?",
-            (page_id,),
-        ).fetchone()
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
         if page_row is None:
             raise ValueError("Page not found.")
-        if int(page_row["is_missing"]) == 1:
+        if bool(page_row.is_missing):
             return {"skipped": True, "reason": "page is missing"}
 
-        current_status = str(page_row["status"])
+        current_status = str(page_row.status)
         if current_status not in {"layout_reviewed", "ocr_extracting", "ocr_failed"}:
             return {"skipped": True, "reason": f"page status is {current_status}"}
 
-        conn.execute(
-            "UPDATE pages SET status = 'ocr_extracting', updated_at = ? WHERE id = ?",
-            (_utc_now(), page_id),
-        )
+        page_row.status = "ocr_extracting"
+        page_row.updated_at = _utc_now()
 
     try:
         return extract_ocr_for_page(page_id)
     except Exception:
-        with get_connection() as conn:
-            conn.execute(
-                "UPDATE pages SET status = 'ocr_failed', updated_at = ? WHERE id = ? AND is_missing = 0",
-                (_utc_now(), page_id),
-            )
+        with get_session() as session:
+            page_row = session.get(Page, page_id)
+            if page_row is not None and not bool(page_row.is_missing):
+                page_row.status = "ocr_failed"
+                page_row.updated_at = _utc_now()
         raise
 
 
 def get_activity_snapshot(*, limit: int = 30) -> dict[str, Any]:
     safe_limit = max(1, min(limit, 200))
-    with get_connection() as conn:
-        running_row = conn.execute(
-            """
-            SELECT j.id, j.stage, j.page_id, j.started_at, j.attempts, p.rel_path
-            FROM pipeline_jobs j
-            LEFT JOIN pages p ON p.id = j.page_id
-            WHERE j.status = 'running'
-            ORDER BY j.started_at ASC, j.id ASC
-            LIMIT 1
-            """
-        ).fetchone()
+    with get_session() as session:
+        running_row = session.execute(
+            select(
+                PipelineJob.id,
+                PipelineJob.stage,
+                PipelineJob.page_id,
+                PipelineJob.started_at,
+                PipelineJob.attempts,
+                Page.rel_path,
+            )
+            .outerjoin(Page, Page.id == PipelineJob.page_id)
+            .where(PipelineJob.status == "running")
+            .order_by(PipelineJob.started_at.asc(), PipelineJob.id.asc())
+            .limit(1)
+        ).first()
 
-        queued_rows = conn.execute(
-            """
-            SELECT j.id, j.stage, j.page_id, j.created_at, p.rel_path
-            FROM pipeline_jobs j
-            LEFT JOIN pages p ON p.id = j.page_id
-            WHERE j.status = 'queued'
-            ORDER BY j.id ASC
-            LIMIT 15
-            """
-        ).fetchall()
+        queued_rows = session.execute(
+            select(
+                PipelineJob.id,
+                PipelineJob.stage,
+                PipelineJob.page_id,
+                PipelineJob.created_at,
+                Page.rel_path,
+            )
+            .outerjoin(Page, Page.id == PipelineJob.page_id)
+            .where(PipelineJob.status == "queued")
+            .order_by(PipelineJob.id.asc())
+            .limit(15)
+        ).all()
 
-        queued_by_stage_rows = conn.execute(
-            """
-            SELECT stage, COUNT(*) AS count
-            FROM pipeline_jobs
-            WHERE status = 'queued'
-            GROUP BY stage
-            ORDER BY stage
-            """
-        ).fetchall()
+        queued_by_stage_rows = session.execute(
+            select(PipelineJob.stage, func.count(PipelineJob.id))
+            .where(PipelineJob.status == "queued")
+            .group_by(PipelineJob.stage)
+            .order_by(PipelineJob.stage)
+        ).all()
 
-        events_rows = conn.execute(
-            """
-            SELECT e.id, e.ts, e.stage, e.event_type, e.page_id, e.message, e.data_json, p.rel_path
-            FROM pipeline_events e
-            LEFT JOIN pages p ON p.id = e.page_id
-            ORDER BY e.id DESC
-            LIMIT ?
-            """,
-            (safe_limit,),
-        ).fetchall()
+        events_rows = session.execute(
+            select(
+                PipelineEvent.id,
+                PipelineEvent.ts,
+                PipelineEvent.stage,
+                PipelineEvent.event_type,
+                PipelineEvent.page_id,
+                PipelineEvent.message,
+                PipelineEvent.data_json,
+                Page.rel_path,
+            )
+            .outerjoin(Page, Page.id == PipelineEvent.page_id)
+            .order_by(PipelineEvent.id.desc())
+            .limit(safe_limit)
+        ).all()
 
     running = (
         None
         if running_row is None
         else {
-            "job_id": int(running_row["id"]),
-            "stage": running_row["stage"],
-            "page_id": None if running_row["page_id"] is None else int(running_row["page_id"]),
-            "rel_path": running_row["rel_path"],
-            "started_at": running_row["started_at"],
-            "attempts": int(running_row["attempts"]),
+            "job_id": int(running_row[0]),
+            "stage": running_row[1],
+            "page_id": None if running_row[2] is None else int(running_row[2]),
+            "rel_path": running_row[5],
+            "started_at": running_row[3],
+            "attempts": int(running_row[4]),
         }
     )
 
     queued_preview = [
         {
-            "job_id": int(row["id"]),
-            "stage": row["stage"],
-            "page_id": None if row["page_id"] is None else int(row["page_id"]),
-            "rel_path": row["rel_path"],
-            "created_at": row["created_at"],
+            "job_id": int(row[0]),
+            "stage": row[1],
+            "page_id": None if row[2] is None else int(row[2]),
+            "rel_path": row[4],
+            "created_at": row[3],
         }
         for row in queued_rows
     ]
-    queued_by_stage = {row["stage"]: int(row["count"]) for row in queued_by_stage_rows}
+    queued_by_stage = {str(stage): int(count) for stage, count in queued_by_stage_rows}
 
     recent_events = [
         {
-            "id": int(row["id"]),
-            "ts": row["ts"],
-            "stage": row["stage"],
-            "event_type": row["event_type"],
-            "page_id": None if row["page_id"] is None else int(row["page_id"]),
-            "rel_path": row["rel_path"],
-            "message": row["message"],
-            "data": _json_loads(row["data_json"]),
+            "id": int(row[0]),
+            "ts": row[1],
+            "stage": row[2],
+            "event_type": row[3],
+            "page_id": None if row[4] is None else int(row[4]),
+            "rel_path": row[7],
+            "message": row[5],
+            "data": _json_loads(row[6]),
         }
         for row in reversed(events_rows)
     ]

@@ -5,10 +5,13 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-import sqlite3
+
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 from .config import settings
-from .db import get_connection
+from .db import get_session
+from .models import DuplicateFile, Page
 
 
 @dataclass
@@ -54,14 +57,14 @@ def _scan_file_hashes() -> list[tuple[str, str]]:
     return scanned
 
 
-def _fetch_pages_by_hash(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
-    rows = conn.execute("SELECT * FROM pages").fetchall()
-    return {row["file_hash"]: row for row in rows}
+def _fetch_pages_by_hash(session: Session) -> dict[str, Page]:
+    rows = session.execute(select(Page)).scalars().all()
+    return {str(row.file_hash): row for row in rows}
 
 
-def _fetch_pages_by_rel_path(conn: sqlite3.Connection) -> dict[str, sqlite3.Row]:
-    rows = conn.execute("SELECT * FROM pages").fetchall()
-    return {row["rel_path"]: row for row in rows}
+def _fetch_pages_by_rel_path(session: Session) -> dict[str, Page]:
+    rows = session.execute(select(Page)).scalars().all()
+    return {str(row.rel_path): row for row in rows}
 
 
 def discover_images() -> ScanSummary:
@@ -77,11 +80,11 @@ def discover_images() -> ScanSummary:
     updated_pages = 0
     duplicate_files = 0
 
-    with get_connection() as conn:
-        conn.execute("UPDATE duplicate_files SET active = 0")
+    with get_session() as session:
+        session.execute(update(DuplicateFile).values(active=False))
 
-        pages_by_hash = _fetch_pages_by_hash(conn)
-        pages_by_rel_path = _fetch_pages_by_rel_path(conn)
+        pages_by_hash = _fetch_pages_by_hash(session)
+        pages_by_rel_path = _fetch_pages_by_rel_path(session)
 
         seen_page_ids: set[int] = set()
 
@@ -91,100 +94,87 @@ def discover_images() -> ScanSummary:
 
             page_row = pages_by_hash.get(file_hash)
             if page_row is not None:
-                conn.execute(
-                    """
-                    UPDATE pages
-                    SET rel_path = ?, updated_at = ?, last_seen_at = ?, is_missing = 0
-                    WHERE id = ?
-                    """,
-                    (canonical_rel_path, now, now, page_row["id"]),
-                )
-                page_id = int(page_row["id"])
+                old_rel_path = str(page_row.rel_path)
+                page_row.rel_path = canonical_rel_path
+                page_row.updated_at = now
+                page_row.last_seen_at = now
+                page_row.is_missing = False
+                page_id = int(page_row.id)
                 updated_pages += 1
+
+                if old_rel_path != canonical_rel_path:
+                    pages_by_rel_path.pop(old_rel_path, None)
+                pages_by_rel_path[canonical_rel_path] = page_row
             else:
                 existing_path_row = pages_by_rel_path.get(canonical_rel_path)
                 if existing_path_row is not None:
-                    conn.execute(
-                        """
-                        UPDATE pages
-                        SET file_hash = ?, updated_at = ?, last_seen_at = ?, is_missing = 0
-                        WHERE id = ?
-                        """,
-                        (file_hash, now, now, existing_path_row["id"]),
-                    )
-                    page_id = int(existing_path_row["id"])
+                    old_hash = str(existing_path_row.file_hash)
+                    existing_path_row.file_hash = file_hash
+                    existing_path_row.updated_at = now
+                    existing_path_row.last_seen_at = now
+                    existing_path_row.is_missing = False
+                    page_id = int(existing_path_row.id)
                     updated_pages += 1
+
+                    if old_hash != file_hash:
+                        pages_by_hash.pop(old_hash, None)
+                    pages_by_hash[file_hash] = existing_path_row
                 else:
-                    cursor = conn.execute(
-                        """
-                        INSERT INTO pages(rel_path, file_hash, status, created_at, updated_at, last_seen_at, is_missing)
-                        VALUES (?, ?, 'new', ?, ?, ?, 0)
-                        """,
-                        (canonical_rel_path, file_hash, now, now, now),
+                    page_row = Page(
+                        rel_path=canonical_rel_path,
+                        file_hash=file_hash,
+                        status="new",
+                        created_at=now,
+                        updated_at=now,
+                        last_seen_at=now,
+                        is_missing=False,
                     )
-                    page_id = int(cursor.lastrowid)
+                    session.add(page_row)
+                    session.flush()
+                    page_id = int(page_row.id)
                     new_pages += 1
+                    pages_by_hash[file_hash] = page_row
+                    pages_by_rel_path[canonical_rel_path] = page_row
 
             seen_page_ids.add(page_id)
 
             for duplicate_rel_path in rel_paths[1:]:
                 duplicate_files += 1
-                existing_duplicate = conn.execute(
-                    "SELECT id, first_seen_at FROM duplicate_files WHERE rel_path = ?",
-                    (duplicate_rel_path,),
-                ).fetchone()
+                existing_duplicate = session.execute(
+                    select(DuplicateFile).where(DuplicateFile.rel_path == duplicate_rel_path).limit(1)
+                ).scalar_one_or_none()
 
                 if existing_duplicate is None:
-                    conn.execute(
-                        """
-                        INSERT INTO duplicate_files(
-                            rel_path,
-                            file_hash,
-                            canonical_page_id,
-                            active,
-                            first_seen_at,
-                            last_seen_at
+                    session.add(
+                        DuplicateFile(
+                            rel_path=duplicate_rel_path,
+                            file_hash=file_hash,
+                            canonical_page_id=page_id,
+                            active=True,
+                            first_seen_at=now,
+                            last_seen_at=now,
                         )
-                        VALUES (?, ?, ?, 1, ?, ?)
-                        """,
-                        (duplicate_rel_path, file_hash, page_id, now, now),
                     )
                 else:
-                    conn.execute(
-                        """
-                        UPDATE duplicate_files
-                        SET file_hash = ?,
-                            canonical_page_id = ?,
-                            active = 1,
-                            last_seen_at = ?
-                        WHERE id = ?
-                        """,
-                        (file_hash, page_id, now, existing_duplicate["id"]),
-                    )
+                    existing_duplicate.file_hash = file_hash
+                    existing_duplicate.canonical_page_id = page_id
+                    existing_duplicate.active = True
+                    existing_duplicate.last_seen_at = now
 
         if seen_page_ids:
-            placeholders = ",".join("?" for _ in seen_page_ids)
-            result = conn.execute(
-                f"""
-                UPDATE pages
-                SET is_missing = 1,
-                    updated_at = ?
-                WHERE id NOT IN ({placeholders}) AND is_missing = 0
-                """,
-                (now, *seen_page_ids),
-            )
+            stale_pages = session.execute(
+                select(Page)
+                .where(Page.id.not_in(seen_page_ids))
+                .where(Page.is_missing.is_(False))
+            ).scalars().all()
         else:
-            result = conn.execute(
-                """
-                UPDATE pages
-                SET is_missing = 1,
-                    updated_at = ?
-                WHERE is_missing = 0
-                """,
-                (now,),
-            )
+            stale_pages = session.execute(select(Page).where(Page.is_missing.is_(False))).scalars().all()
 
-        missing_marked = result.rowcount
+        for stale_page in stale_pages:
+            stale_page.is_missing = True
+            stale_page.updated_at = now
+
+        missing_marked = len(stale_pages)
 
     return ScanSummary(
         source_dir=str(settings.source_dir),

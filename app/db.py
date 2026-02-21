@@ -1,204 +1,79 @@
 from __future__ import annotations
 
-import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
+
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from .config import settings
+from .models import Base
+
+_ENGINE: Engine | None = None
+_ENGINE_DB_PATH: Path | None = None
+_SESSION_FACTORY: sessionmaker[Session] | None = None
+
+
+def _database_url(db_path: Path) -> str:
+    return f"sqlite+pysqlite:///{db_path}"
+
+
+def _new_engine(db_path: Path) -> Engine:
+    engine = create_engine(
+        _database_url(db_path),
+        future=True,
+        connect_args={"check_same_thread": False},
+    )
+
+    @event.listens_for(engine, "connect")
+    def _on_connect(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON;")
+        cursor.execute("PRAGMA journal_mode=WAL;")
+        cursor.close()
+
+    return engine
+
+
+def get_engine() -> Engine:
+    global _ENGINE, _ENGINE_DB_PATH, _SESSION_FACTORY
+
+    db_path = settings.db_path.resolve()
+    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if _ENGINE is not None and _ENGINE_DB_PATH == db_path and _SESSION_FACTORY is not None:
+        return _ENGINE
+
+    if _ENGINE is not None:
+        _ENGINE.dispose()
+
+    _ENGINE = _new_engine(db_path)
+    _ENGINE_DB_PATH = db_path
+    _SESSION_FACTORY = sessionmaker(bind=_ENGINE, autoflush=False, expire_on_commit=False, future=True)
+    return _ENGINE
+
+
+def _get_session_factory() -> sessionmaker[Session]:
+    get_engine()
+    if _SESSION_FACTORY is None:
+        raise RuntimeError("Session factory is not initialized.")
+    return _SESSION_FACTORY
 
 
 @contextmanager
-def get_connection() -> sqlite3.Connection:
-    settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(settings.db_path)
-    connection.row_factory = sqlite3.Row
+def get_session() -> Session:
+    session = _get_session_factory()()
     try:
-        yield connection
-        connection.commit()
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
-        connection.close()
+        session.close()
 
 
 def init_db() -> None:
-    with get_connection() as conn:
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA foreign_keys=ON;")
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS pages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                rel_path TEXT NOT NULL UNIQUE,
-                file_hash TEXT NOT NULL UNIQUE,
-                status TEXT NOT NULL DEFAULT 'new',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL,
-                is_missing INTEGER NOT NULL DEFAULT 0 CHECK (is_missing IN (0, 1))
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS duplicate_files (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                rel_path TEXT NOT NULL UNIQUE,
-                file_hash TEXT NOT NULL,
-                canonical_page_id INTEGER NOT NULL,
-                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-                first_seen_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL,
-                FOREIGN KEY(canonical_page_id) REFERENCES pages(id)
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS layouts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                page_id INTEGER NOT NULL,
-                class_name TEXT NOT NULL,
-                x1 REAL NOT NULL,
-                y1 REAL NOT NULL,
-                x2 REAL NOT NULL,
-                y2 REAL NOT NULL,
-                reading_order INTEGER NOT NULL,
-                confidence REAL,
-                source TEXT NOT NULL DEFAULT 'manual',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS caption_bindings (
-                caption_layout_id INTEGER NOT NULL,
-                target_layout_id INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(caption_layout_id, target_layout_id),
-                FOREIGN KEY(caption_layout_id) REFERENCES layouts(id) ON DELETE CASCADE,
-                FOREIGN KEY(target_layout_id) REFERENCES layouts(id) ON DELETE CASCADE
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_pages_status
-            ON pages(status)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_duplicate_files_active
-            ON duplicate_files(active)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_layouts_page_order
-            ON layouts(page_id, reading_order)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_caption_bindings_caption
-            ON caption_bindings(caption_layout_id)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_caption_bindings_target
-            ON caption_bindings(target_layout_id)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS ocr_outputs (
-                layout_id INTEGER PRIMARY KEY,
-                page_id INTEGER NOT NULL,
-                class_name TEXT NOT NULL,
-                output_format TEXT NOT NULL,
-                content TEXT NOT NULL,
-                model_name TEXT NOT NULL,
-                key_alias TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE,
-                FOREIGN KEY(layout_id) REFERENCES layouts(id) ON DELETE CASCADE
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_ocr_outputs_page
-            ON ocr_outputs(page_id)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS pipeline_jobs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                stage TEXT NOT NULL,
-                page_id INTEGER,
-                status TEXT NOT NULL,
-                payload_json TEXT,
-                result_json TEXT,
-                error TEXT,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                started_at TEXT,
-                finished_at TEXT,
-                FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE CASCADE
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS pipeline_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ts TEXT NOT NULL,
-                stage TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                page_id INTEGER,
-                message TEXT NOT NULL,
-                data_json TEXT,
-                FOREIGN KEY(page_id) REFERENCES pages(id) ON DELETE SET NULL
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_status_stage
-            ON pipeline_jobs(status, stage, id)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_stage_page_status
-            ON pipeline_jobs(stage, page_id, status)
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_pipeline_events_stage_ts
-            ON pipeline_events(stage, ts DESC)
-            """
-        )
+    engine = get_engine()
+    Base.metadata.create_all(bind=engine)

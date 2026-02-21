@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 import json
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import delete, func, select
 
 from .config import settings
-from .db import get_connection, init_db
+from .db import get_session, init_db
 from .discovery import discover_images
 from .layouts import (
     create_layout,
@@ -22,6 +24,8 @@ from .layouts import (
     replace_caption_bindings,
     update_layout,
 )
+from .ocr_extract import extract_ocr_for_page
+from .models import DuplicateFile, Layout, Page, PipelineEvent, PipelineJob
 from .pipeline_runtime import (
     emit_event,
     enqueue_job,
@@ -89,15 +93,21 @@ app = FastAPI(title="OCR Pipeline", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
+def _utc_now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 def _discovery_source_info() -> tuple[str, list[str]]:
     return str(settings.source_dir), list(settings.allowed_extensions)
 
 
 def _pipeline_stats_snapshot() -> dict[str, int]:
-    with get_connection() as conn:
-        total_pages = int(conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0])
-        missing_pages = int(conn.execute("SELECT COUNT(*) FROM pages WHERE is_missing = 1").fetchone()[0])
-        active_duplicate_files = int(conn.execute("SELECT COUNT(*) FROM duplicate_files WHERE active = 1").fetchone()[0])
+    with get_session() as session:
+        total_pages = int(session.query(Page).count())
+        missing_pages = int(session.query(Page).filter(Page.is_missing.is_(True)).count())
+        active_duplicate_files = int(
+            session.query(DuplicateFile).filter(DuplicateFile.active.is_(True)).count()
+        )
     return {
         "total_pages": total_pages,
         "missing_pages": missing_pages,
@@ -226,25 +236,19 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
         message="Pipeline state wipe started.",
     )
 
-    with get_connection() as conn:
+    with get_session() as session:
         counts = {
-            "pages": int(conn.execute("SELECT COUNT(*) FROM pages").fetchone()[0]),
-            "layouts": int(conn.execute("SELECT COUNT(*) FROM layouts").fetchone()[0]),
-            "duplicates": int(conn.execute("SELECT COUNT(*) FROM duplicate_files").fetchone()[0]),
-            "pipeline_jobs": int(conn.execute("SELECT COUNT(*) FROM pipeline_jobs").fetchone()[0]),
-            "pipeline_events": int(conn.execute("SELECT COUNT(*) FROM pipeline_events").fetchone()[0]),
+            "pages": int(session.query(Page).count()),
+            "layouts": int(session.query(Layout).count()),
+            "duplicates": int(session.query(DuplicateFile).count()),
+            "pipeline_jobs": int(session.query(PipelineJob).count()),
+            "pipeline_events": int(session.query(PipelineEvent).count()),
         }
-        conn.execute("DELETE FROM pipeline_events")
-        conn.execute("DELETE FROM pipeline_jobs")
-        conn.execute("DELETE FROM duplicate_files")
-        conn.execute("DELETE FROM layouts")
-        conn.execute("DELETE FROM pages")
-        conn.execute(
-            """
-            DELETE FROM sqlite_sequence
-            WHERE name IN ('pages', 'duplicate_files', 'layouts', 'pipeline_jobs', 'pipeline_events')
-            """
-        )
+        session.execute(delete(PipelineEvent))
+        session.execute(delete(PipelineJob))
+        session.execute(delete(DuplicateFile))
+        session.execute(delete(Layout))
+        session.execute(delete(Page))
 
     rescan_summary: dict[str, int | str] | None = None
     auto_layout_detection: dict[str, int] | None = None
@@ -305,24 +309,18 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
 
 @app.get("/api/pages")
 def list_pages() -> dict[str, object]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, rel_path, status, is_missing, created_at, updated_at, last_seen_at
-            FROM pages
-            ORDER BY rel_path
-            """
-        ).fetchall()
+    with get_session() as session:
+        rows = session.execute(select(Page).order_by(Page.rel_path.asc())).scalars().all()
 
     pages = [
         {
-            "id": int(row["id"]),
-            "rel_path": row["rel_path"],
-            "status": row["status"],
-            "is_missing": bool(row["is_missing"]),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-            "last_seen_at": row["last_seen_at"],
+            "id": int(row.id),
+            "rel_path": row.rel_path,
+            "status": row.status,
+            "is_missing": bool(row.is_missing),
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+            "last_seen_at": row.last_seen_at,
         }
         for row in rows
     ]
@@ -383,17 +381,14 @@ def page_layouts(page_id: int) -> dict[str, object]:
 
 @app.get("/api/layout-review/next")
 def next_layout_review_page_global() -> dict[str, object]:
-    with get_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT id, rel_path
-            FROM pages
-            WHERE is_missing = 0
-              AND status = 'layout_detected'
-            ORDER BY id ASC
-            LIMIT 1
-            """
-        ).fetchone()
+    with get_session() as session:
+        row = session.execute(
+            select(Page.id, Page.rel_path)
+            .where(Page.is_missing.is_(False))
+            .where(Page.status == "layout_detected")
+            .order_by(Page.id.asc())
+            .limit(1)
+        ).first()
 
     if row is None:
         return {
@@ -404,24 +399,21 @@ def next_layout_review_page_global() -> dict[str, object]:
 
     return {
         "has_next": True,
-        "next_page_id": int(row["id"]),
-        "next_page_rel_path": row["rel_path"],
+        "next_page_id": int(row[0]),
+        "next_page_rel_path": row[1],
     }
 
 
 @app.get("/api/ocr-review/next")
 def next_ocr_review_page_global() -> dict[str, object]:
-    with get_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT id, rel_path
-            FROM pages
-            WHERE is_missing = 0
-              AND status = 'ocr_done'
-            ORDER BY id ASC
-            LIMIT 1
-            """
-        ).fetchone()
+    with get_session() as session:
+        row = session.execute(
+            select(Page.id, Page.rel_path)
+            .where(Page.is_missing.is_(False))
+            .where(Page.status == "ocr_done")
+            .order_by(Page.id.asc())
+            .limit(1)
+        ).first()
 
     if row is None:
         return {
@@ -432,8 +424,8 @@ def next_ocr_review_page_global() -> dict[str, object]:
 
     return {
         "has_next": True,
-        "next_page_id": int(row["id"]),
-        "next_page_rel_path": row["rel_path"],
+        "next_page_id": int(row[0]),
+        "next_page_rel_path": row[1],
     }
 
 
@@ -443,32 +435,24 @@ def next_layout_review_page(page_id: int) -> dict[str, object]:
     if page is None:
         raise HTTPException(status_code=404, detail="Page not found.")
 
-    with get_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT id, rel_path
-            FROM pages
-            WHERE is_missing = 0
-              AND status = 'layout_detected'
-              AND id > ?
-            ORDER BY id ASC
-            LIMIT 1
-            """,
-            (page_id,),
-        ).fetchone()
+    with get_session() as session:
+        row = session.execute(
+            select(Page.id, Page.rel_path)
+            .where(Page.is_missing.is_(False))
+            .where(Page.status == "layout_detected")
+            .where(Page.id > page_id)
+            .order_by(Page.id.asc())
+            .limit(1)
+        ).first()
         if row is None:
-            row = conn.execute(
-                """
-                SELECT id, rel_path
-                FROM pages
-                WHERE is_missing = 0
-                  AND status = 'layout_detected'
-                  AND id < ?
-                ORDER BY id ASC
-                LIMIT 1
-                """,
-                (page_id,),
-            ).fetchone()
+            row = session.execute(
+                select(Page.id, Page.rel_path)
+                .where(Page.is_missing.is_(False))
+                .where(Page.status == "layout_detected")
+                .where(Page.id < page_id)
+                .order_by(Page.id.asc())
+                .limit(1)
+            ).first()
 
     if row is None:
         return {
@@ -479,8 +463,8 @@ def next_layout_review_page(page_id: int) -> dict[str, object]:
 
     return {
         "has_next": True,
-        "next_page_id": int(row["id"]),
-        "next_page_rel_path": row["rel_path"],
+        "next_page_id": int(row[0]),
+        "next_page_rel_path": row[1],
     }
 
 
@@ -490,32 +474,24 @@ def next_ocr_review_page(page_id: int) -> dict[str, object]:
     if page is None:
         raise HTTPException(status_code=404, detail="Page not found.")
 
-    with get_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT id, rel_path
-            FROM pages
-            WHERE is_missing = 0
-              AND status = 'ocr_done'
-              AND id > ?
-            ORDER BY id ASC
-            LIMIT 1
-            """,
-            (page_id,),
-        ).fetchone()
+    with get_session() as session:
+        row = session.execute(
+            select(Page.id, Page.rel_path)
+            .where(Page.is_missing.is_(False))
+            .where(Page.status == "ocr_done")
+            .where(Page.id > page_id)
+            .order_by(Page.id.asc())
+            .limit(1)
+        ).first()
         if row is None:
-            row = conn.execute(
-                """
-                SELECT id, rel_path
-                FROM pages
-                WHERE is_missing = 0
-                  AND status = 'ocr_done'
-                  AND id < ?
-                ORDER BY id ASC
-                LIMIT 1
-                """,
-                (page_id,),
-            ).fetchone()
+            row = session.execute(
+                select(Page.id, Page.rel_path)
+                .where(Page.is_missing.is_(False))
+                .where(Page.status == "ocr_done")
+                .where(Page.id < page_id)
+                .order_by(Page.id.asc())
+                .limit(1)
+            ).first()
 
     if row is None:
         return {
@@ -526,8 +502,8 @@ def next_ocr_review_page(page_id: int) -> dict[str, object]:
 
     return {
         "has_next": True,
-        "next_page_id": int(row["id"]),
-        "next_page_rel_path": row["rel_path"],
+        "next_page_id": int(row[0]),
+        "next_page_rel_path": row[1],
     }
 
 
@@ -745,6 +721,67 @@ def complete_ocr_review(page_id: int) -> dict[str, object]:
     return result
 
 
+@app.post("/api/pages/{page_id}/ocr/reextract")
+def reextract_ocr(page_id: int) -> dict[str, object]:
+    page = get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
+        if page_row is None:
+            raise HTTPException(status_code=404, detail="Page not found.")
+        if bool(page_row.is_missing):
+            raise HTTPException(status_code=400, detail="Page is marked as missing.")
+
+        current_status = str(page_row.status)
+        if current_status not in {"layout_reviewed", "ocr_done", "ocr_reviewed", "ocr_failed"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Page status must allow OCR extraction (got {current_status}).",
+            )
+
+        page_row.status = "ocr_extracting"
+        page_row.updated_at = _utc_now()
+
+    emit_event(
+        stage="ocr_extract",
+        event_type="job_started",
+        page_id=page_id,
+        message="Manual OCR reextraction started.",
+        data={"trigger": "manual_reextract"},
+    )
+    try:
+        result = extract_ocr_for_page(page_id)
+    except Exception as error:
+        with get_session() as session:
+            page_row = session.get(Page, page_id)
+            if page_row is not None and not bool(page_row.is_missing):
+                page_row.status = "ocr_failed"
+                page_row.updated_at = _utc_now()
+        emit_event(
+            stage="ocr_extract",
+            event_type="job_failed",
+            page_id=page_id,
+            message=f"Manual OCR reextraction failed: {error}",
+            data={"trigger": "manual_reextract"},
+        )
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    emit_event(
+        stage="ocr_extract",
+        event_type="job_completed",
+        page_id=page_id,
+        message=(
+            f"Manual OCR reextraction completed. "
+            f"Extracted {result['extracted_count']}, skipped {result['skipped_count']}, "
+            f"Gemini requests {result['requests_count']}."
+        ),
+        data={"trigger": "manual_reextract", "result": result},
+    )
+    return result
+
+
 @app.get("/api/pipeline/activity")
 def pipeline_activity(limit: int = 30) -> dict[str, object]:
     register_default_handlers()
@@ -777,29 +814,27 @@ async def pipeline_activity_stream(request: Request, limit: int = 30) -> Streami
 
 @app.get("/api/duplicates")
 def list_duplicates() -> dict[str, object]:
-    with get_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                d.rel_path AS duplicate_rel_path,
-                d.file_hash,
-                d.first_seen_at,
-                d.last_seen_at,
-                p.rel_path AS canonical_rel_path
-            FROM duplicate_files d
-            JOIN pages p ON p.id = d.canonical_page_id
-            WHERE d.active = 1
-            ORDER BY d.rel_path
-            """
-        ).fetchall()
+    with get_session() as session:
+        rows = session.execute(
+            select(
+                DuplicateFile.rel_path,
+                DuplicateFile.file_hash,
+                DuplicateFile.first_seen_at,
+                DuplicateFile.last_seen_at,
+                Page.rel_path,
+            )
+            .join(Page, Page.id == DuplicateFile.canonical_page_id)
+            .where(DuplicateFile.active.is_(True))
+            .order_by(DuplicateFile.rel_path.asc())
+        ).all()
 
     duplicates = [
         {
-            "duplicate_rel_path": row["duplicate_rel_path"],
-            "canonical_rel_path": row["canonical_rel_path"],
-            "file_hash": row["file_hash"],
-            "first_seen_at": row["first_seen_at"],
-            "last_seen_at": row["last_seen_at"],
+            "duplicate_rel_path": row[0],
+            "canonical_rel_path": row[4],
+            "file_hash": row[1],
+            "first_seen_at": row[2],
+            "last_seen_at": row[3],
         }
         for row in rows
     ]

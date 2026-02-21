@@ -3,7 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>OCR review</title>
+    <title>OCR review | OCR benchmark pipeline</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
     <style>
       :root {
         --bg: #f3f1eb;
@@ -485,22 +486,20 @@
   <body>
     <main>
       <nav class="nav-strip" aria-label="Navigation">
-        <a class="back-nav" href="/" aria-label="Back to dashboard" title="Back to dashboard">
-          <svg class="nav-icon" viewBox="0 0 24 24" focusable="false">
-            <path d="m14 6-6 6 6 6"></path>
-            <path d="M20 12H8"></path>
+        <a class="back-nav" href="/" aria-label="Back to Dashboard" title="Back to Dashboard">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M10 7 5 12l5 5"></path>
+            <path d="M5 12h9a5 5 0 0 0 0-10h-2"></path>
           </svg>
         </a>
         <button id="history-back-btn" class="history-nav-btn" type="button" aria-label="Previous reviewed page" title="Previous reviewed page" disabled>
-          <svg class="nav-icon" viewBox="0 0 24 24" focusable="false">
-            <path d="m14 6-6 6 6 6"></path>
-            <path d="M20 12H8"></path>
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m15 18-6-6 6-6"></path>
           </svg>
         </button>
         <button id="history-forth-btn" class="history-nav-btn" type="button" aria-label="Next page for OCR review" title="Next page for OCR review" disabled>
-          <svg class="nav-icon" viewBox="0 0 24 24" focusable="false">
-            <path d="m10 6 6 6-6 6"></path>
-            <path d="M4 12h12"></path>
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m9 6 6 6-6 6"></path>
           </svg>
         </button>
       </nav>
@@ -519,6 +518,7 @@
             <button id="toggle-reconstructed-btn" class="toggle-btn active" type="button" aria-pressed="true">Reconstructed</button>
             <button id="toggle-content-btn" class="toggle-btn active" type="button" aria-pressed="true">Content</button>
           </div>
+          <button id="reextract-btn" type="button">Detect again</button>
           <button id="review-btn" type="button">Mark reviewed</button>
         </div>
       </section>
@@ -601,6 +601,7 @@
       const FALLBACK_COLORS = ["#4e6f8f", "#7c5f90", "#3f7b69", "#8d6a3b", "#82605b", "#537987", "#6e6b3f"];
 
       const reviewBtn = document.getElementById("review-btn");
+      const reextractBtn = document.getElementById("reextract-btn");
       const toggleSourceBtn = document.getElementById("toggle-source-btn");
       const toggleReconstructedBtn = document.getElementById("toggle-reconstructed-btn");
       const toggleContentBtn = document.getElementById("toggle-content-btn");
@@ -630,6 +631,7 @@
         localEditsByLayoutId: {},
         selectedLayoutId: null,
         reviewSubmitInProgress: false,
+        reextractInProgress: false,
         history: [],
         historyIndex: -1,
         panelVisibility: {
@@ -751,6 +753,13 @@
         return normalized.charAt(0).toUpperCase() + normalized.slice(1);
       }
 
+      function formatStatusLabel(value) {
+        return String(value || "")
+          .replace(/_/g, " ")
+          .trim()
+          .toUpperCase();
+      }
+
       function hashString(value) {
         let hash = 0;
         for (let i = 0; i < value.length; i += 1) {
@@ -788,16 +797,16 @@
         }
         reviewStateBadge.hidden = false;
         if (status === "ocr_done") {
-          reviewStateBadge.textContent = "Needs review";
+          reviewStateBadge.textContent = "NEEDS REVIEW";
           reviewStateBadge.classList.add("needs-review");
           return;
         }
         if (status === "ocr_reviewed") {
-          reviewStateBadge.textContent = "Reviewed";
+          reviewStateBadge.textContent = "REVIEWED";
           reviewStateBadge.classList.add("reviewed");
           return;
         }
-        reviewStateBadge.textContent = formatClassLabel(status);
+        reviewStateBadge.textContent = formatStatusLabel(status);
         reviewStateBadge.classList.add("unknown");
       }
 
@@ -808,8 +817,13 @@
           reviewBtn.disabled = true;
           return;
         }
+        if (state.reextractInProgress) {
+          reviewBtn.textContent = "Mark reviewed";
+          reviewBtn.disabled = true;
+          return;
+        }
         if (alreadyReviewed && !hasDraftChanges()) {
-          reviewBtn.textContent = "Reviewed";
+          reviewBtn.textContent = "REVIEWED";
           reviewBtn.disabled = true;
           return;
         }
@@ -817,9 +831,20 @@
         reviewBtn.disabled = false;
       }
 
+      function updateReextractButtonState() {
+        if (state.reextractInProgress) {
+        reextractBtn.textContent = "Detecting...";
+          reextractBtn.disabled = true;
+          return;
+        }
+        reextractBtn.textContent = "Detect again";
+        reextractBtn.disabled = state.reviewSubmitInProgress || !Number.isInteger(state.pageId) || state.pageId <= 0;
+      }
+
       function updateReviewUiState() {
         updateReviewBadge();
         updateReviewButtonState();
+        updateReextractButtonState();
       }
 
       function toDraftShape(output) {
@@ -1334,8 +1359,9 @@
 
       async function markReviewed() {
         if (state.reviewSubmitInProgress) return;
+        if (state.reextractInProgress) return;
         state.reviewSubmitInProgress = true;
-        updateReviewButtonState();
+        updateReviewUiState();
         try {
           const changedLayoutIds = Object.keys(state.localEditsByLayoutId)
             .map((value) => Number(value))
@@ -1369,7 +1395,51 @@
           setStatus(`OCR review failed: ${error.message}`, { isError: true });
         } finally {
           state.reviewSubmitInProgress = false;
-          updateReviewButtonState();
+          updateReviewUiState();
+        }
+      }
+
+      async function reextractContent() {
+        if (state.reviewSubmitInProgress || state.reextractInProgress) {
+          return;
+        }
+
+        state.reextractInProgress = true;
+        updateReviewUiState();
+        setStatus("Detecting OCR content...");
+
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        try {
+          const result = await fetchJson(`/api/pages/${state.pageId}/ocr/reextract`, {
+            method: "POST",
+          });
+
+          clearDraftState();
+          await loadPageData();
+          renderHeaderMeta();
+          renderOutputs();
+          renderOverlay();
+
+          if (
+            Number.isInteger(selectedLayoutId) &&
+            selectedLayoutId > 0 &&
+            state.outputs.some((output) => Number(output.layout_id) === selectedLayoutId)
+          ) {
+            selectOutput(selectedLayoutId, { scrollImageToLayout: true });
+          } else if (state.outputs.length > 0) {
+            selectOutput(state.outputs[0].layout_id, { scrollImageToLayout: true });
+          }
+          updateReviewUiState();
+          await loadForthAvailability();
+
+          setStatus(
+            `Reextraction finished. Extracted: ${result.extracted_count}, skipped: ${result.skipped_count}, requests: ${result.requests_count}.`,
+          );
+        } catch (error) {
+          setStatus(`Reextraction failed: ${error.message}`, { isError: true });
+        } finally {
+          state.reextractInProgress = false;
+          updateReviewUiState();
         }
       }
 
@@ -1446,6 +1516,7 @@
       toggleReconstructedBtn.addEventListener("click", () => togglePanel("reconstructed"));
       toggleContentBtn.addEventListener("click", () => togglePanel("content"));
 
+      reextractBtn.addEventListener("click", reextractContent);
       reviewBtn.addEventListener("click", markReviewed);
 
       pageImage.addEventListener("load", () => {
