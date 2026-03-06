@@ -14,7 +14,7 @@ from .db import get_session
 from .models import CaptionBinding, Layout, Page
 
 DOC_LAYOUTNET_REPO_ID = "hantian/yolo-doclaynet"
-DOC_LAYOUTNET_CHECKPOINT = "yolov10b-doclaynet.pt"
+DOC_LAYOUTNET_CHECKPOINT = "yolo26m-doclaynet.pt"
 DOC_LAYOUTNET_DEFAULT_IMGSZ = 1024
 DOC_LAYOUTNET_DEFAULT_CONF = 0.25
 DOC_LAYOUTNET_DEFAULT_IOU = 0.45

@@ -67,6 +67,28 @@
         gap: 8px;
       }
 
+      .runtime-options {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 18px;
+        margin-top: 12px;
+      }
+
+      .runtime-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .runtime-toggle input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: var(--accent);
+      }
+
       .pipeline-separator {
         width: 44px;
         height: 30px;
@@ -400,6 +422,16 @@
               <button id="export-final-btn" type="button" disabled>Export</button>
             </div>
           </div>
+          <div class="runtime-options" role="group" aria-label="Runtime automation options">
+            <label class="runtime-toggle" for="auto-detect-layouts-toggle">
+              <input id="auto-detect-layouts-toggle" type="checkbox" />
+              <span>Auto-detect layouts after discovery</span>
+            </label>
+            <label class="runtime-toggle" for="auto-extract-text-toggle">
+              <input id="auto-extract-text-toggle" type="checkbox" />
+              <span>Auto-extract text after layout review</span>
+            </label>
+          </div>
         </div>
         <button id="wipe-btn" class="danger-btn" type="button">Wipe DB state</button>
       </section>
@@ -493,6 +525,8 @@
       const reviewLayoutsBtn = document.getElementById("review-layouts-btn");
       const reviewOcrBtn = document.getElementById("review-ocr-btn");
       const exportFinalBtn = document.getElementById("export-final-btn");
+      const autoDetectLayoutsToggle = document.getElementById("auto-detect-layouts-toggle");
+      const autoExtractTextToggle = document.getElementById("auto-extract-text-toggle");
       const wipeBtn = document.getElementById("wipe-btn");
       const wipeModal = document.getElementById("wipe-modal");
       const wipeConfirmInput = document.getElementById("wipe-confirm-input");
@@ -516,6 +550,11 @@
       let activityStream = null;
       let streamReconnectTimer = null;
       let lastProcessedEventId = 0;
+      let runtimeOptions = {
+        enable_background_jobs: true,
+        auto_detect_layouts_after_discovery: false,
+        auto_extract_text_after_layout_review: false,
+      };
       const DATE_LOCALE = "en-GB";
       const DATE_TIME_FORMAT = {
         year: "numeric",
@@ -567,6 +606,23 @@
           .replace(/_/g, " ")
           .trim()
           .toUpperCase();
+      }
+
+      function applyRuntimeOptions(options) {
+        runtimeOptions = {
+          enable_background_jobs: Boolean(options?.enable_background_jobs),
+          auto_detect_layouts_after_discovery: Boolean(options?.auto_detect_layouts_after_discovery),
+          auto_extract_text_after_layout_review: Boolean(options?.auto_extract_text_after_layout_review),
+        };
+
+        autoDetectLayoutsToggle.checked = runtimeOptions.auto_detect_layouts_after_discovery;
+        autoExtractTextToggle.checked = runtimeOptions.auto_extract_text_after_layout_review;
+
+        const disabled = !runtimeOptions.enable_background_jobs;
+        autoDetectLayoutsToggle.disabled = disabled;
+        autoExtractTextToggle.disabled = disabled;
+        autoDetectLayoutsToggle.title = disabled ? "Background jobs are disabled in config." : "";
+        autoExtractTextToggle.title = disabled ? "Background jobs are disabled in config." : "";
       }
 
       function setPipelinePanelExpanded(expanded) {
@@ -943,12 +999,13 @@
       }
 
       async function reloadDashboard() {
-        const [pagesPayload, duplicatesPayload, activityPayload, nextReviewPayload, nextOcrPayload] = await Promise.all([
+        const [pagesPayload, duplicatesPayload, activityPayload, nextReviewPayload, nextOcrPayload, runtimeOptionsPayload] = await Promise.all([
           fetchJson("/api/pages"),
           fetchJson("/api/duplicates"),
           fetchJson("/api/pipeline/activity"),
           fetchJson("/api/layout-review/next"),
           fetchJson("/api/ocr-review/next"),
+          fetchJson("/api/runtime-options"),
         ]);
 
         renderPages(pagesPayload.pages);
@@ -957,6 +1014,7 @@
         renderActivity(activityPayload);
         applyNextReviewState(nextReviewPayload);
         applyNextOcrReviewState(nextOcrPayload);
+        applyRuntimeOptions(runtimeOptionsPayload);
         syncLastProcessedEventId(activityPayload.recent_events);
       }
 
@@ -1115,6 +1173,42 @@
         }
         if (reviewTarget === "ocr") {
           window.location.href = `/static/ocr_review.html?page_id=${pageId}`;
+        }
+      });
+      autoDetectLayoutsToggle.addEventListener("change", async () => {
+        const previousValue = runtimeOptions.auto_detect_layouts_after_discovery;
+        autoDetectLayoutsToggle.disabled = true;
+        try {
+          const payload = await fetchJson("/api/runtime-options", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auto_detect_layouts_after_discovery: autoDetectLayoutsToggle.checked,
+            }),
+          });
+          applyRuntimeOptions(payload);
+        } catch (error) {
+          console.error(`Failed to update runtime options: ${error.message}`);
+          autoDetectLayoutsToggle.checked = previousValue;
+          applyRuntimeOptions(runtimeOptions);
+        }
+      });
+      autoExtractTextToggle.addEventListener("change", async () => {
+        const previousValue = runtimeOptions.auto_extract_text_after_layout_review;
+        autoExtractTextToggle.disabled = true;
+        try {
+          const payload = await fetchJson("/api/runtime-options", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auto_extract_text_after_layout_review: autoExtractTextToggle.checked,
+            }),
+          });
+          applyRuntimeOptions(payload);
+        } catch (error) {
+          console.error(`Failed to update runtime options: ${error.message}`);
+          autoExtractTextToggle.checked = previousValue;
+          applyRuntimeOptions(runtimeOptions);
         }
       });
       exportFinalBtn.addEventListener("click", runFinalExport);

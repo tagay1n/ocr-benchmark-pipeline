@@ -34,12 +34,20 @@ from .pipeline_runtime import (
     register_default_handlers,
 )
 from .ocr_review import list_ocr_outputs, mark_ocr_reviewed, update_ocr_output
+from .runtime_options import (
+    get_runtime_options,
+    reset_runtime_options_from_settings,
+    should_auto_detect_layouts_after_discovery,
+    should_auto_extract_text_after_layout_review,
+    update_runtime_options,
+)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
     register_default_handlers()
+    reset_runtime_options_from_settings()
     source_dir, allowed_extensions = _discovery_source_info()
     allowed_text = ", ".join(allowed_extensions)
     emit_event(
@@ -78,7 +86,7 @@ async def lifespan(_: FastAPI):
             **stats_snapshot,
         },
     )
-    if settings.enable_background_jobs:
+    if should_auto_detect_layouts_after_discovery():
         auto = enqueue_layout_detection_for_new_pages()
         emit_event(
             stage="layout_detect",
@@ -171,6 +179,11 @@ class UpdateOcrOutputRequest(BaseModel):
     content: str = ""
 
 
+class RuntimeOptionsUpdateRequest(BaseModel):
+    auto_detect_layouts_after_discovery: bool | None = None
+    auto_extract_text_after_layout_review: bool | None = None
+
+
 @app.get("/")
 def root() -> FileResponse:
     return FileResponse("app/static/index.html")
@@ -208,7 +221,7 @@ def scan_images() -> dict[str, object]:
         message=_scan_finished_message("Discovery scan finished.", response),
         data={"trigger": "api", **response},
     )
-    if settings.enable_background_jobs:
+    if should_auto_detect_layouts_after_discovery():
         auto = enqueue_layout_detection_for_new_pages()
         response["auto_layout_detection"] = auto
         emit_event(
@@ -282,7 +295,7 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
             message=_scan_finished_message("Discovery scan finished after wipe.", rescan_summary),
             data={"trigger": "wipe", **rescan_summary},
         )
-        if settings.enable_background_jobs:
+        if should_auto_detect_layouts_after_discovery():
             register_default_handlers()
             auto_layout_detection = enqueue_layout_detection_for_new_pages()
             emit_event(
@@ -304,6 +317,42 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
         "rescanned": payload.rescan,
         "rescan_summary": rescan_summary,
         "auto_layout_detection": auto_layout_detection,
+    }
+
+
+@app.get("/api/runtime-options")
+def runtime_options() -> dict[str, object]:
+    snapshot = get_runtime_options()
+    return {
+        "enable_background_jobs": snapshot.enable_background_jobs,
+        "auto_detect_layouts_after_discovery": snapshot.auto_detect_layouts_after_discovery,
+        "auto_extract_text_after_layout_review": snapshot.auto_extract_text_after_layout_review,
+    }
+
+
+@app.put("/api/runtime-options")
+def put_runtime_options(payload: RuntimeOptionsUpdateRequest) -> dict[str, object]:
+    snapshot = update_runtime_options(
+        auto_detect_layouts_after_discovery=payload.auto_detect_layouts_after_discovery,
+        auto_extract_text_after_layout_review=payload.auto_extract_text_after_layout_review,
+    )
+    emit_event(
+        stage="pipeline",
+        event_type="runtime_options_updated",
+        message=(
+            "Runtime pipeline options updated: "
+            f"auto detect after discovery={snapshot.auto_detect_layouts_after_discovery}, "
+            f"auto extract after layout review={snapshot.auto_extract_text_after_layout_review}."
+        ),
+        data={
+            "auto_detect_layouts_after_discovery": snapshot.auto_detect_layouts_after_discovery,
+            "auto_extract_text_after_layout_review": snapshot.auto_extract_text_after_layout_review,
+        },
+    )
+    return {
+        "enable_background_jobs": snapshot.enable_background_jobs,
+        "auto_detect_layouts_after_discovery": snapshot.auto_detect_layouts_after_discovery,
+        "auto_extract_text_after_layout_review": snapshot.auto_extract_text_after_layout_review,
     }
 
 
@@ -648,7 +697,7 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
         message="Layout review completed.",
         data={"layout_count": result["layout_count"]},
     )
-    if settings.enable_background_jobs:
+    if should_auto_extract_text_after_layout_review():
         enqueued = enqueue_job("ocr_extract", page_id=page_id, payload={"trigger": "layout_review_complete"})
         if enqueued:
             emit_event(

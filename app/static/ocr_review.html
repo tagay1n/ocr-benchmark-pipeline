@@ -153,6 +153,110 @@
         flex-wrap: wrap;
       }
 
+      .zoom-control {
+        position: relative;
+      }
+
+      .zoom-combo {
+        display: inline-flex;
+        position: relative;
+        height: 38px;
+        border: 1px solid #9aa99f;
+        border-radius: 10px;
+        overflow: hidden;
+        background: var(--surface);
+      }
+
+      .zoom-percent-input {
+        width: 58px;
+        height: 100%;
+        border: 0;
+        border-radius: 0;
+        padding: 0 8px;
+        text-align: right;
+        background: transparent;
+        color: var(--ink);
+        font-weight: 600;
+      }
+
+      .zoom-percent-input:focus {
+        outline: none;
+      }
+
+      .zoom-caret-btn {
+        width: 30px;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        border-left: 1px solid var(--border);
+        border-radius: 0;
+        background: #ece8df;
+        color: var(--ink);
+        font-size: 13px;
+        line-height: 1;
+        align-items: stretch;
+      }
+
+      .zoom-caret-btn:hover {
+        background: #e3ddd1;
+      }
+
+      .zoom-caret {
+        opacity: 0.75;
+      }
+
+      .zoom-menu {
+        position: absolute;
+        top: calc(100% + 6px);
+        left: 0;
+        min-width: 172px;
+        padding: 8px 0;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--surface);
+        color: var(--ink);
+        box-shadow: 0 14px 32px rgba(31, 35, 41, 0.14);
+        z-index: 40;
+      }
+
+      .zoom-menu[hidden] {
+        display: none;
+      }
+
+      .zoom-option {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        padding: 6px 12px;
+        font-size: 15px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+
+      .zoom-option:hover {
+        background: #f0ece1;
+      }
+
+      .zoom-option.active::after {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      .zoom-separator {
+        height: 1px;
+        margin: 6px 0;
+        background: var(--border);
+      }
+
       .panel-toggles {
         display: inline-flex;
         align-items: center;
@@ -513,6 +617,30 @@
           </div>
         </div>
         <div class="actions">
+          <div class="zoom-control">
+            <div class="zoom-combo">
+              <input id="zoom-percent-input" class="zoom-percent-input" type="number" min="1" max="400" step="1" value="100" aria-label="Zoom percent" />
+              <button id="zoom-trigger" class="zoom-caret-btn" type="button" aria-label="Open zoom presets" aria-haspopup="true" aria-expanded="false">
+                <span class="zoom-caret">▾</span>
+              </button>
+            </div>
+            <div id="zoom-menu" class="zoom-menu" hidden>
+              <button class="zoom-option" type="button" data-zoom-mode="fit-page">Fit page</button>
+              <button class="zoom-option" type="button" data-zoom-mode="fit-width">Fit width</button>
+              <button class="zoom-option" type="button" data-zoom-mode="automatic">Automatic</button>
+              <div class="zoom-separator"></div>
+              <button class="zoom-option" type="button" data-zoom-percent="50">50%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="70">70%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="85">85%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="100">100%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="125">125%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="150">150%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="175">175%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="200">200%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="300">300%</button>
+              <button class="zoom-option" type="button" data-zoom-percent="400">400%</button>
+            </div>
+          </div>
           <div class="panel-toggles" role="group" aria-label="Panel visibility">
             <button id="toggle-source-btn" class="toggle-btn active" type="button" aria-pressed="true">Source</button>
             <button id="toggle-reconstructed-btn" class="toggle-btn active" type="button" aria-pressed="true">Reconstructed</button>
@@ -571,6 +699,8 @@
 
     <script type="module">
       import {
+        clampZoomPercent,
+        computeZoomScale,
         computeViewportScrollTargetForLayoutId,
         normalizeReviewHistory,
         previousHistoryPageId,
@@ -582,6 +712,8 @@
         history: "ocrReview.history",
         historyIndex: "ocrReview.history.index",
         panelVisibility: "ocrReview.panelVisibility",
+        zoomMode: "ocrReview.zoom.mode",
+        zoomPercent: "ocrReview.zoom.percent",
       };
 
       const CLASS_COLORS = {
@@ -602,6 +734,10 @@
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
+      const zoomTrigger = document.getElementById("zoom-trigger");
+      const zoomMenu = document.getElementById("zoom-menu");
+      const zoomOptions = Array.from(document.querySelectorAll(".zoom-option"));
+      const zoomPercentInput = document.getElementById("zoom-percent-input");
       const toggleSourceBtn = document.getElementById("toggle-source-btn");
       const toggleReconstructedBtn = document.getElementById("toggle-reconstructed-btn");
       const toggleContentBtn = document.getElementById("toggle-content-btn");
@@ -632,6 +768,9 @@
         selectedLayoutId: null,
         reviewSubmitInProgress: false,
         reextractInProgress: false,
+        zoomMode: "automatic",
+        zoomPercent: 100,
+        zoomAppliedPercent: 100,
         history: [],
         historyIndex: -1,
         panelVisibility: {
@@ -708,6 +847,9 @@
 
         const visibleCount = Math.max(1, visiblePanelCount());
         grid.style.gridTemplateColumns = new Array(visibleCount).fill("minmax(0, 1fr)").join(" ");
+        requestAnimationFrame(() => {
+          applyZoom();
+        });
         applySelectedStyles();
       }
 
@@ -726,6 +868,158 @@
         state.panelVisibility[panelKey] = !state.panelVisibility[panelKey];
         applyPanelVisibility();
         persistPanelVisibility();
+      }
+
+      function applyStoredZoomSettings() {
+        state.zoomMode = "automatic";
+        const storedPercent = readStorage(STORAGE_KEYS.zoomPercent);
+        if (storedPercent !== null) {
+          state.zoomPercent = clampZoomPercent(storedPercent);
+        }
+        state.zoomAppliedPercent = 100;
+        setZoomInputFromApplied();
+        updateZoomMenuSelection();
+      }
+
+      function closeZoomMenu() {
+        zoomMenu.hidden = true;
+        zoomTrigger.setAttribute("aria-expanded", "false");
+      }
+
+      function openZoomMenu() {
+        zoomMenu.hidden = false;
+        zoomTrigger.setAttribute("aria-expanded", "true");
+      }
+
+      function updateZoomMenuSelection() {
+        for (const option of zoomOptions) {
+          const optionMode = option.dataset.zoomMode || "";
+          const optionPercent = option.dataset.zoomPercent || "";
+          const modeMatch = optionMode !== "" && optionMode === state.zoomMode;
+          const percentMatch =
+            optionPercent !== "" &&
+            state.zoomMode === "custom" &&
+            Number(optionPercent) === Math.round(state.zoomPercent);
+          option.classList.toggle("active", modeMatch || percentMatch);
+        }
+      }
+
+      function setZoomInputFromApplied() {
+        zoomPercentInput.value = String(Math.round(state.zoomAppliedPercent));
+      }
+
+      function activeZoomViewport() {
+        if (state.panelVisibility.source && sourceViewport.clientWidth > 0 && sourceViewport.clientHeight > 0) {
+          return sourceViewport;
+        }
+        if (
+          state.panelVisibility.reconstructed &&
+          reconstructedViewport.clientWidth > 0 &&
+          reconstructedViewport.clientHeight > 0
+        ) {
+          return reconstructedViewport;
+        }
+        if (sourceViewport.clientWidth > 0 && sourceViewport.clientHeight > 0) {
+          return sourceViewport;
+        }
+        if (reconstructedViewport.clientWidth > 0 && reconstructedViewport.clientHeight > 0) {
+          return reconstructedViewport;
+        }
+        return null;
+      }
+
+      function centerPreviewInViewport(viewport, content) {
+        const viewportWidth = viewport.clientWidth;
+        const viewportHeight = viewport.clientHeight;
+        const contentWidth = content.offsetWidth;
+        const contentHeight = content.offsetHeight;
+        if (!viewportWidth || !viewportHeight || !contentWidth || !contentHeight) {
+          return;
+        }
+        viewport.scrollLeft = Math.max(0, Math.round((contentWidth - viewportWidth) / 2));
+        viewport.scrollTop = Math.max(0, Math.round((contentHeight - viewportHeight) / 2));
+      }
+
+      function applyZoom() {
+        const naturalWidth = Number(pageImage.naturalWidth);
+        const naturalHeight = Number(pageImage.naturalHeight);
+        if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
+          return;
+        }
+
+        const viewport = activeZoomViewport();
+        if (!viewport) {
+          return;
+        }
+
+        const scale = computeZoomScale({
+          mode: state.zoomMode,
+          zoomPercent: state.zoomPercent,
+          naturalWidth,
+          naturalHeight,
+          viewportWidth: Math.max(1, viewport.clientWidth),
+          viewportHeight: Math.max(1, viewport.clientHeight),
+        });
+        if (!scale || !Number.isFinite(scale) || scale <= 0) {
+          return;
+        }
+
+        const displayWidth = Math.max(1, Math.round(naturalWidth * scale));
+        const displayHeight = Math.max(1, Math.round(naturalHeight * scale));
+        const width = `${displayWidth}px`;
+        const height = `${displayHeight}px`;
+
+        pageImage.style.width = width;
+        pageImage.style.height = height;
+        sourceWrap.style.width = width;
+        sourceWrap.style.height = height;
+        reconstructedWrap.style.width = width;
+        reconstructedWrap.style.height = height;
+        reconstructionSurface.style.width = width;
+        reconstructionSurface.style.height = height;
+
+        state.zoomAppliedPercent = Math.round(scale * 1000) / 10;
+        setZoomInputFromApplied();
+        updateZoomMenuSelection();
+
+        requestAnimationFrame(() => {
+          if (state.panelVisibility.source) {
+            centerPreviewInViewport(sourceViewport, sourceWrap);
+          }
+          if (state.panelVisibility.reconstructed) {
+            centerPreviewInViewport(reconstructedViewport, reconstructedWrap);
+          }
+        });
+      }
+
+      function persistZoomSettings() {
+        writeStorage(STORAGE_KEYS.zoomMode, state.zoomMode);
+        writeStorage(STORAGE_KEYS.zoomPercent, String(Math.round(clampZoomPercent(state.zoomPercent))));
+      }
+
+      function setZoomMode(mode) {
+        if (!["fit-page", "fit-width", "automatic"].includes(mode)) {
+          return;
+        }
+        state.zoomMode = mode;
+        applyZoom();
+        persistZoomSettings();
+      }
+
+      function setCustomZoomPercent(percent) {
+        state.zoomMode = "custom";
+        state.zoomPercent = clampZoomPercent(percent);
+        applyZoom();
+        persistZoomSettings();
+      }
+
+      function applyCustomZoomFromInput() {
+        const raw = Number(zoomPercentInput.value);
+        if (!Number.isFinite(raw)) {
+          setZoomInputFromApplied();
+          return;
+        }
+        setCustomZoomPercent(raw);
       }
 
       function setStatus(message, { isError = false } = {}) {
@@ -833,7 +1127,7 @@
 
       function updateReextractButtonState() {
         if (state.reextractInProgress) {
-        reextractBtn.textContent = "Detecting...";
+          reextractBtn.textContent = "Detecting...";
           reextractBtn.disabled = true;
           return;
         }
@@ -1115,20 +1409,6 @@
         const finalSize = Math.max(6, Math.min(best, high > 0 ? high : best));
         contentNode.style.fontSize = `${finalSize}px`;
         contentNode.style.lineHeight = String(lineHeight);
-      }
-
-      function syncPreviewSurfaceSize() {
-        const naturalWidth = Number(pageImage.naturalWidth);
-        const naturalHeight = Number(pageImage.naturalHeight);
-        if (!Number.isFinite(naturalWidth) || !Number.isFinite(naturalHeight) || naturalWidth <= 0 || naturalHeight <= 0) {
-          return;
-        }
-        const width = `${naturalWidth}px`;
-        const height = `${naturalHeight}px`;
-        reconstructedWrap.style.width = width;
-        reconstructedWrap.style.height = height;
-        reconstructionSurface.style.width = width;
-        reconstructionSurface.style.height = height;
       }
 
       function renderReconstruction() {
@@ -1465,6 +1745,7 @@
           return;
         }
 
+        applyStoredZoomSettings();
         state.panelVisibility = normalizePanelVisibility(readStorage(STORAGE_KEYS.panelVisibility));
         applyPanelVisibility();
         state.pageId = pageId;
@@ -1515,17 +1796,81 @@
       toggleSourceBtn.addEventListener("click", () => togglePanel("source"));
       toggleReconstructedBtn.addEventListener("click", () => togglePanel("reconstructed"));
       toggleContentBtn.addEventListener("click", () => togglePanel("content"));
+      zoomTrigger.addEventListener("click", () => {
+        if (zoomMenu.hidden) {
+          openZoomMenu();
+        } else {
+          closeZoomMenu();
+        }
+      });
+      zoomMenu.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const option = target.closest(".zoom-option");
+        if (!(option instanceof HTMLButtonElement)) {
+          return;
+        }
+        const mode = option.dataset.zoomMode;
+        const percent = option.dataset.zoomPercent;
+        if (mode) {
+          setZoomMode(mode);
+        } else if (percent) {
+          setCustomZoomPercent(Number(percent));
+        }
+        closeZoomMenu();
+      });
+      zoomPercentInput.addEventListener("change", () => {
+        applyCustomZoomFromInput();
+      });
+      zoomPercentInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          applyCustomZoomFromInput();
+          zoomPercentInput.blur();
+        }
+      });
+      document.addEventListener("pointerdown", (event) => {
+        if (!(event.target instanceof Element)) {
+          return;
+        }
+        if (event.target.closest(".zoom-control")) {
+          return;
+        }
+        closeZoomMenu();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeZoomMenu();
+        }
+      });
 
       reextractBtn.addEventListener("click", reextractContent);
       reviewBtn.addEventListener("click", markReviewed);
 
       pageImage.addEventListener("load", () => {
-        syncPreviewSurfaceSize();
+        applyZoom();
         renderReconstruction();
         if (state.selectedLayoutId !== null) {
           ensureLayoutVisible(state.selectedLayoutId);
         }
       });
+
+      if (typeof ResizeObserver !== "undefined") {
+        const viewportResizeObserver = new ResizeObserver(() => {
+          if (state.zoomMode !== "custom") {
+            applyZoom();
+          }
+        });
+        viewportResizeObserver.observe(sourceViewport);
+        viewportResizeObserver.observe(reconstructedViewport);
+      } else {
+        window.addEventListener("resize", () => {
+          if (state.zoomMode !== "custom") {
+            applyZoom();
+          }
+        });
+      }
 
       init().catch((error) => {
         setStatus(`Initialization failed: ${error.message}`, { isError: true });

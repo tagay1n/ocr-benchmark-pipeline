@@ -266,6 +266,23 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-21:
+  - Added runtime-only automation toggles on dashboard:
+    - `Auto-detect layouts after discovery`
+    - `Auto-extract text after layout review`
+  - Added config-seeded defaults for runtime automation:
+    - `auto_detect_layouts_after_discovery` (default `false`)
+    - `auto_extract_text_after_layout_review` (default `false`)
+  - Toggle values are initialized from `config.yaml` at app startup and can be changed from UI without rewriting config.
+  - Added backend runtime options API:
+    - `GET /api/runtime-options`
+    - `PUT /api/runtime-options`
+  - Automatic layout detection after discovery/startup/wipe and automatic OCR extraction after layout review are now gated by these runtime toggles instead of always following `enable_background_jobs`.
+  - OCR review zoom UX now mirrors layout review zoom UX:
+    - added zoom combo in OCR review header (editable percent + presets menu)
+    - supports `Fit page`, `Fit width`, `Automatic`, and custom percent values
+    - applies the same zoom scale to both source and reconstructed preview panels
+    - stores zoom settings in local storage and reapplies on page load
+    - updates zoom on viewport resize (non-custom modes) and panel visibility changes
   - Completed raw-SQL removal for active backend data flows:
     - restored/added SQLAlchemy declarative models in `app/models.py`
     - replaced legacy sqlite connection layer in `app/db.py` with SQLAlchemy engine/session management
@@ -598,7 +615,7 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
     - optional immediate rescan after wipe
     - fixed modal visibility bug by enforcing `.modal-backdrop[hidden] { display: none; }`
   - Replaced placeholder layout detector with real DocLayNet integration:
-    - `hantian/yolo-doclaynet` checkpoint (`yolov10b-doclaynet.pt`) via Ultralytics
+    - `hantian/yolo-doclaynet` checkpoint (`yolo26m-doclaynet.pt`) via Ultralytics
     - normalized bbox + class/confidence persistence in `layouts`
     - threshold controls (confidence/IoU) wired from layout review UI
     - class-based muted color rendering for layout bbox + labels on review canvas

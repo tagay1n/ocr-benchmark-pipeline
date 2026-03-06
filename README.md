@@ -22,6 +22,8 @@ allowed_image_extensions:
   - .tiff
   - .webp
 enable_background_jobs: true
+auto_detect_layouts_after_discovery: false
+auto_extract_text_after_layout_review: false
 ```
 
 Optional env overrides:
@@ -31,6 +33,14 @@ Optional env overrides:
 - `ALLOWED_IMAGE_EXTENSIONS` (comma-separated)
 - `APP_CONFIG_PATH` (path to config file)
 - `ENABLE_BACKGROUND_JOBS` (`true/false`)
+
+Runtime automation toggles:
+
+- Dashboard exposes runtime-only toggles for:
+  - `Auto-detect layouts after discovery`
+  - `Auto-extract text after layout review`cl
+- Their initial values come from `config.yaml`.
+- Changing them in the UI does not rewrite `config.yaml`; changes apply only to the current app process.
 
 ## Run
 
@@ -86,7 +96,7 @@ node --test frontend_tests/*.test.mjs
 
 ## Important Note About Detection
 
-`POST /api/pages/{page_id}/layouts/detect` uses `hantian/yolo-doclaynet` (`yolov10b-doclaynet.pt`) via Ultralytics.
+`POST /api/pages/{page_id}/layouts/detect` uses `hantian/yolo-doclaynet` (`yolo26m-doclaynet.pt`) via Ultralytics.
 Model inference runs on CPU by default. First detection may take longer because checkpoint download happens once and is then cached.
 
 ## Project Context

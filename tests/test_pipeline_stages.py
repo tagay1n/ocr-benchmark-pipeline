@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from app import config, db, discovery, layouts, main, ocr_extract, pipeline_runtime
+from app import config, db, discovery, layouts, main, ocr_extract, pipeline_runtime, runtime_options
 from app.config import DEFAULT_EXTENSIONS, Settings
 
 
@@ -33,7 +33,9 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
         self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
         db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
 
     def tearDown(self) -> None:
         self.stack.close()
@@ -108,6 +110,8 @@ class PipelineStagesTests(unittest.TestCase):
 
         self.assertEqual(loaded.gemini_keys, ("key-1", "key-2", "key-3"))
         self.assertEqual(loaded.gemini_usage_path, self.project_root / "_artifacts" / "gemini_usage.json")
+        self.assertFalse(loaded.auto_detect_layouts_after_discovery)
+        self.assertFalse(loaded.auto_extract_text_after_layout_review)
 
     def test_layout_detection_stage_creates_layouts(self) -> None:
         self._write_image("page.png", b"fake-image")
@@ -193,6 +197,7 @@ class PipelineStagesTests(unittest.TestCase):
             result_dir=self.project_root / "result",
             allowed_extensions=DEFAULT_EXTENSIONS,
             enable_background_jobs=True,
+            auto_extract_text_after_layout_review=True,
         )
         self.stack.close()
         self.stack = ExitStack()
@@ -202,7 +207,9 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
         self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
         db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
 
         self._write_image("review-queue.png", b"review-image")
         main.scan_images()
@@ -222,6 +229,127 @@ class PipelineStagesTests(unittest.TestCase):
         enqueue_mock.assert_called_once_with(
             "ocr_extract",
             page_id=page_id,
+            payload={"trigger": "layout_review_complete"},
+        )
+
+    def test_runtime_options_api_updates_runtime_only_values(self) -> None:
+        payload = main.runtime_options()
+        self.assertEqual(
+            payload,
+            {
+                "enable_background_jobs": False,
+                "auto_detect_layouts_after_discovery": False,
+                "auto_extract_text_after_layout_review": False,
+            },
+        )
+
+        updated = main.put_runtime_options(
+            main.RuntimeOptionsUpdateRequest(
+                auto_detect_layouts_after_discovery=True,
+                auto_extract_text_after_layout_review=True,
+            )
+        )
+        self.assertEqual(
+            updated,
+            {
+                "enable_background_jobs": False,
+                "auto_detect_layouts_after_discovery": True,
+                "auto_extract_text_after_layout_review": True,
+            },
+        )
+
+    def test_scan_uses_runtime_toggle_for_auto_layout_detection(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=True,
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
+        db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
+
+        self._write_image("scan-auto-layout.png", b"scan-image")
+
+        with patch.object(main, "enqueue_layout_detection_for_new_pages", return_value={"considered": 1, "queued": 1, "already_queued_or_running": 0}) as enqueue_mock:
+            first = main.scan_images()
+        enqueue_mock.assert_not_called()
+        self.assertEqual(
+            first["auto_layout_detection"],
+            {"considered": 0, "queued": 0, "already_queued_or_running": 0},
+        )
+
+        main.put_runtime_options(
+            main.RuntimeOptionsUpdateRequest(auto_detect_layouts_after_discovery=True)
+        )
+        with patch.object(main, "enqueue_layout_detection_for_new_pages", return_value={"considered": 1, "queued": 1, "already_queued_or_running": 0}) as enqueue_mock:
+            second = main.scan_images()
+        enqueue_mock.assert_called_once()
+        self.assertEqual(
+            second["auto_layout_detection"],
+            {"considered": 1, "queued": 1, "already_queued_or_running": 0},
+        )
+
+    def test_layout_review_uses_runtime_toggle_for_auto_ocr(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=True,
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
+        db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
+
+        self._write_image("layout-auto-ocr-a.png", b"a")
+        self._write_image("layout-auto-ocr-b.png", b"b")
+        main.scan_images()
+        pages = sorted(main.list_pages()["pages"], key=lambda row: row["rel_path"])
+        first_page_id = int(pages[0]["id"])
+        second_page_id = int(pages[1]["id"])
+
+        for page_id in (first_page_id, second_page_id):
+            main.create_page_layout(
+                page_id,
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=None,
+                    bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.25),
+                ),
+            )
+
+        with patch.object(main, "enqueue_job", return_value=True) as enqueue_mock:
+            main.complete_layout_review(first_page_id)
+        enqueue_mock.assert_not_called()
+
+        main.put_runtime_options(
+            main.RuntimeOptionsUpdateRequest(auto_extract_text_after_layout_review=True)
+        )
+        with patch.object(main, "enqueue_job", return_value=True) as enqueue_mock:
+            main.complete_layout_review(second_page_id)
+        enqueue_mock.assert_called_once_with(
+            "ocr_extract",
+            page_id=second_page_id,
             payload={"trigger": "layout_review_complete"},
         )
 
@@ -287,7 +415,9 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
         self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
         db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
 
         self._write_image("ocr.png", b"fake-image")
         main.scan_images()
@@ -341,7 +471,9 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
         self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
         db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
 
         self._write_image("ocr-exhausted.png", b"fake-image")
         main.scan_images()
@@ -390,7 +522,9 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
         self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
         db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
 
         self._write_image("ocr-review.png", b"fake-image")
         main.scan_images()
@@ -449,7 +583,9 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
         self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
         db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
 
         self._write_image("ocr-reextract.png", b"fake-image")
         main.scan_images()
