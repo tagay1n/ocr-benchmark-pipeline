@@ -14,6 +14,7 @@ import {
   nextLayoutReviewUrl,
   pointHandleForCoordinateKey,
   previousHistoryPageId,
+  reorderReadingOrderIds,
   updateReviewHistoryOnVisit,
 } from "../app/static/js/layout_review_utils.mjs";
 
@@ -104,6 +105,48 @@ test("compactReadingOrdersAfterDeletion is no-op when deleted order is invalid",
   const { layouts: compacted, shiftedIds } = compactReadingOrdersAfterDeletion(layouts, null);
   assert.deepEqual(compacted, layouts);
   assert.deepEqual(shiftedIds, []);
+});
+
+test("reorderReadingOrderIds reorders ids before and after target", () => {
+  assert.deepEqual(
+    reorderReadingOrderIds({
+      orderedIds: [10, 20, 30, 40],
+      draggedId: 30,
+      targetId: 10,
+      position: "before",
+    }),
+    [30, 10, 20, 40],
+  );
+
+  assert.deepEqual(
+    reorderReadingOrderIds({
+      orderedIds: [10, 20, 30, 40],
+      draggedId: 20,
+      targetId: 40,
+      position: "after",
+    }),
+    [10, 30, 40, 20],
+  );
+});
+
+test("reorderReadingOrderIds supports drop to end and rejects invalid payload", () => {
+  assert.deepEqual(
+    reorderReadingOrderIds({
+      orderedIds: [1, 2, 3],
+      draggedId: 1,
+      targetId: null,
+    }),
+    [2, 3, 1],
+  );
+
+  assert.equal(
+    reorderReadingOrderIds({
+      orderedIds: [1, 2, 3],
+      draggedId: 99,
+      targetId: 2,
+    }),
+    null,
+  );
 });
 
 test("computeViewportScrollToCenterBBox centers target and clamps at edges", () => {

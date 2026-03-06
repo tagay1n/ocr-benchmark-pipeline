@@ -266,6 +266,18 @@ Initial target is Tatar, but repository design must stay language-neutral so vol
 ## Change Log
 
 - 2026-02-21:
+  - Layout review panel now supports drag-and-drop row reordering for reading order:
+    - dragging a layout row reorders it before/after target row
+    - dropping in empty area of layouts table moves dragged row to the end
+    - reorder rewrites sequential `reading_order` values and saves as local draft changes
+    - visual drop indicators and dragging row state added in layouts table UI
+  - Layout `Order` column was switched to display-only (no direct numeric input):
+    - prevents arbitrary manual order values
+    - order changes are now done via drag-and-drop only
+    - order cell width is constrained to two-digit display
+  - Added reusable reorder helper in `app/static/js/layout_review_utils.mjs`:
+    - `reorderReadingOrderIds(...)`
+    - covered with frontend unit tests in `frontend_tests/layout_review_utils.test.mjs`
   - Added runtime-only automation toggles on dashboard:
     - `Auto-detect layouts after discovery`
     - `Auto-extract text after layout review`

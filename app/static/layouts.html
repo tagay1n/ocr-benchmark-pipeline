@@ -393,7 +393,10 @@
       }
 
       .layout-order-col {
-        width: 5ch;
+        width: 3ch;
+        min-width: 3ch;
+        text-align: right;
+        vertical-align: top;
       }
 
       .layout-bind-col {
@@ -406,11 +409,13 @@
         min-width: var(--actions-col-size);
       }
 
-      .layout-order-input {
-        width: 100%;
-        min-width: 0;
-        padding: 4px;
+      .layout-order-value {
+        display: inline-block;
+        min-width: 2ch;
+        padding-top: 7px;
         text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum";
       }
 
       .layout-bbox-cell {
@@ -636,6 +641,22 @@
         box-shadow: inset 3px 0 0 var(--accent);
       }
 
+      #layouts-body tr[draggable="true"] {
+        cursor: grab;
+      }
+
+      #layouts-body tr.layout-dragging {
+        opacity: 0.48;
+      }
+
+      #layouts-body tr.layout-drop-before td {
+        box-shadow: inset 0 2px 0 var(--accent);
+      }
+
+      #layouts-body tr.layout-drop-after td {
+        box-shadow: inset 0 -2px 0 var(--accent);
+      }
+
       input {
         width: 100%;
         padding: 6px;
@@ -859,10 +880,10 @@
             </button>
           </div>
           <table>
-            <thead>
+              <thead>
                 <tr>
-                  <th class="layout-class-col">Class</th>
                   <th class="layout-order-col">Order</th>
+                  <th class="layout-class-col">Class</th>
                   <th>bbox</th>
                   <th class="layout-bind-col">Bind</th>
                   <th class="layout-actions-col">Actions</th>
@@ -932,6 +953,7 @@
         nextLayoutReviewUrl,
         pointHandleForCoordinateKey,
         previousHistoryPageId,
+        reorderReadingOrderIds,
         updateReviewHistoryOnVisit,
       } from "/static/js/layout_review_utils.mjs";
 
@@ -1018,6 +1040,9 @@
         drawModeActive: false,
         drawPointerId: null,
         drawStartPoint: null,
+        draggingLayoutId: null,
+        dragOverLayoutId: null,
+        dragOverPosition: null,
         reviewSubmitInProgress: false,
         layoutsLoaded: false,
       };
@@ -1691,6 +1716,193 @@
         return true;
       }
 
+      function rowDropPosition(row, event) {
+        const rect = row.getBoundingClientRect();
+        if (!rect.height) {
+          return "after";
+        }
+        return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
+      }
+
+      function clearRowDragUi() {
+        for (const row of layoutsBody.querySelectorAll("tr.layout-dragging, tr.layout-drop-before, tr.layout-drop-after")) {
+          row.classList.remove("layout-dragging", "layout-drop-before", "layout-drop-after");
+        }
+      }
+
+      function resetRowDragState() {
+        state.draggingLayoutId = null;
+        state.dragOverLayoutId = null;
+        state.dragOverPosition = null;
+        clearRowDragUi();
+      }
+
+      function layoutIdsInCurrentOrder() {
+        sortLayoutsInPlace();
+        return state.layouts
+          .map((layout) => Number(layout.id))
+          .filter((layoutId) => Number.isInteger(layoutId) && layoutId > 0);
+      }
+
+      function syncDraftWithServerBaseline(layoutId) {
+        const layout = findLayoutById(layoutId);
+        if (!layout) {
+          return;
+        }
+        const draft = toDraftShape(layout);
+        const serverLayout = state.serverLayoutsById[String(layoutId)];
+        const serverBaseline = serverLayout ? toDraftShape(serverLayout) : draft;
+        if (sameDraft(draft, serverBaseline)) {
+          delete state.localEditsById[String(layoutId)];
+        } else {
+          state.localEditsById[String(layoutId)] = draft;
+        }
+        state.deletedLayoutIds.delete(Number(layoutId));
+      }
+
+      function applySequentialReadingOrder(layoutIdSequence) {
+        const sequence = Array.isArray(layoutIdSequence)
+          ? layoutIdSequence
+              .map((layoutId) => Number(layoutId))
+              .filter((layoutId) => Number.isInteger(layoutId) && layoutId > 0)
+          : [];
+        if (sequence.length === 0) {
+          return false;
+        }
+
+        let changed = false;
+        for (let index = 0; index < sequence.length; index += 1) {
+          const layoutId = sequence[index];
+          const layout = findLayoutById(layoutId);
+          if (!layout) {
+            continue;
+          }
+          const nextOrder = index + 1;
+          if (Number(layout.reading_order) !== nextOrder) {
+            changed = true;
+          }
+          layout.reading_order = nextOrder;
+          syncDraftWithServerBaseline(layoutId);
+        }
+
+        if (!changed) {
+          return false;
+        }
+        persistLayoutDraftState();
+        renderLayouts();
+        return true;
+      }
+
+      function setRowDropIndicator(targetLayoutId, position) {
+        const targetId = Number(targetLayoutId);
+        if (!Number.isInteger(targetId) || targetId <= 0) {
+          return;
+        }
+        if (targetId === Number(state.draggingLayoutId)) {
+          return;
+        }
+        if (state.dragOverLayoutId === targetId && state.dragOverPosition === position) {
+          return;
+        }
+
+        clearRowDragUi();
+        const draggingRow = layoutsBody.querySelector(`tr[data-layout-id="${state.draggingLayoutId}"]`);
+        draggingRow?.classList.add("layout-dragging");
+
+        const row = layoutsBody.querySelector(`tr[data-layout-id="${targetId}"]`);
+        if (!row) {
+          return;
+        }
+        row.classList.add(position === "before" ? "layout-drop-before" : "layout-drop-after");
+        state.dragOverLayoutId = targetId;
+        state.dragOverPosition = position;
+      }
+
+      function finishRowReorder(targetLayoutId, position) {
+        const draggingLayoutId = Number(state.draggingLayoutId);
+        if (!Number.isInteger(draggingLayoutId) || draggingLayoutId <= 0) {
+          resetRowDragState();
+          return;
+        }
+
+        const orderedIds = layoutIdsInCurrentOrder();
+        const nextOrder = reorderReadingOrderIds({
+          orderedIds,
+          draggedId: draggingLayoutId,
+          targetId: targetLayoutId,
+          position,
+        });
+        resetRowDragState();
+        if (!nextOrder) {
+          return;
+        }
+        const changed = applySequentialReadingOrder(nextOrder);
+        if (changed) {
+          selectLayout(draggingLayoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
+          setStatus("Draft saved locally. Order updated by drag-and-drop.");
+        }
+      }
+
+      function rowDragStart(event, layoutId) {
+        const target = event.target;
+        if (
+          target instanceof Element &&
+          target.closest("input, select, button, textarea, label, .row-actions")
+        ) {
+          event.preventDefault();
+          return;
+        }
+
+        const normalizedLayoutId = Number(layoutId);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          event.preventDefault();
+          return;
+        }
+
+        state.draggingLayoutId = normalizedLayoutId;
+        state.dragOverLayoutId = null;
+        state.dragOverPosition = null;
+        clearRowDragUi();
+
+        const row = event.currentTarget;
+        if (row instanceof HTMLTableRowElement) {
+          row.classList.add("layout-dragging");
+        }
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", String(normalizedLayoutId));
+        }
+        selectLayout(normalizedLayoutId, { scrollImageToLayout: true });
+      }
+
+      function rowDragOver(event, layoutId) {
+        if (!Number.isInteger(Number(state.draggingLayoutId))) {
+          return;
+        }
+        event.preventDefault();
+        const row = event.currentTarget;
+        if (!(row instanceof HTMLTableRowElement)) {
+          return;
+        }
+        const position = rowDropPosition(row, event);
+        setRowDropIndicator(layoutId, position);
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
+      }
+
+      function rowDrop(event, layoutId) {
+        if (!Number.isInteger(Number(state.draggingLayoutId))) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        const row = event.currentTarget;
+        const position =
+          row instanceof HTMLTableRowElement ? rowDropPosition(row, event) : "after";
+        finishRowReorder(layoutId, position);
+      }
+
       function bboxWithMinSize(bbox, handle) {
         const minSize = 0.001;
         let { x1, y1, x2, y2 } = bbox;
@@ -2008,8 +2220,29 @@
         const tr = document.createElement("tr");
         const layoutId = Number(layout.id);
         tr.dataset.layoutId = String(layoutId);
+        tr.draggable = true;
+        tr.addEventListener("dragstart", (event) => {
+          rowDragStart(event, layoutId);
+        });
+        tr.addEventListener("dragover", (event) => {
+          rowDragOver(event, layoutId);
+        });
+        tr.addEventListener("drop", (event) => {
+          rowDrop(event, layoutId);
+        });
+        tr.addEventListener("dragend", () => {
+          resetRowDragState();
+        });
         const serverLayout = state.serverLayoutsById[String(layoutId)];
         const serverBaseline = serverLayout ? toDraftShape(serverLayout) : toDraftShape(layout);
+
+        const orderTd = document.createElement("td");
+        orderTd.className = "layout-order-col";
+        const orderValue = document.createElement("span");
+        orderValue.className = "layout-order-value";
+        orderValue.textContent = layout.reading_order === null ? "" : String(layout.reading_order);
+        orderTd.appendChild(orderValue);
+        tr.appendChild(orderTd);
 
         const classTd = document.createElement("td");
         classTd.className = "layout-class-col";
@@ -2024,23 +2257,6 @@
         });
         classTd.appendChild(classInput);
         tr.appendChild(classTd);
-
-        const orderTd = document.createElement("td");
-        orderTd.className = "layout-order-col";
-        const orderInput = document.createElement("input");
-        orderInput.type = "number";
-        orderInput.min = "1";
-        orderInput.step = "1";
-        orderInput.className = "layout-order-input";
-        orderInput.value = layout.reading_order === null ? "" : String(layout.reading_order);
-        orderInput.addEventListener("focus", () => {
-          selectLayout(layoutId, { scrollImageToLayout: true });
-        });
-        orderInput.addEventListener("pointerdown", () => {
-          selectLayout(layoutId, { scrollImageToLayout: true });
-        });
-        orderTd.appendChild(orderInput);
-        tr.appendChild(orderTd);
 
         const bboxTd = document.createElement("td");
         bboxTd.className = "layout-bbox-cell";
@@ -2148,23 +2364,11 @@
         function applyDraftToInputs(draft) {
           classInput.value = draft.class_name;
           applyClassColorToSelect(classInput, draft.class_name);
-          orderInput.value = draft.reading_order === null ? "" : String(draft.reading_order);
+          orderValue.textContent = draft.reading_order === null ? "" : String(draft.reading_order);
           bboxFields[0][1].value = toFixed(draft.bbox.x1);
           bboxFields[1][1].value = toFixed(draft.bbox.y1);
           bboxFields[2][1].value = toFixed(draft.bbox.x2);
           bboxFields[3][1].value = toFixed(draft.bbox.y2);
-        }
-
-        function parseReadingOrder(rawValue) {
-          const raw = String(rawValue).trim();
-          if (raw === "") {
-            return null;
-          }
-          const value = Number(raw);
-          if (!Number.isInteger(value) || value < 1) {
-            throw new Error("Reading order must be an integer >= 1.");
-          }
-          return value;
         }
 
         function parseBoundedNumber(rawValue) {
@@ -2179,7 +2383,9 @@
           const className = normalizeClassName(classInput.value) || "text";
           return {
             class_name: className,
-            reading_order: parseReadingOrder(orderInput.value),
+            reading_order: Number.isInteger(Number(layout.reading_order))
+              ? Number(layout.reading_order)
+              : null,
             bbox: {
               x1: parseBoundedNumber(bboxFields[0][1].value),
               y1: parseBoundedNumber(bboxFields[1][1].value),
@@ -2234,50 +2440,6 @@
           applyClassColorToSelect(classInput, classInput.value);
           if (saveLocalDraft()) {
             renderLayouts();
-          }
-        });
-        orderInput.addEventListener("change", () => {
-          const previousOrder = Number.isInteger(Number(layout.reading_order))
-            ? Number(layout.reading_order)
-            : null;
-          if (saveLocalDraft()) {
-            const currentLayout = state.layouts.find((row) => Number(row.id) === layoutId);
-            const nextOrder =
-              currentLayout && Number.isInteger(Number(currentLayout.reading_order))
-                ? Number(currentLayout.reading_order)
-                : null;
-            let swapped = false;
-
-            if (previousOrder !== null && nextOrder !== null && previousOrder !== nextOrder) {
-              const conflict = state.layouts.find(
-                (row) => Number(row.id) !== layoutId && Number(row.reading_order) === nextOrder,
-              );
-              if (conflict) {
-                const conflictId = Number(conflict.id);
-                const conflictDraft = toDraftShape(conflict);
-                conflictDraft.reading_order = previousOrder;
-
-                conflict.class_name = conflictDraft.class_name;
-                conflict.reading_order = conflictDraft.reading_order;
-                conflict.bbox = { ...conflictDraft.bbox };
-
-                const conflictServer = state.serverLayoutsById[String(conflictId)];
-                const conflictBaseline = conflictServer ? toDraftShape(conflictServer) : conflictDraft;
-                if (sameDraft(conflictDraft, conflictBaseline)) {
-                  delete state.localEditsById[String(conflictId)];
-                } else {
-                  state.localEditsById[String(conflictId)] = conflictDraft;
-                }
-                state.deletedLayoutIds.delete(conflictId);
-                persistLayoutDraftState();
-                swapped = true;
-              }
-            }
-
-            renderLayouts();
-            if (swapped) {
-              setStatus("Draft saved locally. Order swapped.");
-            }
           }
         });
         for (const [, input] of bboxFields) {
@@ -2827,6 +2989,45 @@
       });
       layoutsBody.addEventListener("focusin", (event) => {
         selectLayoutFromPanelEventTarget(event.target);
+      });
+      layoutsBody.addEventListener("dragover", (event) => {
+        const draggingLayoutId = Number(state.draggingLayoutId);
+        if (!Number.isInteger(draggingLayoutId) || draggingLayoutId <= 0) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const row = target.closest("tr[data-layout-id]");
+        if (row) {
+          return;
+        }
+        event.preventDefault();
+        const orderedIds = layoutIdsInCurrentOrder();
+        const lastId = orderedIds.length > 0 ? orderedIds[orderedIds.length - 1] : null;
+        if (Number.isInteger(lastId) && lastId !== draggingLayoutId) {
+          setRowDropIndicator(lastId, "after");
+        }
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "move";
+        }
+      });
+      layoutsBody.addEventListener("drop", (event) => {
+        const draggingLayoutId = Number(state.draggingLayoutId);
+        if (!Number.isInteger(draggingLayoutId) || draggingLayoutId <= 0) {
+          return;
+        }
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const row = target.closest("tr[data-layout-id]");
+        if (row) {
+          return;
+        }
+        event.preventDefault();
+        finishRowReorder(null, "after");
       });
       zoomTrigger.addEventListener("click", () => {
         if (zoomMenu.hidden) {

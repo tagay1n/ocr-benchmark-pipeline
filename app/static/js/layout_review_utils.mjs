@@ -73,6 +73,66 @@ export function compactReadingOrdersAfterDeletion(layouts, deletedOrder) {
   return { layouts: compactedLayouts, shiftedIds };
 }
 
+export function reorderReadingOrderIds({
+  orderedIds,
+  draggedId,
+  targetId,
+  position = "after",
+}) {
+  if (!Array.isArray(orderedIds)) {
+    return null;
+  }
+
+  const normalizedIds = [];
+  const seen = new Set();
+  for (const rawId of orderedIds) {
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    normalizedIds.push(id);
+  }
+  if (normalizedIds.length === 0) {
+    return null;
+  }
+
+  const dragId = Number(draggedId);
+  if (!Number.isInteger(dragId) || dragId <= 0) {
+    return null;
+  }
+  const dragIndex = normalizedIds.indexOf(dragId);
+  if (dragIndex < 0) {
+    return null;
+  }
+
+  const nextIds = [...normalizedIds];
+  nextIds.splice(dragIndex, 1);
+
+  if (targetId === null || targetId === undefined) {
+    nextIds.push(dragId);
+    return nextIds;
+  }
+
+  const dropId = Number(targetId);
+  if (!Number.isInteger(dropId) || dropId <= 0) {
+    return null;
+  }
+  if (dragId === dropId) {
+    return normalizedIds;
+  }
+
+  const dropIndex = nextIds.indexOf(dropId);
+  if (dropIndex < 0) {
+    return null;
+  }
+
+  const placeBefore = position === "before";
+  const insertIndex = placeBefore ? dropIndex : dropIndex + 1;
+  nextIds.splice(insertIndex, 0, dragId);
+  return nextIds;
+}
+
 export function computeViewportScrollToCenterBBox({
   bbox,
   contentWidth,
