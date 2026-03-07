@@ -1247,6 +1247,7 @@
       import {
         applyInlineMarkdownWrapper,
         applyLinePrefixMarkdown,
+        computeEditorToolbarState,
         computeFloatingControlPlacement,
         countTextLines,
         detectEditorValidationIssues,
@@ -1257,6 +1258,7 @@
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
         normalizeReconstructedRenderMode,
+        resolveEditorDrawerLayout,
         tokenBoundsAtOffset,
         textOffsetForLineIndex,
       } from "./js/ocr_review_utils.mjs";
@@ -1794,25 +1796,15 @@
         applyExpandedEditorFontSize({ persist: true });
       }
 
-      function shouldUseResizableEditorDrawer() {
-        return window.innerWidth > EDITOR_DRAWER_RESPONSIVE_BREAKPOINT;
-      }
-
-      function clampEditorDrawerWidth(value) {
-        const raw = Number(value);
-        if (!Number.isFinite(raw)) {
-          return null;
-        }
-        const max = Math.floor(window.innerWidth * EDITOR_DRAWER_WIDTH_MAX_RATIO);
-        if (!Number.isFinite(max) || max <= 0) {
-          return null;
-        }
-        const min = Math.min(EDITOR_DRAWER_WIDTH_MIN, max);
-        return Math.max(min, Math.min(max, Math.round(raw)));
-      }
-
       function applyExpandedEditorDrawerWidth({ persist = false } = {}) {
-        const resizable = shouldUseResizableEditorDrawer();
+        const layout = resolveEditorDrawerLayout({
+          requestedWidth: state.editorDrawerWidth,
+          viewportWidth: window.innerWidth,
+          minWidth: EDITOR_DRAWER_WIDTH_MIN,
+          maxRatio: EDITOR_DRAWER_WIDTH_MAX_RATIO,
+          responsiveBreakpoint: EDITOR_DRAWER_RESPONSIVE_BREAKPOINT,
+        });
+        const resizable = Boolean(layout.resizable);
         if (expandedEditorResizeHandle) {
           expandedEditorResizeHandle.hidden = !resizable;
         }
@@ -1820,7 +1812,7 @@
         if (!resizable) {
           expandedEditor.style.removeProperty("width");
         } else {
-          const clamped = clampEditorDrawerWidth(state.editorDrawerWidth);
+          const clamped = layout.width;
           if (Number.isFinite(clamped)) {
             state.editorDrawerWidth = clamped;
             expandedEditor.style.width = `${clamped}px`;
@@ -1840,13 +1832,13 @@
       }
 
       function setExpandedEditorDrawerWidth(nextWidth) {
-        state.editorDrawerWidth = clampEditorDrawerWidth(nextWidth);
+        state.editorDrawerWidth = Number(nextWidth);
         applyExpandedEditorDrawerWidth({ persist: true });
       }
 
       function applyStoredEditorDrawerWidth() {
         const raw = readStorage(STORAGE_KEYS.editorDrawerWidth);
-        state.editorDrawerWidth = raw !== null ? clampEditorDrawerWidth(raw) : null;
+        state.editorDrawerWidth = raw !== null ? Number(raw) : null;
         applyExpandedEditorDrawerWidth({ persist: false });
       }
 
@@ -1854,7 +1846,14 @@
         if (!(event instanceof PointerEvent) || event.button !== 0) {
           return;
         }
-        if (!shouldUseResizableEditorDrawer()) {
+        const layout = resolveEditorDrawerLayout({
+          requestedWidth: state.editorDrawerWidth,
+          viewportWidth: window.innerWidth,
+          minWidth: EDITOR_DRAWER_WIDTH_MIN,
+          maxRatio: EDITOR_DRAWER_WIDTH_MAX_RATIO,
+          responsiveBreakpoint: EDITOR_DRAWER_RESPONSIVE_BREAKPOINT,
+        });
+        if (!layout.resizable) {
           return;
         }
         const rect = expandedEditor.getBoundingClientRect();
@@ -1917,9 +1916,11 @@
           return;
         }
         const output = currentExpandedEditorOutput();
-        const editorVisible = !expandedEditor.hidden;
-        const markdownEnabled = editorVisible && isMarkdownOutput(output);
-        expandedEditorToolbar.hidden = !editorVisible;
+        const toolbarState = computeEditorToolbarState({
+          editorHidden: expandedEditor.hidden,
+          outputFormat: output?.output_format,
+        });
+        expandedEditorToolbar.hidden = toolbarState.toolbarHidden;
         for (const button of [
           editorActionBoldBtn,
           editorActionItalicBtn,
@@ -1928,7 +1929,7 @@
           editorActionOrderedListItemBtn,
         ]) {
           if (button) {
-            button.disabled = !markdownEnabled;
+            button.disabled = !toolbarState.markdownActionsEnabled;
           }
         }
       }

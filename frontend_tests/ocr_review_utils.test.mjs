@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyInlineMarkdownWrapper,
   applyLinePrefixMarkdown,
+  computeEditorToolbarState,
   countTextLines,
   computeFloatingControlPlacement,
   detectEditorValidationIssues,
@@ -14,6 +15,7 @@ import {
   lineBandFromLineIndex,
   lineIndexFromTextOffset,
   normalizeReconstructedRenderMode,
+  resolveEditorDrawerLayout,
   tokenBoundsAtOffset,
   textOffsetForLineIndex,
 } from "../app/static/js/ocr_review_utils.mjs";
@@ -235,6 +237,70 @@ test("findBestTokenOccurrence supports punctuation and non-word matches", () => 
   assert.deepEqual(
     findBestTokenOccurrence(text, ",", { preferredOffset: 4, wholeWord: false }),
     { start: 4, end: 5 },
+  );
+});
+
+test("computeEditorToolbarState toggles visibility and markdown action availability", () => {
+  assert.deepEqual(computeEditorToolbarState({ editorHidden: true, outputFormat: "markdown" }), {
+    toolbarHidden: true,
+    markdownActionsEnabled: false,
+  });
+  assert.deepEqual(computeEditorToolbarState({ editorHidden: false, outputFormat: "markdown" }), {
+    toolbarHidden: false,
+    markdownActionsEnabled: true,
+  });
+  assert.deepEqual(computeEditorToolbarState({ editorHidden: false, outputFormat: "latex" }), {
+    toolbarHidden: false,
+    markdownActionsEnabled: false,
+  });
+});
+
+test("resolveEditorDrawerLayout disables resizing under breakpoint", () => {
+  assert.deepEqual(
+    resolveEditorDrawerLayout({
+      requestedWidth: 700,
+      viewportWidth: 1100,
+      minWidth: 420,
+      maxRatio: 0.9,
+      responsiveBreakpoint: 1120,
+    }),
+    { resizable: false, width: null },
+  );
+});
+
+test("resolveEditorDrawerLayout clamps width to min and max bounds", () => {
+  assert.deepEqual(
+    resolveEditorDrawerLayout({
+      requestedWidth: 200,
+      viewportWidth: 1400,
+      minWidth: 420,
+      maxRatio: 0.9,
+      responsiveBreakpoint: 1120,
+    }),
+    { resizable: true, width: 420 },
+  );
+  assert.deepEqual(
+    resolveEditorDrawerLayout({
+      requestedWidth: 2000,
+      viewportWidth: 1400,
+      minWidth: 420,
+      maxRatio: 0.9,
+      responsiveBreakpoint: 1120,
+    }),
+    { resizable: true, width: 1260 },
+  );
+});
+
+test("resolveEditorDrawerLayout keeps resizable state with null width for invalid input", () => {
+  assert.deepEqual(
+    resolveEditorDrawerLayout({
+      requestedWidth: null,
+      viewportWidth: 1400,
+      minWidth: 420,
+      maxRatio: 0.9,
+      responsiveBreakpoint: 1120,
+    }),
+    { resizable: true, width: null },
   );
 });
 

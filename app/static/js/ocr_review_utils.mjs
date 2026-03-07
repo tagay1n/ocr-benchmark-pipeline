@@ -6,6 +6,51 @@ export function normalizeReconstructedRenderMode(rawValue) {
   return "markdown";
 }
 
+export function computeEditorToolbarState({ editorHidden, outputFormat } = {}) {
+  const editorVisible = !Boolean(editorHidden);
+  const markdownEnabled = editorVisible && String(outputFormat || "").trim().toLowerCase() === "markdown";
+  return {
+    toolbarHidden: !editorVisible,
+    markdownActionsEnabled: markdownEnabled,
+  };
+}
+
+export function resolveEditorDrawerLayout({
+  requestedWidth,
+  viewportWidth,
+  minWidth = 420,
+  maxRatio = 0.9,
+  responsiveBreakpoint = 1120,
+} = {}) {
+  const viewport = Number(viewportWidth);
+  if (!Number.isFinite(viewport) || viewport <= 0) {
+    return { resizable: false, width: null };
+  }
+  const resizable = viewport > Number(responsiveBreakpoint);
+  if (!resizable) {
+    return { resizable: false, width: null };
+  }
+
+  const max = Math.floor(viewport * Number(maxRatio));
+  if (!Number.isFinite(max) || max <= 0) {
+    return { resizable: false, width: null };
+  }
+  const min = Math.min(Math.max(1, Math.floor(Number(minWidth) || 1)), max);
+
+  if (requestedWidth === null || requestedWidth === undefined) {
+    return { resizable: true, width: null };
+  }
+  if (typeof requestedWidth === "string" && requestedWidth.trim() === "") {
+    return { resizable: true, width: null };
+  }
+  const raw = Number(requestedWidth);
+  if (!Number.isFinite(raw)) {
+    return { resizable: true, width: null };
+  }
+  const width = Math.max(min, Math.min(max, Math.round(raw)));
+  return { resizable: true, width };
+}
+
 function containsMarkdownTableLike(text) {
   const normalized = String(text ?? "");
   if (!normalized) {
