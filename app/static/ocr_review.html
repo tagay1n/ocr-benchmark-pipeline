@@ -376,6 +376,70 @@
         justify-content: flex-end;
       }
 
+      .modal-layout-list {
+        max-height: 250px;
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fff;
+      }
+
+      .modal-layout-option {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 8px 10px;
+        font-size: 14px;
+        line-height: 1.25;
+        cursor: pointer;
+      }
+
+      .modal-layout-option + .modal-layout-option {
+        border-top: 1px solid #ebe6da;
+      }
+
+      .modal-layout-option input {
+        margin: 0;
+      }
+
+      .modal-layout-empty {
+        padding: 12px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .modal-layout-text {
+        min-width: 0;
+        flex: 1 1 auto;
+      }
+
+      .modal-layout-main {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .modal-layout-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(0, 0, 0, 0.2);
+        flex: 0 0 auto;
+      }
+
+      .modal-layout-title {
+        font-weight: 600;
+      }
+
+      .modal-layout-meta {
+        margin-top: 3px;
+        font-size: 12px;
+        color: var(--muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       #reextract-modal-run-btn {
         position: relative;
       }
@@ -496,6 +560,11 @@
         box-shadow: 0 0 0 2px rgba(11, 122, 117, 0.18);
       }
 
+      .recon-item.modal-hovered {
+        outline: 2px dashed rgba(11, 122, 117, 0.74);
+        outline-offset: 2px;
+      }
+
       .recon-item-content {
         white-space: pre-wrap;
         word-break: break-word;
@@ -551,6 +620,11 @@
       .box.layout-selected {
         border-width: 2px;
         box-shadow: 0 0 0 2px rgba(11, 122, 117, 0.2);
+      }
+
+      .box.modal-hovered {
+        outline: 2px dashed rgba(11, 122, 117, 0.74);
+        outline-offset: 2px;
       }
 
       .box-label {
@@ -790,19 +864,10 @@
     <div id="reextract-modal" class="modal-backdrop" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="reextract-modal-title">
         <h2 id="reextract-modal-title">Detect again</h2>
-        <p class="modal-hint">Adjust OCR extraction prompt and generation parameters.</p>
+        <p class="modal-hint">Select layouts and extraction parameters.</p>
         <div class="modal-field">
-          <label for="reextract-modal-prompt-template">Prompt template</label>
-          <textarea
-            id="reextract-modal-prompt-template"
-            class="modal-textarea"
-            spellcheck="false"
-          >Layout class: {class_name}.{caption_line}
-Extract only the content inside this crop.
-Return only extracted content, without explanations.
-Preserve line breaks exactly as shown in the crop.
-Do not dehyphenate words split by line breaks.
-{format_rule}</textarea>
+          <label>Layouts to detect again</label>
+          <div id="reextract-modal-layouts" class="modal-layout-list" role="group" aria-label="Layouts to detect again"></div>
         </div>
         <div class="modal-grid">
           <div class="modal-field">
@@ -882,7 +947,7 @@ Do not dehyphenate words split by line breaks.
       const historyBackBtn = document.getElementById("history-back-btn");
       const historyForthBtn = document.getElementById("history-forth-btn");
       const reextractModal = document.getElementById("reextract-modal");
-      const reextractModalPromptTemplateInput = document.getElementById("reextract-modal-prompt-template");
+      const reextractModalLayoutsContainer = document.getElementById("reextract-modal-layouts");
       const reextractModalTemperatureInput = document.getElementById("reextract-modal-temperature");
       const reextractModalMaxRetriesInput = document.getElementById("reextract-modal-max-retries");
       const reextractModalCancelBtn = document.getElementById("reextract-modal-cancel-btn");
@@ -891,10 +956,12 @@ Do not dehyphenate words split by line breaks.
       const state = {
         pageId: null,
         page: null,
+        pageLayouts: [],
         outputs: [],
         serverOutputsByLayoutId: {},
         localEditsByLayoutId: {},
         selectedLayoutId: null,
+        reextractHoverLayoutId: null,
         reviewSubmitInProgress: false,
         reextractInProgress: false,
         zoomMode: "automatic",
@@ -1184,6 +1251,51 @@ Do not dehyphenate words split by line breaks.
           .toUpperCase();
       }
 
+      function formatCoord(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return "0.0000";
+        }
+        return numeric.toFixed(4);
+      }
+
+      function bboxSummaryText(bbox) {
+        if (!bbox || typeof bbox !== "object") {
+          return "bbox unavailable";
+        }
+        return `x1 ${formatCoord(bbox.x1)} y1 ${formatCoord(bbox.y1)} x2 ${formatCoord(bbox.x2)} y2 ${formatCoord(bbox.y2)}`;
+      }
+
+      function compactTextPreview(value, maxLength = 90) {
+        const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
+        if (!normalized) {
+          return "";
+        }
+        if (normalized.length <= maxLength) {
+          return normalized;
+        }
+        return `${normalized.slice(0, maxLength - 1)}…`;
+      }
+
+      function outputPreviewText(layoutId) {
+        const output = outputByLayoutId(layoutId);
+        if (!output) {
+          return "No OCR yet";
+        }
+        const format = String(output.output_format || "").toLowerCase();
+        if (format === "skip") {
+          return "Skipped region (no text extraction)";
+        }
+        let text = String(output.content ?? "");
+        if (format === "html") {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(`<body>${text}</body>`, "text/html");
+          text = doc.body.textContent || text;
+        }
+        const preview = compactTextPreview(text);
+        return preview || "No OCR content";
+      }
+
       function hashString(value) {
         let hash = 0;
         for (let i = 0; i < value.length; i += 1) {
@@ -1273,18 +1385,141 @@ Do not dehyphenate words split by line breaks.
 
       function setReextractModalBusy(busy) {
         const inProgress = Boolean(busy);
-        reextractModalRunBtn.disabled = inProgress;
         reextractModalRunBtn.classList.toggle("is-busy", inProgress);
         reextractModalCancelBtn.disabled = inProgress;
-        reextractModalPromptTemplateInput.disabled = inProgress;
         reextractModalTemperatureInput.disabled = inProgress;
         reextractModalMaxRetriesInput.disabled = inProgress;
+        const layoutInputs = reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]');
+        for (const checkbox of layoutInputs) {
+          checkbox.disabled = inProgress;
+        }
+        updateReextractModalRunButtonState();
+      }
+
+      function normalizedLayoutsForReextract() {
+        const rows = [];
+        const seen = new Set();
+        for (const row of state.pageLayouts) {
+          const id = Number(row?.id);
+          const readingOrder = Number(row?.reading_order);
+          if (!Number.isInteger(id) || id <= 0 || seen.has(id)) {
+            continue;
+          }
+          seen.add(id);
+          const bbox = row && typeof row === "object" ? row.bbox : null;
+          rows.push({
+            id,
+            reading_order: Number.isInteger(readingOrder) && readingOrder > 0 ? readingOrder : id,
+            class_name: String(row?.class_name || ""),
+            bbox: bbox && typeof bbox === "object" ? bbox : null,
+          });
+        }
+        rows.sort((a, b) => {
+          const orderCmp = Number(a.reading_order) - Number(b.reading_order);
+          if (orderCmp !== 0) return orderCmp;
+          return Number(a.id) - Number(b.id);
+        });
+        return rows;
+      }
+
+      function defaultReextractSelection(layouts) {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        if (
+          Number.isInteger(selectedLayoutId) &&
+          selectedLayoutId > 0 &&
+          layouts.some((layout) => Number(layout.id) === selectedLayoutId)
+        ) {
+          return new Set([selectedLayoutId]);
+        }
+        return new Set(layouts.map((layout) => Number(layout.id)));
+      }
+
+      function updateReextractModalRunButtonState() {
+        const checkboxes = Array.from(
+          reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]'),
+        );
+        const checkedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+        reextractModalRunBtn.disabled = state.reextractInProgress || checkboxes.length === 0 || checkedCount === 0;
+      }
+
+      function renderReextractLayoutOptions() {
+        const layouts = normalizedLayoutsForReextract();
+        const selectedByDefault = defaultReextractSelection(layouts);
+        reextractModalLayoutsContainer.innerHTML = "";
+        setReextractHoveredLayout(null);
+
+        if (layouts.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "modal-layout-empty";
+          empty.textContent = "No layouts available on this page.";
+          reextractModalLayoutsContainer.appendChild(empty);
+          updateReextractModalRunButtonState();
+          return;
+        }
+
+        for (const layout of layouts) {
+          const option = document.createElement("label");
+          option.className = "modal-layout-option";
+
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.name = "reextract-layout-id";
+          checkbox.value = String(layout.id);
+          checkbox.checked = selectedByDefault.has(layout.id);
+          checkbox.disabled = state.reextractInProgress;
+          checkbox.addEventListener("change", () => {
+            updateReextractModalRunButtonState();
+          });
+          option.appendChild(checkbox);
+
+          const textWrap = document.createElement("div");
+          textWrap.className = "modal-layout-text";
+
+          const main = document.createElement("div");
+          main.className = "modal-layout-main";
+
+          const swatch = document.createElement("span");
+          swatch.className = "modal-layout-swatch";
+          swatch.style.background = colorForClass(layout.class_name);
+          main.appendChild(swatch);
+
+          const title = document.createElement("span");
+          title.className = "modal-layout-title";
+          title.textContent = `${layout.reading_order}. ${formatClassLabel(layout.class_name)}`;
+          main.appendChild(title);
+
+          textWrap.appendChild(main);
+
+          const meta = document.createElement("div");
+          meta.className = "modal-layout-meta";
+          meta.textContent = `${outputPreviewText(layout.id)} | ${bboxSummaryText(layout.bbox)}`;
+          textWrap.appendChild(meta);
+
+          option.appendChild(textWrap);
+
+          option.addEventListener("mouseenter", () => {
+            setReextractHoveredLayout(layout.id);
+          });
+          option.addEventListener("mouseleave", () => {
+            setReextractHoveredLayout(null);
+          });
+          option.addEventListener("focusin", () => {
+            setReextractHoveredLayout(layout.id);
+          });
+          option.addEventListener("focusout", () => {
+            setReextractHoveredLayout(null);
+          });
+
+          reextractModalLayoutsContainer.appendChild(option);
+        }
+        updateReextractModalRunButtonState();
       }
 
       function openReextractModal() {
         if (state.reviewSubmitInProgress || state.reextractInProgress) {
           return;
         }
+        renderReextractLayoutOptions();
         reextractModal.hidden = false;
       }
 
@@ -1292,15 +1527,11 @@ Do not dehyphenate words split by line breaks.
         if (state.reextractInProgress) {
           return;
         }
+        setReextractHoveredLayout(null);
         reextractModal.hidden = true;
       }
 
       function parseReextractPayload() {
-        const promptTemplate = String(reextractModalPromptTemplateInput.value ?? "").trim();
-        if (!promptTemplate) {
-          throw new Error("Prompt template cannot be empty.");
-        }
-
         const temperature = Number(reextractModalTemperatureInput.value);
         if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) {
           throw new Error("Temperature must be between 0 and 2.");
@@ -1311,8 +1542,17 @@ Do not dehyphenate words split by line breaks.
           throw new Error("Max retries per layout must be an integer between 1 and 10.");
         }
 
+        const layoutIds = Array.from(
+          reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]:checked'),
+        )
+          .map((checkbox) => Number(checkbox.value))
+          .filter((value) => Number.isInteger(value) && value > 0);
+        if (layoutIds.length === 0) {
+          throw new Error("Select at least one layout to detect again.");
+        }
+
         return {
-          prompt_template: promptTemplate,
+          layout_ids: layoutIds,
           temperature,
           max_retries_per_layout: maxRetries,
         };
@@ -1385,6 +1625,22 @@ Do not dehyphenate words split by line breaks.
         return state.outputs.find((output) => Number(output.layout_id) === Number(layoutId)) || null;
       }
 
+      function applyReextractHoverStyles() {
+        const hoveredId = Number(state.reextractHoverLayoutId);
+        for (const box of sourceOverlay.querySelectorAll(".box[data-layout-id]")) {
+          box.classList.toggle("modal-hovered", Number(box.dataset.layoutId) === hoveredId);
+        }
+        for (const item of reconstructionSurface.querySelectorAll(".recon-item[data-layout-id]")) {
+          item.classList.toggle("modal-hovered", Number(item.dataset.layoutId) === hoveredId);
+        }
+      }
+
+      function setReextractHoveredLayout(layoutId) {
+        const normalized = Number(layoutId);
+        state.reextractHoverLayoutId = Number.isInteger(normalized) && normalized > 0 ? normalized : null;
+        applyReextractHoverStyles();
+      }
+
       function applySelectedStyles() {
         const selectedId = Number(state.selectedLayoutId);
         for (const row of outputsBody.querySelectorAll("tr[data-layout-id]")) {
@@ -1396,6 +1652,7 @@ Do not dehyphenate words split by line breaks.
         for (const item of reconstructionSurface.querySelectorAll(".recon-item[data-layout-id]")) {
           item.classList.toggle("recon-selected", Number(item.dataset.layoutId) === selectedId);
         }
+        applyReextractHoverStyles();
       }
 
       function scrollViewportToLayout(layoutId, viewport, content) {
@@ -1788,13 +2045,15 @@ Do not dehyphenate words split by line breaks.
       }
 
       async function loadPageData() {
-        const [pagePayload, outputsPayload] = await Promise.all([
+        const [pagePayload, outputsPayload, layoutsPayload] = await Promise.all([
           fetchJson(`/api/pages/${state.pageId}`),
           fetchJson(`/api/pages/${state.pageId}/ocr-outputs`),
+          fetchJson(`/api/pages/${state.pageId}/layouts`),
         ]);
         state.page = pagePayload.page;
         pageImage.src = pagePayload.image_url;
         state.outputs = outputsPayload.outputs || [];
+        state.pageLayouts = Array.isArray(layoutsPayload.layouts) ? layoutsPayload.layouts : [];
         state.serverOutputsByLayoutId = Object.fromEntries(
           state.outputs.map((output) => [String(output.layout_id), { ...output }]),
         );

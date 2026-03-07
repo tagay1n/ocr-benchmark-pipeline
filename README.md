@@ -110,6 +110,14 @@ node --test frontend_tests/*.test.mjs
 - `GET /api/pipeline/activity`
 - `GET /api/pipeline/activity/stream`
 
+## OCR Prompt Debug Artifacts
+
+Each OCR extraction run writes resolved text prompts (without image clip bytes) to:
+
+- `_artifacts/ocr_prompts/<timestamp>_page_<page_id>.jsonl`
+
+Each JSONL row includes page/layout identifiers, class, output format, caption targets, and the exact prompt sent to Gemini.
+
 ## Documentation Policy
 
 This repository keeps active project documentation in only two files:

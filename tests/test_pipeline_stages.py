@@ -520,6 +520,64 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(outputs_payload["outputs"][0]["output_format"], "markdown")
         self.assertEqual(outputs_payload["outputs"][0]["content"], "Extracted text")
 
+    def test_ocr_extract_writes_prompt_debug_artifact(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=False,
+            gemini_keys=("k1",),
+            gemini_usage_path=self.project_root / "_artifacts" / "gemini_usage.json",
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
+        db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
+
+        self._write_image("ocr-prompt-debug.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", return_value="Extracted text"
+        ):
+            result = pipeline_runtime._ocr_extract_handler({"page_id": page_id, "payload": {}, "id": 1, "stage": "ocr_extract"})
+
+        prompt_debug_path = Path(str(result.get("prompt_debug_path", "")))
+        self.assertTrue(prompt_debug_path.exists())
+        self.assertTrue(prompt_debug_path.name.endswith(f"_page_{page_id}.jsonl"))
+
+        rows = [
+            json.loads(line)
+            for line in prompt_debug_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertGreaterEqual(len(rows), 1)
+        first = rows[0]
+        self.assertEqual(first["page_id"], page_id)
+        self.assertEqual(first["class_name"], "text")
+        self.assertEqual(first["output_format"], "markdown")
+        self.assertIn("Layout class: text.", first["prompt"])
+        self.assertNotIn("clip", first["prompt"].lower())
+
     def test_ocr_extract_stores_exhausted_keys_as_json_array(self) -> None:
         self.test_settings = Settings(
             project_root=self.project_root,
@@ -699,7 +757,7 @@ class PipelineStagesTests(unittest.TestCase):
         self._write_image("ocr-reextract-params.png", b"fake-image")
         main.scan_images()
         page_id = self._first_page_id()
-        main.create_page_layout(
+        layout_payload = main.create_page_layout(
             page_id,
             main.CreateLayoutRequest(
                 class_name="text",
@@ -707,6 +765,7 @@ class PipelineStagesTests(unittest.TestCase):
                 bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
             ),
         )
+        layout_id = int(layout_payload["layout"]["id"])
         main.complete_layout_review(page_id)
 
         fake_result = {
@@ -724,6 +783,7 @@ class PipelineStagesTests(unittest.TestCase):
             },
         }
         request_payload = main.ReextractOcrRequest(
+            layout_ids=[layout_id],
             prompt_template="Layout class: {class_name}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
@@ -734,6 +794,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(result, fake_result)
         extract_mock.assert_called_once_with(
             page_id,
+            layout_ids=[layout_id],
             prompt_template="Layout class: {class_name}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
@@ -776,6 +837,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(result["status"], "ocr_done")
         extract_mock.assert_called_once_with(
             page_id,
+            layout_ids=None,
             prompt_template=None,
             temperature=None,
             max_retries_per_layout=None,
@@ -818,6 +880,77 @@ class PipelineStagesTests(unittest.TestCase):
             result = main.reextract_ocr(page_id, main.ReextractOcrRequest())
 
         self.assertEqual(result["status"], "ocr_done")
+
+    def test_manual_ocr_reextract_selected_layouts_updates_only_selected_outputs(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=False,
+            gemini_keys=("k1",),
+            gemini_usage_path=self.project_root / "_artifacts" / "gemini_usage.json",
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
+        db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
+
+        self._write_image("ocr-reextract-selected-layouts.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        first_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=0.5, y2=0.5),
+            ),
+        )["layout"]
+        second_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.5, y1=0.5, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+        first_layout_id = int(first_layout["id"])
+        second_layout_id = int(second_layout["id"])
+
+        main.complete_layout_review(page_id)
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", side_effect=["Initial first", "Initial second"]
+        ):
+            pipeline_runtime._ocr_extract_handler({"page_id": page_id, "payload": {}, "id": 1, "stage": "ocr_extract"})
+
+        reviewed = main.complete_ocr_review(page_id)
+        self.assertEqual(reviewed["status"], "ocr_reviewed")
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", side_effect=["Updated first"]
+        ):
+            result = main.reextract_ocr(page_id, main.ReextractOcrRequest(layout_ids=[first_layout_id]))
+
+        self.assertEqual(result["status"], "ocr_done")
+        self.assertEqual(result["layouts_total"], 2)
+        self.assertEqual(result["layouts_selected"], 1)
+        self.assertEqual(result["extracted_count"], 1)
+        self.assertEqual(result["requests_count"], 1)
+
+        outputs_payload = main.page_ocr_outputs(page_id)
+        outputs_by_layout_id = {int(output["layout_id"]): str(output["content"]) for output in outputs_payload["outputs"]}
+        self.assertEqual(outputs_by_layout_id[first_layout_id], "Updated first")
+        self.assertEqual(outputs_by_layout_id[second_layout_id], "Initial second")
 
     def test_manual_ocr_reextract_failure_keeps_previous_outputs(self) -> None:
         self.test_settings = Settings(

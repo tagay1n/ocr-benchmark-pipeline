@@ -257,6 +257,21 @@ def _crop_layout_png_bytes(image_path: Path, bbox: dict[str, float]) -> bytes:
         return output.getvalue()
 
 
+def _write_prompt_debug_dump(page_id: int, prompt_rows: list[dict[str, Any]]) -> Path | None:
+    if not prompt_rows:
+        return None
+    try:
+        prompts_dir = (settings.project_root / "_artifacts" / "ocr_prompts").resolve()
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        output_path = prompts_dir / f"{timestamp}_page_{int(page_id)}.jsonl"
+        lines = [json.dumps(row, ensure_ascii=False) for row in prompt_rows]
+        output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return output_path
+    except OSError:
+        return None
+
+
 def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
     with get_session() as session:
         layouts = session.execute(
@@ -305,6 +320,7 @@ def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
 def extract_ocr_for_page(
     page_id: int,
     *,
+    layout_ids: list[int] | None = None,
     prompt_template: str | None = None,
     temperature: float | None = None,
     max_retries_per_layout: int | None = None,
@@ -327,6 +343,35 @@ def extract_ocr_for_page(
     if not layouts:
         raise ValueError("No layouts found for OCR extraction.")
 
+    selected_layout_ids: list[int] | None = None
+    layouts_to_process = list(layouts)
+    if layout_ids is not None:
+        normalized_ids: list[int] = []
+        seen_ids: set[int] = set()
+        for raw_layout_id in layout_ids:
+            layout_id = int(raw_layout_id)
+            if layout_id <= 0 or layout_id in seen_ids:
+                continue
+            seen_ids.add(layout_id)
+            normalized_ids.append(layout_id)
+        if not normalized_ids:
+            raise ValueError("layout_ids must contain at least one positive layout id.")
+
+        page_layout_ids = {int(layout["id"]) for layout in layouts}
+        missing_layout_ids = [layout_id for layout_id in normalized_ids if layout_id not in page_layout_ids]
+        if missing_layout_ids:
+            raise ValueError(
+                f"Selected layout ids are not present on this page: {', '.join(str(value) for value in missing_layout_ids)}."
+            )
+
+        selected_layout_ids = normalized_ids
+        selected_layout_id_set = set(selected_layout_ids)
+        layouts_to_process = [
+            layout for layout in layouts if int(layout["id"]) in selected_layout_id_set
+        ]
+        if not layouts_to_process:
+            raise ValueError("No selected layouts available for OCR extraction.")
+
     resolved_prompt_template = (
         DEFAULT_PROMPT_TEMPLATE
         if prompt_template is None or not str(prompt_template).strip()
@@ -344,14 +389,26 @@ def extract_ocr_for_page(
     exhausted_keys = _load_usage_state()
 
     pending_outputs: list[dict[str, Any]] = []
+    prompt_debug_rows: list[dict[str, Any]] = []
     extracted_count = 0
     skipped_count = 0
     request_count = 0
-    for layout in layouts:
+    for layout in layouts_to_process:
         prompt, output_format = _prompt_for_layout(
             layout,
             layout["caption_targets"],
             prompt_template=resolved_prompt_template,
+        )
+        prompt_debug_rows.append(
+            {
+                "page_id": int(page_id),
+                "layout_id": int(layout["id"]),
+                "class_name": str(layout["class_name"]),
+                "reading_order": int(layout["reading_order"]),
+                "output_format": output_format,
+                "caption_targets": list(layout["caption_targets"]),
+                "prompt": prompt,
+            }
         )
         if output_format == "skip":
             pending_outputs.append(
@@ -391,6 +448,7 @@ def extract_ocr_for_page(
                     continue
                 last_error = error_text
         if last_error is not None:
+            _write_prompt_debug_dump(page_id, prompt_debug_rows)
             raise RuntimeError(f"OCR extraction failed for layout {layout['id']}: {last_error}")
 
         pending_outputs.append(
@@ -406,7 +464,15 @@ def extract_ocr_for_page(
 
     now = _utc_now()
     with get_session() as session:
-        session.execute(delete(OcrOutput).where(OcrOutput.page_id == page_id))
+        if selected_layout_ids is None:
+            session.execute(delete(OcrOutput).where(OcrOutput.page_id == page_id))
+        else:
+            session.execute(
+                delete(OcrOutput).where(
+                    OcrOutput.page_id == page_id,
+                    OcrOutput.layout_id.in_(selected_layout_ids),
+                )
+            )
         for output in pending_outputs:
             session.add(
                 OcrOutput(
@@ -427,14 +493,18 @@ def extract_ocr_for_page(
         page_row.status = "ocr_done"
         page_row.updated_at = now
 
+    prompt_debug_path = _write_prompt_debug_dump(page_id, prompt_debug_rows)
+
     return {
         "page_id": page_id,
         "status": "ocr_done",
         "model": GEMINI_MODEL,
         "layouts_total": len(layouts),
+        "layouts_selected": len(layouts_to_process),
         "extracted_count": extracted_count,
         "skipped_count": skipped_count,
         "requests_count": request_count,
+        "prompt_debug_path": None if prompt_debug_path is None else str(prompt_debug_path),
         "inference_params": {
             "temperature": resolved_temperature,
             "max_retries_per_layout": resolved_max_retries,

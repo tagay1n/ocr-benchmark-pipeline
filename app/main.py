@@ -180,6 +180,7 @@ class UpdateOcrOutputRequest(BaseModel):
 
 
 class ReextractOcrRequest(BaseModel):
+    layout_ids: list[int] | None = None
     prompt_template: str | None = Field(default=None, max_length=20000)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_retries_per_layout: int | None = Field(default=None, ge=1, le=10)
@@ -886,6 +887,7 @@ def reextract_ocr(page_id: int, payload: ReextractOcrRequest | None = None) -> d
         message="Manual OCR reextraction started.",
         data={
             "trigger": "manual_reextract",
+            "layout_ids": params.layout_ids,
             "temperature": params.temperature,
             "max_retries_per_layout": params.max_retries_per_layout,
             "prompt_template": params.prompt_template,
@@ -894,6 +896,7 @@ def reextract_ocr(page_id: int, payload: ReextractOcrRequest | None = None) -> d
     try:
         result = extract_ocr_for_page(
             page_id,
+            layout_ids=params.layout_ids,
             prompt_template=params.prompt_template,
             temperature=params.temperature,
             max_retries_per_layout=params.max_retries_per_layout,
