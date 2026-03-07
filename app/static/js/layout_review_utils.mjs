@@ -42,6 +42,172 @@ export function computeZoomScale({
   return clampZoomPercent(zoomPercent) / 100;
 }
 
+export function reconstructionLineHeight(outputFormat) {
+  const normalized = String(outputFormat || "").trim().toLowerCase();
+  if (normalized === "latex") {
+    return 1.02;
+  }
+  if (normalized === "html") {
+    return 1.08;
+  }
+  return 1.1;
+}
+
+export function reconstructionHorizontalScale({
+  measuredContentWidth,
+  availableWidth,
+  maxScale = 1.22,
+  minGainRatio = 0.03,
+}) {
+  const measured = Number(measuredContentWidth);
+  const available = Number(availableWidth);
+  if (!Number.isFinite(measured) || !Number.isFinite(available) || measured <= 0 || available <= 0) {
+    return 1;
+  }
+  const ratio = available / measured;
+  if (!Number.isFinite(ratio) || ratio <= 1 + Number(minGainRatio || 0)) {
+    return 1;
+  }
+  const cap = Number(maxScale);
+  if (!Number.isFinite(cap) || cap <= 1) {
+    return 1;
+  }
+  return Math.min(cap, ratio);
+}
+
+export function countStretchableSpaces(value) {
+  const text = String(value ?? "");
+  if (!text) {
+    return 0;
+  }
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === " ") {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+export function countStretchableGlyphs(value) {
+  const text = String(value ?? "");
+  if (!text) {
+    return 0;
+  }
+  let count = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === " " || char === "\n" || char === "\r" || char === "\t") {
+      continue;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+export function reconstructionWordSpacing({
+  measuredContentWidth,
+  availableWidth,
+  spacesCount,
+  maxWordSpacing = 1.6,
+  minGainRatio = 0.02,
+}) {
+  const measured = Number(measuredContentWidth);
+  const available = Number(availableWidth);
+  const spaces = Number(spacesCount);
+  if (!Number.isFinite(measured) || !Number.isFinite(available) || measured <= 0 || available <= 0) {
+    return 0;
+  }
+  if (!Number.isFinite(spaces) || spaces <= 0) {
+    return 0;
+  }
+  const gap = available - measured;
+  if (gap <= 0) {
+    return 0;
+  }
+  const gainThreshold = available * Math.max(0, Number(minGainRatio) || 0);
+  if (gap <= gainThreshold) {
+    return 0;
+  }
+  const raw = gap / spaces;
+  const cap = Number(maxWordSpacing);
+  if (!Number.isFinite(raw) || raw <= 0 || !Number.isFinite(cap) || cap <= 0) {
+    return 0;
+  }
+  return Math.min(cap, raw);
+}
+
+export function reconstructionLetterSpacing({
+  measuredContentWidth,
+  availableWidth,
+  glyphsCount,
+  maxLetterSpacing = 0.7,
+  minGainRatio = 0.006,
+}) {
+  const measured = Number(measuredContentWidth);
+  const available = Number(availableWidth);
+  const glyphs = Number(glyphsCount);
+  if (!Number.isFinite(measured) || !Number.isFinite(available) || measured <= 0 || available <= 0) {
+    return 0;
+  }
+  if (!Number.isFinite(glyphs) || glyphs <= 1) {
+    return 0;
+  }
+  const gap = available - measured;
+  if (gap <= 0) {
+    return 0;
+  }
+  const gainThreshold = available * Math.max(0, Number(minGainRatio) || 0);
+  if (gap <= gainThreshold) {
+    return 0;
+  }
+  const raw = gap / Math.max(1, glyphs - 1);
+  const cap = Number(maxLetterSpacing);
+  if (!Number.isFinite(raw) || raw <= 0 || !Number.isFinite(cap) || cap <= 0) {
+    return 0;
+  }
+  return Math.min(cap, raw);
+}
+
+export function findMaxFittingFontSize({
+  minFontSize = 6,
+  maxFontSize,
+  iterations = 12,
+  fitsAtFontSize,
+}) {
+  const min = Number(minFontSize);
+  const max = Number(maxFontSize);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= 0) {
+    return 6;
+  }
+  if (typeof fitsAtFontSize !== "function") {
+    return Math.max(1, Math.min(min, max));
+  }
+  const safeMin = Math.max(1, Math.min(min, max));
+  const safeMax = Math.max(safeMin, max);
+  if (!fitsAtFontSize(safeMin)) {
+    return safeMin;
+  }
+  if (fitsAtFontSize(safeMax)) {
+    return safeMax;
+  }
+
+  let low = safeMin;
+  let high = safeMax;
+  let best = safeMin;
+  const passes = Number.isInteger(iterations) && iterations > 0 ? iterations : 12;
+  for (let index = 0; index < passes; index += 1) {
+    const mid = (low + high) / 2;
+    if (fitsAtFontSize(mid)) {
+      best = mid;
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return best;
+}
+
 export function pointHandleForCoordinateKey(key) {
   if (key === "x1" || key === "y1") {
     return "nw";

@@ -545,8 +545,8 @@
         padding: 0;
         overflow: hidden;
         display: flex;
-        align-items: center;
-        justify-content: center;
+        align-items: stretch;
+        justify-content: stretch;
         font-size: 11px;
         line-height: 1.25;
         color: #1e1f1c;
@@ -569,12 +569,15 @@
         white-space: pre-wrap;
         word-break: break-word;
         overflow-wrap: anywhere;
+        width: 100%;
+        height: 100%;
         max-width: 100%;
         max-height: 100%;
         overflow: hidden;
         font-size: 12px;
-        line-height: 1.25;
-        text-align: center;
+        line-height: 1.1;
+        text-align: left;
+        transform-origin: top left;
       }
 
       .recon-item-content.markdown {
@@ -889,10 +892,17 @@
     <script type="module">
       import {
         clampZoomPercent,
+        countStretchableGlyphs,
         computeZoomScale,
         computeViewportScrollTargetForLayoutId,
+        countStretchableSpaces,
+        findMaxFittingFontSize,
         normalizeReviewHistory,
         previousHistoryPageId,
+        reconstructionHorizontalScale,
+        reconstructionLetterSpacing,
+        reconstructionLineHeight,
+        reconstructionWordSpacing,
         updateReviewHistoryOnVisit,
       } from "./js/layout_review_utils.mjs";
 
@@ -1179,6 +1189,7 @@
         updateZoomMenuSelection();
 
         requestAnimationFrame(() => {
+          refitReconstructedContent();
           if (state.panelVisibility.source) {
             centerPreviewInViewport(sourceViewport, sourceWrap);
           }
@@ -1249,21 +1260,6 @@
           .replace(/_/g, " ")
           .trim()
           .toUpperCase();
-      }
-
-      function formatCoord(value) {
-        const numeric = Number(value);
-        if (!Number.isFinite(numeric)) {
-          return "0.0000";
-        }
-        return numeric.toFixed(4);
-      }
-
-      function bboxSummaryText(bbox) {
-        if (!bbox || typeof bbox !== "object") {
-          return "bbox unavailable";
-        }
-        return `x1 ${formatCoord(bbox.x1)} y1 ${formatCoord(bbox.y1)} x2 ${formatCoord(bbox.x2)} y2 ${formatCoord(bbox.y2)}`;
       }
 
       function compactTextPreview(value, maxLength = 90) {
@@ -1406,12 +1402,10 @@
             continue;
           }
           seen.add(id);
-          const bbox = row && typeof row === "object" ? row.bbox : null;
           rows.push({
             id,
             reading_order: Number.isInteger(readingOrder) && readingOrder > 0 ? readingOrder : id,
             class_name: String(row?.class_name || ""),
-            bbox: bbox && typeof bbox === "object" ? bbox : null,
           });
         }
         rows.sort((a, b) => {
@@ -1492,7 +1486,7 @@
 
           const meta = document.createElement("div");
           meta.className = "modal-layout-meta";
-          meta.textContent = `${outputPreviewText(layout.id)} | ${bboxSummaryText(layout.bbox)}`;
+          meta.textContent = outputPreviewText(layout.id);
           textWrap.appendChild(meta);
 
           option.appendChild(textWrap);
@@ -1780,25 +1774,27 @@
         return appendPlainContent(container, content, "markdown");
       }
 
-      function estimateLineCount(text, availableWidthPx) {
-        const width = Number(availableWidthPx);
-        if (!Number.isFinite(width) || width <= 0) {
-          return 1;
-        }
-        const approxCharsPerLine = Math.max(8, Math.floor(width / 7));
-        const lines = String(text ?? "").split(/\r?\n/);
-        let count = 0;
-        for (const line of lines) {
-          const length = line.length;
-          count += Math.max(1, Math.ceil(length / approxCharsPerLine));
-        }
-        return Math.max(1, count);
-      }
-
       function contentFitsInItem(contentNode, availableWidth, availableHeight) {
         const maxWidth = Math.ceil(availableWidth + 1);
         const maxHeight = Math.ceil(availableHeight + 1);
         return contentNode.scrollWidth <= maxWidth && contentNode.scrollHeight <= maxHeight;
+      }
+
+      function measureIntrinsicContentWidth(contentNode) {
+        if (!contentNode) {
+          return 0;
+        }
+        const previousWidth = contentNode.style.width;
+        const previousMaxWidth = contentNode.style.maxWidth;
+        contentNode.style.width = "max-content";
+        contentNode.style.maxWidth = "none";
+        const measured = Number(contentNode.scrollWidth);
+        contentNode.style.width = previousWidth;
+        contentNode.style.maxWidth = previousMaxWidth;
+        if (!Number.isFinite(measured) || measured <= 0) {
+          return 0;
+        }
+        return measured;
       }
 
       function fitReconstructedContent(item, contentNode, output) {
@@ -1810,39 +1806,119 @@
           return;
         }
 
-        const availableWidth = item.clientWidth;
-        const availableHeight = item.clientHeight;
-        if (availableWidth <= 6 || availableHeight <= 6) {
+        const availableWidth = Math.max(1, item.clientWidth - 2);
+        const availableHeight = Math.max(1, item.clientHeight - 2);
+        if (availableWidth <= 4 || availableHeight <= 4) {
           return;
         }
 
-        const rawText = String(output.content ?? "");
-        const estimatedLines = estimateLineCount(rawText, availableWidth);
-        let high = Math.min(42, Math.max(8, availableHeight));
-        const estimatedByHeight = Math.floor((availableHeight / Math.max(1, estimatedLines)) * 1.35);
-        high = Math.min(high, Math.max(8, estimatedByHeight));
-        if (format === "html") {
-          high = Math.min(18, Math.max(9, high));
-        }
-        let low = 6;
-        let best = low;
-        const lineHeight = format === "latex" ? 1.2 : 1.25;
+        contentNode.style.width = `${availableWidth}px`;
+        contentNode.style.height = `${availableHeight}px`;
+        contentNode.style.transform = "scaleX(1)";
+        contentNode.style.wordSpacing = "0px";
+        contentNode.style.letterSpacing = "0px";
 
-        for (let i = 0; i < 10; i += 1) {
-          const mid = (low + high) / 2;
-          contentNode.style.fontSize = `${mid}px`;
-          contentNode.style.lineHeight = String(lineHeight);
-          if (contentFitsInItem(contentNode, availableWidth, availableHeight)) {
-            best = mid;
-            low = mid + 0.35;
-          } else {
-            high = mid - 0.35;
+        const lineHeight = reconstructionLineHeight(format);
+        contentNode.style.lineHeight = String(lineHeight);
+
+        const maxFontSize = Math.max(6, Math.min(availableWidth, availableHeight));
+        const finalSize = findMaxFittingFontSize({
+          minFontSize: 6,
+          maxFontSize,
+          iterations: 14,
+          fitsAtFontSize(fontSize) {
+            contentNode.style.fontSize = `${fontSize}px`;
+            return contentFitsInItem(contentNode, availableWidth, availableHeight);
+          },
+        });
+        contentNode.style.fontSize = `${finalSize}px`;
+        contentNode.style.lineHeight = String(lineHeight);
+
+        if (format === "markdown") {
+          const spacesCount = countStretchableSpaces(String(output.content ?? ""));
+          const intrinsicWidth = measureIntrinsicContentWidth(contentNode);
+          const maxWordSpacing = reconstructionWordSpacing({
+            measuredContentWidth: intrinsicWidth,
+            availableWidth,
+            spacesCount,
+            maxWordSpacing: 3.5,
+            minGainRatio: 0.01,
+          });
+          if (maxWordSpacing > 0) {
+            let low = 0;
+            let high = maxWordSpacing;
+            let best = 0;
+            for (let index = 0; index < 10; index += 1) {
+              const mid = (low + high) / 2;
+              contentNode.style.wordSpacing = `${mid}px`;
+              if (contentFitsInItem(contentNode, availableWidth, availableHeight)) {
+                best = mid;
+                low = mid;
+              } else {
+                high = mid;
+              }
+            }
+            contentNode.style.wordSpacing = `${best}px`;
+          }
+
+          const glyphsCount = countStretchableGlyphs(String(output.content ?? ""));
+          const intrinsicAfterWordSpacing = measureIntrinsicContentWidth(contentNode);
+          const maxLetterSpacing = reconstructionLetterSpacing({
+            measuredContentWidth: intrinsicAfterWordSpacing,
+            availableWidth,
+            glyphsCount,
+            maxLetterSpacing: 0.8,
+            minGainRatio: 0.004,
+          });
+          if (maxLetterSpacing > 0) {
+            let low = 0;
+            let high = maxLetterSpacing;
+            let best = 0;
+            for (let index = 0; index < 10; index += 1) {
+              const mid = (low + high) / 2;
+              contentNode.style.letterSpacing = `${mid}px`;
+              if (contentFitsInItem(contentNode, availableWidth, availableHeight)) {
+                best = mid;
+                low = mid;
+              } else {
+                high = mid;
+              }
+            }
+            contentNode.style.letterSpacing = `${best}px`;
           }
         }
 
-        const finalSize = Math.max(6, Math.min(best, high > 0 ? high : best));
-        contentNode.style.fontSize = `${finalSize}px`;
-        contentNode.style.lineHeight = String(lineHeight);
+        if (format !== "html") {
+          const intrinsicWidth = measureIntrinsicContentWidth(contentNode);
+          const horizontalScale = reconstructionHorizontalScale({
+            measuredContentWidth: intrinsicWidth,
+            availableWidth,
+            maxScale: 1.12,
+            minGainRatio: 0.01,
+          });
+          contentNode.style.transform = `scaleX(${horizontalScale})`;
+        } else {
+          contentNode.style.transform = "scaleX(1)";
+        }
+      }
+
+      function refitReconstructedContent() {
+        if (!state.outputs.length) {
+          return;
+        }
+        const outputsById = new Map(state.outputs.map((output) => [Number(output.layout_id), output]));
+        for (const item of reconstructionSurface.querySelectorAll(".recon-item[data-layout-id]")) {
+          const layoutId = Number(item.dataset.layoutId);
+          const output = outputsById.get(layoutId);
+          if (!output) {
+            continue;
+          }
+          const contentNode = item.querySelector(".recon-item-content");
+          if (!contentNode) {
+            continue;
+          }
+          fitReconstructedContent(item, contentNode, output);
+        }
       }
 
       function renderReconstruction() {

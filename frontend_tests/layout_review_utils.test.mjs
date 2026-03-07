@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   clampZoomPercent,
+  countStretchableGlyphs,
+  countStretchableSpaces,
   compactReadingOrdersAfterDeletion,
   computeDraggedBBox,
   mergeLayoutsForReview,
@@ -10,11 +12,16 @@ import {
   computeViewportScrollTargetForLayoutId,
   computeViewportScrollToCenterBBox,
   computeZoomScale,
+  findMaxFittingFontSize,
   formatZoomPercent,
   normalizeReviewHistory,
   nextLayoutReviewUrl,
   pointHandleForCoordinateKey,
   previousHistoryPageId,
+  reconstructionHorizontalScale,
+  reconstructionLetterSpacing,
+  reconstructionLineHeight,
+  reconstructionWordSpacing,
   reorderReadingOrderIds,
   updateReviewHistoryOnVisit,
 } from "../app/static/js/layout_review_utils.mjs";
@@ -68,6 +75,145 @@ test("computeZoomScale returns null when dimensions are unavailable", () => {
     viewportHeight: 700,
   });
   assert.equal(scale, null);
+});
+
+test("findMaxFittingFontSize chooses the largest fitting size", () => {
+  const threshold = 23.75;
+  const result = findMaxFittingFontSize({
+    minFontSize: 6,
+    maxFontSize: 40,
+    iterations: 16,
+    fitsAtFontSize(fontSize) {
+      return fontSize <= threshold;
+    },
+  });
+  assert.ok(result > 23.0 && result < 24.0);
+});
+
+test("findMaxFittingFontSize falls back to min when even min does not fit", () => {
+  const result = findMaxFittingFontSize({
+    minFontSize: 6,
+    maxFontSize: 40,
+    iterations: 16,
+    fitsAtFontSize() {
+      return false;
+    },
+  });
+  assert.equal(result, 6);
+});
+
+test("reconstructionLineHeight returns tighter defaults by format", () => {
+  assert.equal(reconstructionLineHeight("markdown"), 1.1);
+  assert.equal(reconstructionLineHeight("html"), 1.08);
+  assert.equal(reconstructionLineHeight("latex"), 1.02);
+});
+
+test("reconstructionHorizontalScale expands width in a controlled range", () => {
+  assert.equal(
+    reconstructionHorizontalScale({
+      measuredContentWidth: 200,
+      availableWidth: 220,
+      maxScale: 1.3,
+      minGainRatio: 0.02,
+    }),
+    1.1,
+  );
+  assert.equal(
+    reconstructionHorizontalScale({
+      measuredContentWidth: 200,
+      availableWidth: 202,
+      maxScale: 1.3,
+      minGainRatio: 0.02,
+    }),
+    1,
+  );
+  assert.equal(
+    reconstructionHorizontalScale({
+      measuredContentWidth: 200,
+      availableWidth: 500,
+      maxScale: 1.18,
+      minGainRatio: 0,
+    }),
+    1.18,
+  );
+});
+
+test("countStretchableSpaces counts plain spaces only", () => {
+  assert.equal(countStretchableSpaces("a b  c"), 3);
+  assert.equal(countStretchableSpaces("a\tb\nc"), 0);
+  assert.equal(countStretchableSpaces(""), 0);
+});
+
+test("countStretchableGlyphs ignores whitespace characters", () => {
+  assert.equal(countStretchableGlyphs("ab c"), 3);
+  assert.equal(countStretchableGlyphs("a\tb\nc\r d"), 4);
+  assert.equal(countStretchableGlyphs("   "), 0);
+});
+
+test("reconstructionWordSpacing computes bounded spacing from width gap", () => {
+  assert.equal(
+    reconstructionWordSpacing({
+      measuredContentWidth: 180,
+      availableWidth: 210,
+      spacesCount: 15,
+      maxWordSpacing: 3,
+      minGainRatio: 0.01,
+    }),
+    2,
+  );
+  assert.equal(
+    reconstructionWordSpacing({
+      measuredContentWidth: 198,
+      availableWidth: 200,
+      spacesCount: 10,
+      maxWordSpacing: 3,
+      minGainRatio: 0.02,
+    }),
+    0,
+  );
+  assert.equal(
+    reconstructionWordSpacing({
+      measuredContentWidth: 100,
+      availableWidth: 200,
+      spacesCount: 2,
+      maxWordSpacing: 1.5,
+      minGainRatio: 0,
+    }),
+    1.5,
+  );
+});
+
+test("reconstructionLetterSpacing computes bounded spacing from width gap", () => {
+  assert.equal(
+    reconstructionLetterSpacing({
+      measuredContentWidth: 180,
+      availableWidth: 210,
+      glyphsCount: 31,
+      maxLetterSpacing: 1,
+      minGainRatio: 0.005,
+    }),
+    1,
+  );
+  assert.equal(
+    reconstructionLetterSpacing({
+      measuredContentWidth: 198,
+      availableWidth: 200,
+      glyphsCount: 20,
+      maxLetterSpacing: 1,
+      minGainRatio: 0.02,
+    }),
+    0,
+  );
+  assert.equal(
+    reconstructionLetterSpacing({
+      measuredContentWidth: 198,
+      availableWidth: 200,
+      glyphsCount: 1,
+      maxLetterSpacing: 1,
+      minGainRatio: 0,
+    }),
+    0,
+  );
 });
 
 test("pointHandleForCoordinateKey maps bbox coordinates to corner handles", () => {
