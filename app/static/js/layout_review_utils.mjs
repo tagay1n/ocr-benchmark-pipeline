@@ -474,6 +474,69 @@ export function computeViewportCenterPadding({
   return { x, y };
 }
 
+export function computeApproxLineBand({
+  offsetY,
+  contentHeight,
+  lineHeight,
+  minLineHeight = 6,
+} = {}) {
+  const y = Number(offsetY);
+  const height = Number(contentHeight);
+  const lh = Number(lineHeight);
+  const minLh = Number(minLineHeight);
+  if (!Number.isFinite(y) || !Number.isFinite(height) || !Number.isFinite(lh)) {
+    return null;
+  }
+  if (height <= 0 || lh <= 0) {
+    return null;
+  }
+
+  const safeMin = Number.isFinite(minLh) && minLh > 0 ? minLh : 6;
+  const effectiveLineHeight = Math.max(safeMin, lh);
+  const clampedY = Math.max(0, Math.min(height - 0.001, y));
+  const lineIndex = Math.max(0, Math.floor(clampedY / effectiveLineHeight));
+  return computeApproxLineBandByIndex({
+    lineIndex,
+    contentHeight: height,
+    lineHeight: effectiveLineHeight,
+    minLineHeight: safeMin,
+  });
+}
+
+export function computeApproxLineBandByIndex({
+  lineIndex,
+  contentHeight,
+  lineHeight,
+  minLineHeight = 6,
+} = {}) {
+  const index = Number(lineIndex);
+  const height = Number(contentHeight);
+  const lh = Number(lineHeight);
+  const minLh = Number(minLineHeight);
+  if (!Number.isFinite(index) || !Number.isFinite(height) || !Number.isFinite(lh)) {
+    return null;
+  }
+  if (height <= 0 || lh <= 0) {
+    return null;
+  }
+  const safeMin = Number.isFinite(minLh) && minLh > 0 ? minLh : 6;
+  const effectiveLineHeight = Math.max(safeMin, lh);
+  const totalLines = Math.max(1, Math.ceil(height / effectiveLineHeight));
+  const clampedIndex = Math.max(0, Math.min(totalLines - 1, Math.floor(index)));
+  const topPx = Math.min(height, clampedIndex * effectiveLineHeight);
+  const bandHeightPx = Math.max(1, Math.min(effectiveLineHeight, height - topPx));
+  if (bandHeightPx <= 0) {
+    return null;
+  }
+
+  return {
+    lineIndex: clampedIndex,
+    topRatio: topPx / height,
+    heightRatio: bandHeightPx / height,
+    totalLines,
+  };
+}
+
 export function nextLayoutReviewUrl(nextPayload) {
   if (!nextPayload || !nextPayload.has_next) {
     return null;

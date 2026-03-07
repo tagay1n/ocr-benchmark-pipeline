@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OCR review | OCR benchmark pipeline</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
     <style>
       :root {
         --bg: #f3f1eb;
@@ -580,6 +581,30 @@
         transform-origin: top left;
       }
 
+      .recon-item-content.markdown-rendered {
+        white-space: normal;
+      }
+
+      .recon-item-content.markdown-rendered p,
+      .recon-item-content.markdown-rendered ul,
+      .recon-item-content.markdown-rendered ol,
+      .recon-item-content.markdown-rendered h1,
+      .recon-item-content.markdown-rendered h2,
+      .recon-item-content.markdown-rendered h3,
+      .recon-item-content.markdown-rendered h4,
+      .recon-item-content.markdown-rendered h5,
+      .recon-item-content.markdown-rendered h6,
+      .recon-item-content.markdown-rendered blockquote,
+      .recon-item-content.markdown-rendered pre,
+      .recon-item-content.markdown-rendered table {
+        margin: 0;
+      }
+
+      .recon-item-content.markdown-rendered a {
+        color: #225e8a;
+        text-decoration: underline;
+      }
+
       .recon-item-content.markdown {
         font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
       }
@@ -605,6 +630,44 @@
         padding: 2px 4px;
         font-size: inherit;
         text-align: left;
+      }
+
+      .recon-item.markdown-table-warning {
+        border-color: #c16a22;
+        box-shadow: 0 0 0 1px rgba(193, 106, 34, 0.25);
+      }
+
+      .recon-warning-badge {
+        position: absolute;
+        top: 3px;
+        right: 3px;
+        z-index: 2;
+        border-radius: 999px;
+        border: 1px solid #c16a22;
+        background: #f7e6d8;
+        color: #6f3a0f;
+        font-size: 10px;
+        line-height: 1;
+        padding: 2px 6px;
+        pointer-events: none;
+      }
+
+      .recon-line-highlight {
+        position: absolute;
+        left: 0;
+        right: 0;
+        background: rgba(11, 122, 117, 0.18);
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .box-line-highlight {
+        position: absolute;
+        left: 0;
+        right: 0;
+        background: rgba(11, 122, 117, 0.26);
+        pointer-events: none;
+        z-index: 1;
       }
 
       #source-overlay {
@@ -893,6 +956,8 @@
       import {
         clampZoomPercent,
         countStretchableGlyphs,
+        computeApproxLineBand,
+        computeApproxLineBandByIndex,
         computeZoomScale,
         computeViewportScrollTargetForLayoutId,
         countStretchableSpaces,
@@ -905,6 +970,11 @@
         reconstructionWordSpacing,
         updateReviewHistoryOnVisit,
       } from "./js/layout_review_utils.mjs";
+      import {
+        containsMarkdownTable,
+        renderLatexInto,
+        renderMarkdownInto,
+      } from "./js/reconstructed_markdown.mjs";
 
       const STORAGE_KEYS = {
         draftPrefix: "ocrReview.drafts",
@@ -972,6 +1042,7 @@
         localEditsByLayoutId: {},
         selectedLayoutId: null,
         reextractHoverLayoutId: null,
+        hoveredLine: null,
         reviewSubmitInProgress: false,
         reextractInProgress: false,
         zoomMode: "automatic",
@@ -985,6 +1056,7 @@
           content: true,
         },
       };
+      let reconstructionRefitScheduled = false;
 
       function readStorage(key) {
         try {
@@ -1619,6 +1691,85 @@
         return state.outputs.find((output) => Number(output.layout_id) === Number(layoutId)) || null;
       }
 
+      function clearLineHoverHighlights() {
+        for (const marker of reconstructionSurface.querySelectorAll(".recon-line-highlight")) {
+          marker.remove();
+        }
+        for (const marker of sourceOverlay.querySelectorAll(".box-line-highlight")) {
+          marker.remove();
+        }
+      }
+
+      function applyLineHoverHighlights() {
+        clearLineHoverHighlights();
+        const hovered = state.hoveredLine;
+        if (!hovered || typeof hovered !== "object") {
+          return;
+        }
+        const layoutId = Number(hovered.layoutId);
+        const topRatio = Number(hovered.topRatio);
+        const heightRatio = Number(hovered.heightRatio);
+        if (
+          !Number.isInteger(layoutId) ||
+          layoutId <= 0 ||
+          !Number.isFinite(topRatio) ||
+          !Number.isFinite(heightRatio)
+        ) {
+          return;
+        }
+        const clampedTop = Math.max(0, Math.min(1, topRatio));
+        const clampedHeight = Math.max(0, Math.min(1 - clampedTop, heightRatio));
+        if (clampedHeight <= 0) {
+          return;
+        }
+
+        const reconItem = reconstructionSurface.querySelector(`.recon-item[data-layout-id="${layoutId}"]`);
+        if (reconItem) {
+          const reconMarker = document.createElement("div");
+          reconMarker.className = "recon-line-highlight";
+          reconMarker.style.top = `${clampedTop * 100}%`;
+          reconMarker.style.height = `${clampedHeight * 100}%`;
+          reconItem.appendChild(reconMarker);
+        }
+
+        const sourceBox = sourceOverlay.querySelector(`.box[data-layout-id="${layoutId}"]`);
+        if (sourceBox) {
+          const sourceMarker = document.createElement("div");
+          sourceMarker.className = "box-line-highlight";
+          sourceMarker.style.top = `${clampedTop * 100}%`;
+          sourceMarker.style.height = `${clampedHeight * 100}%`;
+          sourceBox.appendChild(sourceMarker);
+        }
+      }
+
+      function setHoveredLine(layoutId, lineBand) {
+        const normalizedId = Number(layoutId);
+        if (!Number.isInteger(normalizedId) || normalizedId <= 0 || !lineBand) {
+          if (state.hoveredLine === null) {
+            return;
+          }
+          state.hoveredLine = null;
+          applyLineHoverHighlights();
+          return;
+        }
+        const next = {
+          layoutId: normalizedId,
+          lineIndex: Number(lineBand.lineIndex),
+          topRatio: Number(lineBand.topRatio),
+          heightRatio: Number(lineBand.heightRatio),
+        };
+        const prev = state.hoveredLine;
+        if (
+          prev &&
+          Number(prev.layoutId) === next.layoutId &&
+          Number(prev.lineIndex) === next.lineIndex
+        ) {
+          return;
+        }
+        state.hoveredLine = next;
+        applyLineHoverHighlights();
+      }
+
       function applyReextractHoverStyles() {
         const hoveredId = Number(state.reextractHoverLayoutId);
         for (const box of sourceOverlay.querySelectorAll(".box[data-layout-id]")) {
@@ -1647,6 +1798,7 @@
           item.classList.toggle("recon-selected", Number(item.dataset.layoutId) === selectedId);
         }
         applyReextractHoverStyles();
+        applyLineHoverHighlights();
       }
 
       function scrollViewportToLayout(layoutId, viewport, content) {
@@ -1718,6 +1870,17 @@
         return block;
       }
 
+      function scheduleReconstructionRefit() {
+        if (reconstructionRefitScheduled) {
+          return;
+        }
+        reconstructionRefitScheduled = true;
+        requestAnimationFrame(() => {
+          reconstructionRefitScheduled = false;
+          refitReconstructedContent();
+        });
+      }
+
       function cloneAllowedTableNode(node) {
         const allowedTags = new Set(["table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption"]);
         if (!(node instanceof Element)) {
@@ -1769,7 +1932,23 @@
           return appendPlainContent(container, content, "html");
         }
         if (format === "latex") {
-          return appendPlainContent(container, content, "latex");
+          const block = appendPlainContent(container, content, "latex");
+          renderLatexInto(block, content, { onRendered: scheduleReconstructionRefit });
+          return block;
+        }
+        if (format === "markdown") {
+          const block = appendPlainContent(container, content, "markdown");
+          const hasMarkdownTable = containsMarkdownTable(content);
+          if (hasMarkdownTable) {
+            container.classList.add("markdown-table-warning");
+            container.title = "Markdown table detected in OCR output. Re-extract this layout.";
+            const badge = document.createElement("span");
+            badge.className = "recon-warning-badge";
+            badge.textContent = "TABLE MD";
+            container.appendChild(badge);
+          }
+          renderMarkdownInto(block, content, { onRendered: scheduleReconstructionRefit });
+          return block;
         }
         return appendPlainContent(container, content, "markdown");
       }
@@ -1795,6 +1974,104 @@
           return 0;
         }
         return measured;
+      }
+
+      function lineHeightForContentNode(contentNode) {
+        if (!contentNode) {
+          return null;
+        }
+        const computed = window.getComputedStyle(contentNode);
+        const parsed = Number.parseFloat(computed.lineHeight);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+        const fallback = Number.parseFloat(computed.fontSize) * 1.25;
+        if (Number.isFinite(fallback) && fallback > 0) {
+          return fallback;
+        }
+        return null;
+      }
+
+      function updateHoveredLineFromPointer(contentNode, layoutId, clientY) {
+        if (!contentNode) {
+          return;
+        }
+        const rect = contentNode.getBoundingClientRect();
+        if (!rect || rect.height <= 0) {
+          return;
+        }
+        const lineHeight = lineHeightForContentNode(contentNode);
+        if (!lineHeight) {
+          return;
+        }
+        const offsetY = Number(clientY) - rect.top;
+        const band = computeApproxLineBand({
+          offsetY,
+          contentHeight: rect.height,
+          lineHeight,
+          minLineHeight: 6,
+        });
+        setHoveredLine(layoutId, band);
+      }
+
+      function markdownContentNodeByLayout(layoutId) {
+        const normalized = Number(layoutId);
+        if (!Number.isInteger(normalized) || normalized <= 0) {
+          return null;
+        }
+        return reconstructionSurface.querySelector(
+          `.recon-item[data-layout-id="${normalized}"] .recon-item-content.markdown`,
+        );
+      }
+
+      function isInteractiveTextTarget(target) {
+        if (!(target instanceof Element)) {
+          return false;
+        }
+        return Boolean(target.closest("textarea, input, select, [contenteditable='true'], [role='textbox']"));
+      }
+
+      function moveHoveredLineWithKeyboard(step) {
+        const delta = Number(step);
+        if (!Number.isInteger(delta) || delta === 0) {
+          return false;
+        }
+        const hoveredLayoutId = Number(state.hoveredLine?.layoutId);
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const candidateLayoutId =
+          Number.isInteger(hoveredLayoutId) && hoveredLayoutId > 0 ? hoveredLayoutId : selectedLayoutId;
+        if (!Number.isInteger(candidateLayoutId) || candidateLayoutId <= 0) {
+          return false;
+        }
+        const output = outputByLayoutId(candidateLayoutId);
+        if (!output || String(output.output_format || "").toLowerCase() !== "markdown") {
+          return false;
+        }
+        const contentNode = markdownContentNodeByLayout(candidateLayoutId);
+        if (!contentNode) {
+          return false;
+        }
+        const rect = contentNode.getBoundingClientRect();
+        const lineHeight = lineHeightForContentNode(contentNode);
+        if (!rect || rect.height <= 0 || !lineHeight) {
+          return false;
+        }
+
+        const currentIndex =
+          state.hoveredLine && Number(state.hoveredLine.layoutId) === candidateLayoutId
+            ? Number(state.hoveredLine.lineIndex)
+            : 0;
+        const nextBand = computeApproxLineBandByIndex({
+          lineIndex: (Number.isInteger(currentIndex) ? currentIndex : 0) + delta,
+          contentHeight: rect.height,
+          lineHeight,
+          minLineHeight: 6,
+        });
+        if (!nextBand) {
+          return false;
+        }
+        setHoveredLine(candidateLayoutId, nextBand);
+        return true;
       }
 
       function fitReconstructedContent(item, contentNode, output) {
@@ -1922,6 +2199,7 @@
       }
 
       function renderReconstruction() {
+        state.hoveredLine = null;
         reconstructionSurface.innerHTML = "";
         for (const output of state.outputs) {
           const color = colorForClass(output.class_name);
@@ -1940,6 +2218,14 @@
           });
 
           const contentNode = appendStructuredContent(item, output);
+          if (String(output.output_format || "").toLowerCase() === "markdown") {
+            contentNode.addEventListener("pointermove", (event) => {
+              updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
+            });
+            contentNode.addEventListener("pointerleave", () => {
+              setHoveredLine(null, null);
+            });
+          }
           reconstructionSurface.appendChild(item);
           fitReconstructedContent(item, contentNode, output);
         }
@@ -2360,6 +2646,19 @@
         closeZoomMenu();
       });
       document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+          if (!reextractModal.hidden) {
+            return;
+          }
+          if (isInteractiveTextTarget(event.target)) {
+            return;
+          }
+          const moved = moveHoveredLineWithKeyboard(event.key === "ArrowDown" ? 1 : -1);
+          if (moved) {
+            event.preventDefault();
+            return;
+          }
+        }
         if (event.key === "Escape") {
           closeZoomMenu();
           closeReextractModal();

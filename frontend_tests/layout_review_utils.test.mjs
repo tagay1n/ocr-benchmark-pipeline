@@ -6,6 +6,8 @@ import {
   countStretchableGlyphs,
   countStretchableSpaces,
   compactReadingOrdersAfterDeletion,
+  computeApproxLineBand,
+  computeApproxLineBandByIndex,
   computeDraggedBBox,
   mergeLayoutsForReview,
   computeViewportCenterPadding,
@@ -430,6 +432,65 @@ test("computeDraggedBBox rejects tiny drags and invalid inputs", () => {
     }),
     null,
   );
+});
+
+test("computeApproxLineBand maps y offset to normalized line band", () => {
+  const band = computeApproxLineBand({
+    offsetY: 23,
+    contentHeight: 100,
+    lineHeight: 10,
+  });
+  assert.deepEqual(band, {
+    lineIndex: 2,
+    topRatio: 0.2,
+    heightRatio: 0.1,
+    totalLines: 10,
+  });
+});
+
+test("computeApproxLineBand clamps to content bounds", () => {
+  const band = computeApproxLineBand({
+    offsetY: 999,
+    contentHeight: 95,
+    lineHeight: 12,
+  });
+  assert.equal(band?.lineIndex, 7);
+  assert.equal(band?.topRatio, (7 * 12) / 95);
+  assert.equal(band?.heightRatio, 11 / 95);
+  assert.equal(band?.totalLines, 8);
+});
+
+test("computeApproxLineBand returns null for invalid input", () => {
+  assert.equal(
+    computeApproxLineBand({
+      offsetY: 10,
+      contentHeight: 0,
+      lineHeight: 12,
+    }),
+    null,
+  );
+  assert.equal(
+    computeApproxLineBand({
+      offsetY: Number.NaN,
+      contentHeight: 100,
+      lineHeight: 12,
+    }),
+    null,
+  );
+});
+
+test("computeApproxLineBandByIndex clamps and reports total line count", () => {
+  const band = computeApproxLineBandByIndex({
+    lineIndex: 999,
+    contentHeight: 50,
+    lineHeight: 12,
+  });
+  assert.deepEqual(band, {
+    lineIndex: 4,
+    topRatio: 48 / 50,
+    heightRatio: 2 / 50,
+    totalLines: 5,
+  });
 });
 
 test("computeViewportCenterPadding centers only when content is smaller than viewport", () => {
