@@ -812,6 +812,17 @@
         border-bottom: 1px solid var(--border);
       }
 
+      .editor-header-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .editor-wrap-btn {
+        min-height: 30px;
+        min-width: 72px;
+      }
+
       .editor-header h2 {
         margin: 0;
         font-size: 16px;
@@ -823,15 +834,44 @@
         font-size: 12px;
       }
 
+      .editor-mode-badge {
+        margin-top: 6px;
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid #c9c3b1;
+        background: #f0ede3;
+        color: #5d594f;
+        font-size: 11px;
+        line-height: 1;
+        padding: 3px 8px;
+      }
+
+      .editor-mode-badge.codemirror {
+        border-color: #1f7b74;
+        background: #e7f2f1;
+        color: #155a55;
+      }
+
+      .editor-mode-badge.fallback {
+        border-color: #9a7a43;
+        background: #f3ead8;
+        color: #6f5322;
+      }
+
       .editor-body {
         flex: 1 1 auto;
         min-height: 0;
         padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
 
       .editor-textarea {
         width: 100%;
-        height: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 10px;
@@ -839,6 +879,48 @@
         font-size: 13px;
         line-height: 1.45;
         resize: none;
+      }
+
+      .editor-cm {
+        width: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        background: #ffffff;
+      }
+
+      .editor-cm[hidden] {
+        display: none;
+      }
+
+      .editor-cm .cm-editor {
+        height: 100%;
+      }
+
+      .editor-cm .cm-scroller {
+        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .editor-cm .cm-gutters {
+        background: #f4f2eb;
+        border-right: 1px solid #ddd7c7;
+      }
+
+      .editor-status {
+        min-height: 22px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 2px 8px;
+        font-size: 12px;
+        color: #5e5a50;
+        background: #f3f0e7;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
       }
 
       @media (max-width: 1120px) {
@@ -982,11 +1064,17 @@
         <div>
           <h2 id="expanded-editor-title">Edit content</h2>
           <div id="expanded-editor-meta" class="editor-meta"></div>
+          <div id="expanded-editor-mode-badge" class="editor-mode-badge">Loading editor…</div>
         </div>
-        <button id="expanded-editor-close-btn" type="button" aria-label="Close expanded editor">✕</button>
+        <div class="editor-header-actions">
+          <button id="expanded-editor-wrap-btn" class="secondary editor-wrap-btn" type="button">Wrap on</button>
+          <button id="expanded-editor-close-btn" type="button" aria-label="Close expanded editor">✕</button>
+        </div>
       </div>
       <div class="editor-body">
+        <div id="expanded-editor-cm" class="editor-cm" hidden></div>
         <textarea id="expanded-editor-textarea" class="editor-textarea" spellcheck="false"></textarea>
+        <div id="expanded-editor-status" class="editor-status">Ln 1, Col 1 | 0 chars</div>
       </div>
     </aside>
 
@@ -1080,6 +1168,10 @@
       const reextractModalRunBtn = document.getElementById("reextract-modal-run-btn");
       const expandedEditor = document.getElementById("expanded-editor");
       const expandedEditorMeta = document.getElementById("expanded-editor-meta");
+      const expandedEditorModeBadge = document.getElementById("expanded-editor-mode-badge");
+      const expandedEditorWrapBtn = document.getElementById("expanded-editor-wrap-btn");
+      const expandedEditorStatus = document.getElementById("expanded-editor-status");
+      const expandedEditorCmHost = document.getElementById("expanded-editor-cm");
       const expandedEditorTextarea = document.getElementById("expanded-editor-textarea");
       const expandedEditorCloseBtn = document.getElementById("expanded-editor-close-btn");
 
@@ -1110,6 +1202,11 @@
       let reconstructionRefitScheduled = false;
       const RECONSTRUCTED_CONTROLS_IDLE_MS = 2500;
       let reconstructedControlsIdleTimer = null;
+      let codeMirrorDepsPromise = null;
+      let codeMirrorDeps = null;
+      let codeMirrorView = null;
+      let suppressCodeMirrorChange = false;
+      let editorWrapEnabled = true;
 
       function readStorage(key) {
         try {
@@ -1469,6 +1566,350 @@
         expandedEditorMeta.textContent = `Order ${output.reading_order} | ${formatClassLabel(output.class_name)}`;
       }
 
+      function setExpandedEditorModeBadge(mode) {
+        if (!expandedEditorModeBadge) {
+          return;
+        }
+        const normalized = String(mode || "").trim().toLowerCase();
+        expandedEditorModeBadge.classList.remove("codemirror", "fallback");
+        if (normalized === "codemirror") {
+          expandedEditorModeBadge.textContent = "CodeMirror";
+          expandedEditorModeBadge.classList.add("codemirror");
+          return;
+        }
+        if (normalized === "fallback") {
+          expandedEditorModeBadge.textContent = "Textarea fallback";
+          expandedEditorModeBadge.classList.add("fallback");
+          return;
+        }
+        expandedEditorModeBadge.textContent = "Loading editor…";
+      }
+
+      function setExpandedEditorWrapButtonState(enabled) {
+        editorWrapEnabled = Boolean(enabled);
+        expandedEditorWrapBtn.textContent = editorWrapEnabled ? "Wrap on" : "Wrap off";
+      }
+
+      function updateExpandedEditorStatusText({ line = 1, column = 1, chars = 0 } = {}) {
+        expandedEditorStatus.textContent = `Ln ${line}, Col ${column} | ${chars} chars`;
+      }
+
+      function updateExpandedEditorStatusFromCodeMirror(view = codeMirrorView) {
+        if (!view) {
+          return;
+        }
+        const head = Number(view.state.selection.main.head);
+        const lineInfo = view.state.doc.lineAt(head);
+        const line = Number(lineInfo.number);
+        const column = Math.max(1, head - lineInfo.from + 1);
+        updateExpandedEditorStatusText({
+          line,
+          column,
+          chars: view.state.doc.length,
+        });
+      }
+
+      function updateExpandedEditorStatusFromTextarea() {
+        const text = String(expandedEditorTextarea.value ?? "");
+        const cursor = Number.isInteger(expandedEditorTextarea.selectionStart)
+          ? expandedEditorTextarea.selectionStart
+          : text.length;
+        const clampedCursor = Math.max(0, Math.min(text.length, cursor));
+        const before = text.slice(0, clampedCursor);
+        const line = before.split("\n").length;
+        const lineStart = before.lastIndexOf("\n") + 1;
+        const column = clampedCursor - lineStart + 1;
+        updateExpandedEditorStatusText({
+          line,
+          column,
+          chars: text.length,
+        });
+      }
+
+      function toggleExpandedEditorWrap() {
+        const nextEnabled = !editorWrapEnabled;
+        setExpandedEditorWrapButtonState(nextEnabled);
+        if (codeMirrorView) {
+          const content = codeMirrorView.state.doc.toString();
+          const selection = codeMirrorView.state.selection.main;
+          const hadFocus = codeMirrorView.hasFocus;
+          void ensureCodeMirrorView({
+            initialText: content,
+            forceRecreate: true,
+            selection: {
+              anchor: Number(selection.anchor),
+              head: Number(selection.head),
+            },
+            focusEditor: hadFocus,
+          });
+          return;
+        }
+        if (expandedEditorTextarea) {
+          expandedEditorTextarea.wrap = nextEnabled ? "soft" : "off";
+          expandedEditorTextarea.style.whiteSpace = nextEnabled ? "pre-wrap" : "pre";
+        }
+      }
+
+      function isCodeMirrorFocused() {
+        return Boolean(codeMirrorView && codeMirrorView.hasFocus);
+      }
+
+      function setCodeMirrorContent(value, { moveCursorToEnd = false } = {}) {
+        if (!codeMirrorView) {
+          return;
+        }
+        const nextValue = String(value ?? "");
+        const currentValue = codeMirrorView.state.doc.toString();
+        const end = nextValue.length;
+        suppressCodeMirrorChange = true;
+        try {
+          if (currentValue !== nextValue) {
+            codeMirrorView.dispatch({
+              changes: { from: 0, to: codeMirrorView.state.doc.length, insert: nextValue },
+              ...(moveCursorToEnd ? { selection: { anchor: end } } : {}),
+            });
+          } else if (moveCursorToEnd) {
+            codeMirrorView.dispatch({ selection: { anchor: end } });
+          }
+        } finally {
+          suppressCodeMirrorChange = false;
+        }
+      }
+
+      async function loadCodeMirrorDeps() {
+        if (codeMirrorDepsPromise !== null) {
+          const cached = await codeMirrorDepsPromise;
+          if (!cached) {
+            codeMirrorDepsPromise = null;
+          }
+          return cached;
+        }
+        codeMirrorDepsPromise = (async () => {
+          const normalizeModule = (module) => {
+            if (!module) {
+              return null;
+            }
+            const EditorView = module?.EditorView ?? null;
+            const basicSetup = module?.basicSetup ?? module?.minimalSetup ?? null;
+            if (!EditorView || !basicSetup) {
+              return null;
+            }
+            return { EditorView, basicSetup };
+          };
+
+          const importFromProvider = async (provider) => {
+            try {
+              const module = await import(provider.codemirror);
+              const normalized = normalizeModule(module);
+              if (normalized) {
+                return normalized;
+              }
+            } catch {
+              // Continue to fetch+blob fallback below.
+            }
+
+            if (!provider.allowFetchFallback) {
+              return null;
+            }
+
+            try {
+              const response = await fetch(provider.codemirror, { cache: "no-store" });
+              if (!response.ok) {
+                return null;
+              }
+              const source = await response.text();
+              if (!source || !source.trim()) {
+                return null;
+              }
+              const blobUrl = URL.createObjectURL(
+                new Blob([source], { type: "text/javascript" }),
+              );
+              try {
+                const blobModule = await import(blobUrl);
+                return normalizeModule(blobModule);
+              } finally {
+                URL.revokeObjectURL(blobUrl);
+              }
+            } catch {
+              return null;
+            }
+          };
+
+          const providers = [
+            {
+              codemirror: "/static/js/vendor/codemirror.bundle.mjs",
+              allowFetchFallback: true,
+            },
+            {
+              codemirror: "./js/vendor/codemirror.bundle.mjs",
+              allowFetchFallback: true,
+            },
+            {
+              codemirror: "https://esm.sh/codemirror@6.0.2",
+              allowFetchFallback: false,
+            },
+            {
+              codemirror: "https://ga.jspm.io/npm:codemirror@6.0.2/dist/index.js",
+              allowFetchFallback: false,
+            },
+          ];
+
+          for (const provider of providers) {
+            const deps = await importFromProvider(provider);
+            if (deps) {
+              return deps;
+            }
+          }
+          return null;
+        })();
+        const deps = await codeMirrorDepsPromise;
+        if (!deps) {
+          codeMirrorDepsPromise = null;
+        }
+        return deps;
+      }
+
+      function destroyCodeMirrorView() {
+        if (!codeMirrorView) {
+          return;
+        }
+        codeMirrorView.destroy();
+        codeMirrorView = null;
+        if (expandedEditorCmHost) {
+          expandedEditorCmHost.textContent = "";
+        }
+      }
+
+      async function ensureCodeMirrorView({
+        initialText = "",
+        moveCursorToEnd = false,
+        forceRecreate = false,
+        selection = null,
+        focusEditor = true,
+      } = {}) {
+        if (!expandedEditorCmHost) {
+          return false;
+        }
+        if (codeMirrorView && !forceRecreate) {
+          setCodeMirrorContent(initialText, { moveCursorToEnd });
+          expandedEditorCmHost.hidden = false;
+          expandedEditorTextarea.hidden = true;
+          setExpandedEditorModeBadge("codemirror");
+          updateExpandedEditorStatusFromCodeMirror(codeMirrorView);
+          if (focusEditor) {
+            codeMirrorView.focus();
+          }
+          return true;
+        }
+        if (forceRecreate) {
+          destroyCodeMirrorView();
+        }
+
+        const deps = await loadCodeMirrorDeps();
+        if (!deps) {
+          setStatus("CodeMirror is unavailable; using textarea fallback.", { isError: true });
+          setExpandedEditorModeBadge("fallback");
+          return false;
+        }
+
+        const insertNewline = (view) => {
+          const range = view.state.selection.main;
+          const from = Number(range.from);
+          const to = Number(range.to);
+          view.dispatch({
+            changes: { from, to, insert: "\n" },
+            selection: { anchor: from + 1 },
+          });
+          return true;
+        };
+
+        const closeDrawer = () => {
+          closeExpandedEditor();
+          return true;
+        };
+
+        const updateListener = deps.EditorView.updateListener.of((update) => {
+          if (update.docChanged && !suppressCodeMirrorChange) {
+            const layoutId = Number(state.expandedEditorLayoutId);
+            if (Number.isInteger(layoutId) && layoutId > 0) {
+              const content = update.state.doc.toString();
+              updateOutputContent(layoutId, content, { source: "codemirror" });
+            }
+          }
+          if (!update.docChanged && !update.selectionSet) {
+            return;
+          }
+          updateExpandedEditorStatusFromCodeMirror(update.view);
+        });
+
+        const keyHandlers = deps.EditorView.domEventHandlers({
+          keydown(event, view) {
+            if (!(event instanceof KeyboardEvent)) {
+              return false;
+            }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g") {
+              event.preventDefault();
+              const totalLines = view.state.doc.lines;
+              const currentLine = view.state.doc.lineAt(view.state.selection.main.head).number;
+              const raw = window.prompt(`Go to line (1-${totalLines})`, String(currentLine));
+              if (raw === null) {
+                return true;
+              }
+              const requested = Number.parseInt(String(raw).trim(), 10);
+              if (!Number.isInteger(requested)) {
+                return true;
+              }
+              const targetLine = Math.max(1, Math.min(totalLines, requested));
+              const lineInfo = view.state.doc.line(targetLine);
+              view.dispatch({
+                selection: { anchor: lineInfo.from },
+                scrollIntoView: true,
+              });
+              updateExpandedEditorStatusFromCodeMirror(view);
+              return true;
+            }
+            if (event.key !== "Enter") {
+              return false;
+            }
+            if (event.ctrlKey || event.metaKey) {
+              event.preventDefault();
+              return insertNewline(view);
+            }
+            event.preventDefault();
+            return closeDrawer();
+          },
+        });
+
+        codeMirrorDeps = deps;
+        const wrapExtension = editorWrapEnabled ? deps.EditorView.lineWrapping : [];
+        const baseExtensions = [deps.basicSetup, wrapExtension, updateListener, keyHandlers];
+        const initialSelection = selection
+          ? {
+              anchor: Number(selection.anchor ?? selection.head ?? 0),
+              head: Number(selection.head ?? selection.anchor ?? 0),
+            }
+          : null;
+
+        codeMirrorView = new deps.EditorView({
+          parent: expandedEditorCmHost,
+          doc: String(initialText ?? ""),
+          extensions: baseExtensions,
+          ...(initialSelection ? { selection: initialSelection } : {}),
+        });
+
+        expandedEditorCmHost.hidden = false;
+        expandedEditorTextarea.hidden = true;
+        setExpandedEditorModeBadge("codemirror");
+        if (moveCursorToEnd) {
+          setCodeMirrorContent(initialText, { moveCursorToEnd: true });
+        }
+        updateExpandedEditorStatusFromCodeMirror(codeMirrorView);
+        if (focusEditor) {
+          codeMirrorView.focus();
+        }
+        return true;
+      }
+
       function closeExpandedEditor() {
         state.expandedEditorLayoutId = null;
         expandedEditor.hidden = true;
@@ -1489,11 +1930,29 @@
         selectOutput(normalized, { scrollImageToLayout: true });
         state.expandedEditorLayoutId = normalized;
         expandedEditor.hidden = false;
-        expandedEditorTextarea.value = String(output.content ?? "");
+        const content = String(output.content ?? "");
         updateExpandedEditorMeta(output);
+        setExpandedEditorWrapButtonState(editorWrapEnabled);
+        if (codeMirrorView) {
+          expandedEditorCmHost.hidden = false;
+          expandedEditorTextarea.hidden = true;
+          setExpandedEditorModeBadge("codemirror");
+          setCodeMirrorContent(content, { moveCursorToEnd: true });
+          updateExpandedEditorStatusFromCodeMirror(codeMirrorView);
+          codeMirrorView.focus();
+          return;
+        }
+        setExpandedEditorModeBadge("loading");
+        expandedEditorTextarea.hidden = false;
+        expandedEditorCmHost.hidden = true;
+        expandedEditorTextarea.value = content;
+        expandedEditorTextarea.wrap = editorWrapEnabled ? "soft" : "off";
+        expandedEditorTextarea.style.whiteSpace = editorWrapEnabled ? "pre-wrap" : "pre";
         expandedEditorTextarea.focus();
-        const end = expandedEditorTextarea.value.length;
+        const end = content.length;
         expandedEditorTextarea.setSelectionRange(end, end);
+        updateExpandedEditorStatusFromTextarea();
+        void ensureCodeMirrorView({ initialText: content, moveCursorToEnd: true });
       }
 
       function syncExpandedEditorFromState() {
@@ -1509,8 +1968,17 @@
         if (expandedEditor.hidden) {
           expandedEditor.hidden = false;
         }
+        const content = String(output.content ?? "");
         if (document.activeElement !== expandedEditorTextarea) {
-          expandedEditorTextarea.value = String(output.content ?? "");
+          expandedEditorTextarea.value = content;
+        }
+        if (!isCodeMirrorFocused()) {
+          setCodeMirrorContent(content);
+        }
+        if (!expandedEditorTextarea.hidden) {
+          updateExpandedEditorStatusFromTextarea();
+        } else {
+          updateExpandedEditorStatusFromCodeMirror();
         }
         updateExpandedEditorMeta(output);
       }
@@ -2527,11 +2995,14 @@
           setStatus("Draft saved locally.");
         }
         if (
-          Number(state.expandedEditorLayoutId) === Number(layoutId) &&
-          source !== expandedEditorTextarea &&
-          document.activeElement !== expandedEditorTextarea
+          Number(state.expandedEditorLayoutId) === Number(layoutId)
         ) {
-          expandedEditorTextarea.value = nextDraft.content;
+          if (source !== expandedEditorTextarea && document.activeElement !== expandedEditorTextarea) {
+            expandedEditorTextarea.value = nextDraft.content;
+          }
+          if (source !== "codemirror" && !isCodeMirrorFocused()) {
+            setCodeMirrorContent(nextDraft.content);
+          }
         }
         renderReconstruction();
         persistDraftState();
@@ -2953,12 +3424,72 @@
       expandedEditorCloseBtn.addEventListener("click", () => {
         closeExpandedEditor();
       });
+      expandedEditorWrapBtn.addEventListener("click", () => {
+        toggleExpandedEditorWrap();
+      });
+      expandedEditorTextarea.addEventListener("keydown", (event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g") {
+          event.preventDefault();
+          const text = String(expandedEditorTextarea.value ?? "");
+          const totalLines = text.split("\n").length;
+          const cursor = Number.isInteger(expandedEditorTextarea.selectionStart)
+            ? expandedEditorTextarea.selectionStart
+            : 0;
+          const currentLine = text.slice(0, cursor).split("\n").length;
+          const raw = window.prompt(`Go to line (1-${totalLines})`, String(currentLine));
+          if (raw === null) {
+            return;
+          }
+          const requested = Number.parseInt(String(raw).trim(), 10);
+          if (!Number.isInteger(requested)) {
+            return;
+          }
+          const targetLine = Math.max(1, Math.min(totalLines, requested));
+          const lines = text.split("\n");
+          let targetIndex = 0;
+          for (let index = 0; index < targetLine - 1; index += 1) {
+            targetIndex += lines[index].length + 1;
+          }
+          expandedEditorTextarea.focus();
+          expandedEditorTextarea.setSelectionRange(targetIndex, targetIndex);
+          updateExpandedEditorStatusFromTextarea();
+          return;
+        }
+        if (event.key !== "Enter") {
+          return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+          event.preventDefault();
+          const start = Number.isInteger(expandedEditorTextarea.selectionStart)
+            ? expandedEditorTextarea.selectionStart
+            : expandedEditorTextarea.value.length;
+          const end = Number.isInteger(expandedEditorTextarea.selectionEnd)
+            ? expandedEditorTextarea.selectionEnd
+            : expandedEditorTextarea.value.length;
+          expandedEditorTextarea.setRangeText("\n", start, end, "end");
+          const layoutId = Number(state.expandedEditorLayoutId);
+          if (Number.isInteger(layoutId) && layoutId > 0) {
+            updateOutputFromInput(layoutId, expandedEditorTextarea);
+          }
+          updateExpandedEditorStatusFromTextarea();
+          return;
+        }
+        event.preventDefault();
+        closeExpandedEditor();
+      });
       expandedEditorTextarea.addEventListener("input", () => {
         const layoutId = Number(state.expandedEditorLayoutId);
         if (!Number.isInteger(layoutId) || layoutId <= 0) {
           return;
         }
         updateOutputFromInput(layoutId, expandedEditorTextarea);
+        updateExpandedEditorStatusFromTextarea();
+      });
+      expandedEditorTextarea.addEventListener("click", () => {
+        updateExpandedEditorStatusFromTextarea();
+      });
+      expandedEditorTextarea.addEventListener("keyup", () => {
+        updateExpandedEditorStatusFromTextarea();
       });
       reviewBtn.addEventListener("click", markReviewed);
 
