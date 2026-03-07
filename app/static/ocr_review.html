@@ -32,6 +32,12 @@
           var(--bg);
       }
 
+      body.editor-resizing,
+      body.editor-resizing * {
+        cursor: ew-resize !important;
+        user-select: none !important;
+      }
+
       main {
         position: relative;
         width: 100%;
@@ -786,6 +792,7 @@
       }
 
       .editor-drawer {
+        --expanded-editor-font-size: 13px;
         position: fixed;
         top: 0;
         right: 0;
@@ -800,6 +807,33 @@
       }
 
       .editor-drawer[hidden] {
+        display: none;
+      }
+
+      .editor-resize-handle {
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 12px;
+        transform: translateX(-50%);
+        cursor: ew-resize;
+        z-index: 70;
+        touch-action: none;
+      }
+
+      .editor-resize-handle::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 2px;
+        transform: translateX(-50%);
+        background: rgba(121, 111, 89, 0.32);
+      }
+
+      .editor-resize-handle[hidden] {
         display: none;
       }
 
@@ -822,6 +856,22 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
+      }
+
+      .editor-font-size-control {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 6px;
+        padding-left: 6px;
+        border-left: 1px solid #d7d0be;
+      }
+
+      .editor-font-size-value {
+        min-width: 44px;
+        text-align: center;
+        font-size: 12px;
+        color: var(--muted);
       }
 
       .editor-wrap-btn {
@@ -867,6 +917,24 @@
         gap: 8px;
       }
 
+      .editor-toolbar {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      .editor-toolbar[hidden] {
+        display: none;
+      }
+
+      .editor-tool-btn {
+        min-height: 30px;
+        padding: 4px 10px;
+        font-size: 12px;
+        line-height: 1;
+      }
+
       .editor-textarea {
         width: 100%;
         flex: 1 1 auto;
@@ -875,7 +943,7 @@
         border-radius: 10px;
         padding: 10px;
         font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-        font-size: 13px;
+        font-size: var(--expanded-editor-font-size);
         line-height: 1.45;
         resize: none;
       }
@@ -900,7 +968,7 @@
 
       .editor-cm .cm-scroller {
         font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-        font-size: 13px;
+        font-size: var(--expanded-editor-font-size);
         line-height: 1.45;
       }
 
@@ -920,6 +988,28 @@
         display: inline-flex;
         align-items: center;
         gap: 10px;
+      }
+
+      .editor-validation {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .editor-validation[hidden] {
+        display: none;
+      }
+
+      .editor-validation-badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid #9a7a43;
+        background: #f3ead8;
+        color: #6f5322;
+        font-size: 11px;
+        line-height: 1;
+        padding: 3px 8px;
       }
 
       @media (max-width: 1120px) {
@@ -1059,20 +1149,75 @@
     </div>
 
     <aside id="expanded-editor" class="editor-drawer" role="dialog" aria-modal="true" aria-labelledby="expanded-editor-title" hidden>
+      <div id="expanded-editor-resize-handle" class="editor-resize-handle" aria-hidden="true"></div>
       <div class="editor-header">
         <div class="editor-title-row">
           <h2 id="expanded-editor-title">Edit content</h2>
           <div id="expanded-editor-mode-badge" class="editor-mode-badge" hidden>CodeMirror</div>
         </div>
         <div class="editor-header-actions">
-          <button id="expanded-editor-wrap-btn" class="secondary editor-wrap-btn" type="button">Wrap on</button>
           <button id="expanded-editor-close-btn" type="button" aria-label="Close expanded editor">✕</button>
         </div>
       </div>
       <div class="editor-body">
+        <div id="expanded-editor-toolbar" class="editor-toolbar" hidden>
+          <button id="editor-action-bold" class="secondary editor-tool-btn" type="button" title="Bold (Ctrl/Cmd+B)">
+            B
+          </button>
+          <button id="editor-action-italic" class="secondary editor-tool-btn" type="button" title="Italic (Ctrl/Cmd+I)">
+            I
+          </button>
+          <button
+            id="editor-action-inline-formula"
+            class="secondary editor-tool-btn"
+            type="button"
+            title="Inline formula (Ctrl/Cmd+Shift+E)"
+          >
+            fx
+          </button>
+          <button
+            id="editor-action-list-item"
+            class="secondary editor-tool-btn"
+            type="button"
+            title="List item (Ctrl/Cmd+Shift+8)"
+          >
+            •
+          </button>
+          <button
+            id="editor-action-ordered-list-item"
+            class="secondary editor-tool-btn"
+            type="button"
+            title="Ordered list item (Ctrl/Cmd+Shift+7)"
+          >
+            1.
+          </button>
+          <button id="expanded-editor-wrap-btn" class="secondary editor-tool-btn editor-wrap-btn" type="button">Wrap on</button>
+          <div class="editor-font-size-control" aria-label="Editor text size">
+            <button
+              id="editor-font-size-decrease-btn"
+              class="secondary editor-tool-btn"
+              type="button"
+              title="Decrease text size"
+            >
+              A-
+            </button>
+            <span id="editor-font-size-value" class="editor-font-size-value">13px</span>
+            <button
+              id="editor-font-size-increase-btn"
+              class="secondary editor-tool-btn"
+              type="button"
+              title="Increase text size"
+            >
+              A+
+            </button>
+          </div>
+        </div>
         <div id="expanded-editor-cm" class="editor-cm" hidden></div>
         <textarea id="expanded-editor-textarea" class="editor-textarea" spellcheck="false"></textarea>
-        <div id="expanded-editor-status" class="editor-status">Ln 1, Col 1 | 0 chars</div>
+        <div id="expanded-editor-status" class="editor-status">
+          <span id="expanded-editor-status-text">Ln 1, Col 1 | 0 chars</span>
+          <div id="expanded-editor-validation" class="editor-validation" hidden></div>
+        </div>
       </div>
     </aside>
 
@@ -1100,11 +1245,18 @@
         renderMarkdownInto,
       } from "./js/reconstructed_markdown.mjs";
       import {
+        applyInlineMarkdownWrapper,
+        applyLinePrefixMarkdown,
         computeFloatingControlPlacement,
+        countTextLines,
+        detectEditorValidationIssues,
         hasLocalDraftForLayout,
         isRectOnscreen,
         isReconstructedRestoreDisabled,
+        lineBandFromLineIndex,
+        lineIndexFromTextOffset,
         normalizeReconstructedRenderMode,
+        textOffsetForLineIndex,
       } from "./js/ocr_review_utils.mjs";
 
       const STORAGE_KEYS = {
@@ -1115,7 +1267,16 @@
         zoomMode: "ocrReview.zoom.mode",
         zoomPercent: "ocrReview.zoom.percent",
         reconstructedRenderMode: "ocrReview.reconstructed.render_mode",
+        editorFontSize: "ocrReview.editor.font_size",
+        editorDrawerWidth: "ocrReview.editor.drawer_width",
       };
+      const EDITOR_FONT_SIZE_MIN = 10;
+      const EDITOR_FONT_SIZE_MAX = 24;
+      const EDITOR_FONT_SIZE_DEFAULT = 13;
+      const EDITOR_FONT_SIZE_STEP = 1;
+      const EDITOR_DRAWER_WIDTH_MIN = 420;
+      const EDITOR_DRAWER_WIDTH_MAX_RATIO = 0.9;
+      const EDITOR_DRAWER_RESPONSIVE_BREAKPOINT = 1120;
 
       const CLASS_COLORS = {
         title: "#8f4b63",
@@ -1165,9 +1326,21 @@
       const reextractModalCancelBtn = document.getElementById("reextract-modal-cancel-btn");
       const reextractModalRunBtn = document.getElementById("reextract-modal-run-btn");
       const expandedEditor = document.getElementById("expanded-editor");
+      const expandedEditorResizeHandle = document.getElementById("expanded-editor-resize-handle");
       const expandedEditorModeBadge = document.getElementById("expanded-editor-mode-badge");
+      const expandedEditorToolbar = document.getElementById("expanded-editor-toolbar");
+      const editorActionBoldBtn = document.getElementById("editor-action-bold");
+      const editorActionItalicBtn = document.getElementById("editor-action-italic");
+      const editorActionInlineFormulaBtn = document.getElementById("editor-action-inline-formula");
+      const editorActionListItemBtn = document.getElementById("editor-action-list-item");
+      const editorActionOrderedListItemBtn = document.getElementById("editor-action-ordered-list-item");
+      const editorFontSizeDecreaseBtn = document.getElementById("editor-font-size-decrease-btn");
+      const editorFontSizeIncreaseBtn = document.getElementById("editor-font-size-increase-btn");
+      const editorFontSizeValue = document.getElementById("editor-font-size-value");
       const expandedEditorWrapBtn = document.getElementById("expanded-editor-wrap-btn");
       const expandedEditorStatus = document.getElementById("expanded-editor-status");
+      const expandedEditorStatusText = document.getElementById("expanded-editor-status-text");
+      const expandedEditorValidation = document.getElementById("expanded-editor-validation");
       const expandedEditorCmHost = document.getElementById("expanded-editor-cm");
       const expandedEditorTextarea = document.getElementById("expanded-editor-textarea");
       const expandedEditorCloseBtn = document.getElementById("expanded-editor-close-btn");
@@ -1195,6 +1368,8 @@
           source: true,
           reconstructed: true,
         },
+        editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
+        editorDrawerWidth: null,
       };
       let reconstructionRefitScheduled = false;
       const RECONSTRUCTED_CONTROLS_IDLE_MS = 2500;
@@ -1204,6 +1379,7 @@
       let codeMirrorView = null;
       let suppressCodeMirrorChange = false;
       let editorWrapEnabled = true;
+      let editorResizeSession = null;
 
       function readStorage(key) {
         try {
@@ -1403,6 +1579,16 @@
         updateZoomMenuSelection();
       }
 
+      function applyStoredEditorFontSize() {
+        const raw = readStorage(STORAGE_KEYS.editorFontSize);
+        if (raw !== null) {
+          state.editorFontSize = clampEditorFontSize(raw);
+        } else {
+          state.editorFontSize = EDITOR_FONT_SIZE_DEFAULT;
+        }
+        applyExpandedEditorFontSize({ persist: false });
+      }
+
       function closeZoomMenu() {
         zoomMenu.hidden = true;
         zoomTrigger.setAttribute("aria-expanded", "false");
@@ -1575,8 +1761,360 @@
         expandedEditorWrapBtn.textContent = editorWrapEnabled ? "Wrap on" : "Wrap off";
       }
 
+      function clampEditorFontSize(value) {
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) {
+          return EDITOR_FONT_SIZE_DEFAULT;
+        }
+        return Math.max(EDITOR_FONT_SIZE_MIN, Math.min(EDITOR_FONT_SIZE_MAX, Math.round(numeric)));
+      }
+
+      function applyExpandedEditorFontSize({ persist = false } = {}) {
+        const clamped = clampEditorFontSize(state.editorFontSize);
+        state.editorFontSize = clamped;
+        expandedEditor.style.setProperty("--expanded-editor-font-size", `${clamped}px`);
+        if (editorFontSizeValue) {
+          editorFontSizeValue.textContent = `${clamped}px`;
+        }
+        if (editorFontSizeDecreaseBtn) {
+          editorFontSizeDecreaseBtn.disabled = clamped <= EDITOR_FONT_SIZE_MIN;
+        }
+        if (editorFontSizeIncreaseBtn) {
+          editorFontSizeIncreaseBtn.disabled = clamped >= EDITOR_FONT_SIZE_MAX;
+        }
+        if (persist) {
+          writeStorage(STORAGE_KEYS.editorFontSize, String(clamped));
+        }
+      }
+
+      function setExpandedEditorFontSize(nextSize) {
+        state.editorFontSize = clampEditorFontSize(nextSize);
+        applyExpandedEditorFontSize({ persist: true });
+      }
+
+      function shouldUseResizableEditorDrawer() {
+        return window.innerWidth > EDITOR_DRAWER_RESPONSIVE_BREAKPOINT;
+      }
+
+      function clampEditorDrawerWidth(value) {
+        const raw = Number(value);
+        if (!Number.isFinite(raw)) {
+          return null;
+        }
+        const max = Math.floor(window.innerWidth * EDITOR_DRAWER_WIDTH_MAX_RATIO);
+        if (!Number.isFinite(max) || max <= 0) {
+          return null;
+        }
+        const min = Math.min(EDITOR_DRAWER_WIDTH_MIN, max);
+        return Math.max(min, Math.min(max, Math.round(raw)));
+      }
+
+      function applyExpandedEditorDrawerWidth({ persist = false } = {}) {
+        const resizable = shouldUseResizableEditorDrawer();
+        if (expandedEditorResizeHandle) {
+          expandedEditorResizeHandle.hidden = !resizable;
+        }
+
+        if (!resizable) {
+          expandedEditor.style.removeProperty("width");
+        } else {
+          const clamped = clampEditorDrawerWidth(state.editorDrawerWidth);
+          if (Number.isFinite(clamped)) {
+            state.editorDrawerWidth = clamped;
+            expandedEditor.style.width = `${clamped}px`;
+          } else {
+            state.editorDrawerWidth = null;
+            expandedEditor.style.removeProperty("width");
+          }
+        }
+
+        if (persist) {
+          if (Number.isFinite(state.editorDrawerWidth)) {
+            writeStorage(STORAGE_KEYS.editorDrawerWidth, String(state.editorDrawerWidth));
+          } else {
+            removeStorage(STORAGE_KEYS.editorDrawerWidth);
+          }
+        }
+      }
+
+      function setExpandedEditorDrawerWidth(nextWidth) {
+        state.editorDrawerWidth = clampEditorDrawerWidth(nextWidth);
+        applyExpandedEditorDrawerWidth({ persist: true });
+      }
+
+      function applyStoredEditorDrawerWidth() {
+        const raw = readStorage(STORAGE_KEYS.editorDrawerWidth);
+        state.editorDrawerWidth = raw !== null ? clampEditorDrawerWidth(raw) : null;
+        applyExpandedEditorDrawerWidth({ persist: false });
+      }
+
+      function beginEditorDrawerResize(event) {
+        if (!(event instanceof PointerEvent) || event.button !== 0) {
+          return;
+        }
+        if (!shouldUseResizableEditorDrawer()) {
+          return;
+        }
+        const rect = expandedEditor.getBoundingClientRect();
+        editorResizeSession = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startWidth: rect.width,
+        };
+        expandedEditorResizeHandle.setPointerCapture(event.pointerId);
+        document.body.classList.add("editor-resizing");
+        event.preventDefault();
+      }
+
+      function updateEditorDrawerResize(event) {
+        if (!editorResizeSession || !(event instanceof PointerEvent)) {
+          return;
+        }
+        if (event.pointerId !== editorResizeSession.pointerId) {
+          return;
+        }
+        const delta = editorResizeSession.startX - event.clientX;
+        setExpandedEditorDrawerWidth(editorResizeSession.startWidth + delta);
+      }
+
+      function endEditorDrawerResize(event) {
+        if (!editorResizeSession) {
+          return;
+        }
+        if (event instanceof PointerEvent && event.pointerId !== editorResizeSession.pointerId) {
+          return;
+        }
+        if (
+          expandedEditorResizeHandle &&
+          event instanceof PointerEvent &&
+          expandedEditorResizeHandle.hasPointerCapture(event.pointerId)
+        ) {
+          expandedEditorResizeHandle.releasePointerCapture(event.pointerId);
+        }
+        editorResizeSession = null;
+        document.body.classList.remove("editor-resizing");
+      }
+
+      function currentExpandedEditorOutput() {
+        const layoutId = Number(state.expandedEditorLayoutId);
+        if (!Number.isInteger(layoutId) || layoutId <= 0) {
+          return null;
+        }
+        return outputByLayoutId(layoutId);
+      }
+
+      function isMarkdownOutput(output) {
+        if (!output) {
+          return false;
+        }
+        return String(output.output_format || "").toLowerCase() === "markdown";
+      }
+
+      function refreshExpandedEditorToolbar() {
+        if (!expandedEditorToolbar) {
+          return;
+        }
+        const output = currentExpandedEditorOutput();
+        const editorVisible = !expandedEditor.hidden;
+        const markdownEnabled = editorVisible && isMarkdownOutput(output);
+        expandedEditorToolbar.hidden = !editorVisible;
+        for (const button of [
+          editorActionBoldBtn,
+          editorActionItalicBtn,
+          editorActionInlineFormulaBtn,
+          editorActionListItemBtn,
+          editorActionOrderedListItemBtn,
+        ]) {
+          if (button) {
+            button.disabled = !markdownEnabled;
+          }
+        }
+      }
+
+      function applyMarkdownActionToContent({ action, content, selectionStart, selectionEnd }) {
+        const normalized = String(action || "").trim().toLowerCase();
+        if (normalized === "bold") {
+          return applyInlineMarkdownWrapper({
+            content,
+            selectionStart,
+            selectionEnd,
+            left: "**",
+            right: "**",
+            placeholder: "text",
+          });
+        }
+        if (normalized === "italic") {
+          return applyInlineMarkdownWrapper({
+            content,
+            selectionStart,
+            selectionEnd,
+            left: "*",
+            right: "*",
+            placeholder: "text",
+          });
+        }
+        if (normalized === "inline_formula") {
+          return applyInlineMarkdownWrapper({
+            content,
+            selectionStart,
+            selectionEnd,
+            left: "$",
+            right: "$",
+            placeholder: "formula",
+          });
+        }
+        if (normalized === "list_item") {
+          return applyLinePrefixMarkdown({
+            content,
+            selectionStart,
+            selectionEnd,
+            kind: "unordered",
+          });
+        }
+        if (normalized === "ordered_list_item") {
+          return applyLinePrefixMarkdown({
+            content,
+            selectionStart,
+            selectionEnd,
+            kind: "ordered",
+          });
+        }
+        return null;
+      }
+
+      function applyMarkdownAction(action) {
+        const output = currentExpandedEditorOutput();
+        const layoutId = Number(state.expandedEditorLayoutId);
+        if (!Number.isInteger(layoutId) || layoutId <= 0 || !isMarkdownOutput(output)) {
+          return false;
+        }
+
+        if (codeMirrorView && !expandedEditorCmHost.hidden) {
+          const content = codeMirrorView.state.doc.toString();
+          const selection = codeMirrorView.state.selection.main;
+          const result = applyMarkdownActionToContent({
+            action,
+            content,
+            selectionStart: Number(selection.from),
+            selectionEnd: Number(selection.to),
+          });
+          if (!result) {
+            return false;
+          }
+          codeMirrorView.dispatch({
+            changes: {
+              from: 0,
+              to: codeMirrorView.state.doc.length,
+              insert: String(result.content ?? ""),
+            },
+            selection: {
+              anchor: Number(result.selectionStart ?? 0),
+              head: Number(result.selectionEnd ?? result.selectionStart ?? 0),
+            },
+            scrollIntoView: true,
+          });
+          codeMirrorView.focus();
+          return true;
+        }
+
+        const content = String(expandedEditorTextarea.value ?? "");
+        const start = Number.isInteger(expandedEditorTextarea.selectionStart)
+          ? expandedEditorTextarea.selectionStart
+          : content.length;
+        const end = Number.isInteger(expandedEditorTextarea.selectionEnd)
+          ? expandedEditorTextarea.selectionEnd
+          : content.length;
+        const result = applyMarkdownActionToContent({
+          action,
+          content,
+          selectionStart: start,
+          selectionEnd: end,
+        });
+        if (!result) {
+          return false;
+        }
+        expandedEditorTextarea.value = String(result.content ?? "");
+        expandedEditorTextarea.setSelectionRange(
+          Number(result.selectionStart ?? 0),
+          Number(result.selectionEnd ?? result.selectionStart ?? 0),
+        );
+        updateOutputFromInput(layoutId, expandedEditorTextarea);
+        updateExpandedEditorStatusFromTextarea();
+        renderExpandedEditorValidation();
+        syncHoveredLineFromExpandedEditor({ source: "editor" });
+        expandedEditorTextarea.focus();
+        return true;
+      }
+
+      function resolveExpandedEditorHotkeyAction(event) {
+        if (!(event instanceof KeyboardEvent)) {
+          return null;
+        }
+        const hasMod = Boolean(event.ctrlKey || event.metaKey);
+        if (!hasMod || event.altKey) {
+          return null;
+        }
+        const key = String(event.key || "").toLowerCase();
+        if (!event.shiftKey && key === "b") {
+          return "bold";
+        }
+        if (!event.shiftKey && key === "i") {
+          return "italic";
+        }
+        if (event.shiftKey && key === "e") {
+          return "inline_formula";
+        }
+        if (event.shiftKey && (event.code === "Digit8" || key === "8" || key === "*")) {
+          return "list_item";
+        }
+        if (event.shiftKey && (event.code === "Digit7" || key === "7")) {
+          return "ordered_list_item";
+        }
+        return null;
+      }
+
       function updateExpandedEditorStatusText({ line = 1, column = 1, chars = 0 } = {}) {
+        if (expandedEditorStatusText) {
+          expandedEditorStatusText.textContent = `Ln ${line}, Col ${column} | ${chars} chars`;
+          return;
+        }
         expandedEditorStatus.textContent = `Ln ${line}, Col ${column} | ${chars} chars`;
+      }
+
+      function renderExpandedEditorValidation() {
+        if (!expandedEditorValidation) {
+          return;
+        }
+        const layoutId = Number(state.expandedEditorLayoutId);
+        if (!Number.isInteger(layoutId) || layoutId <= 0 || expandedEditor.hidden) {
+          expandedEditorValidation.hidden = true;
+          expandedEditorValidation.innerHTML = "";
+          return;
+        }
+        const output = outputByLayoutId(layoutId);
+        if (!output) {
+          expandedEditorValidation.hidden = true;
+          expandedEditorValidation.innerHTML = "";
+          return;
+        }
+        const issues = detectEditorValidationIssues({
+          content: output.content,
+          format: output.output_format,
+        });
+        expandedEditorValidation.innerHTML = "";
+        if (!issues.length) {
+          expandedEditorValidation.hidden = true;
+          return;
+        }
+        const fragment = document.createDocumentFragment();
+        for (const issue of issues) {
+          const badge = document.createElement("span");
+          badge.className = "editor-validation-badge";
+          badge.textContent = String(issue?.label || "Validation warning");
+          fragment.appendChild(badge);
+        }
+        expandedEditorValidation.appendChild(fragment);
+        expandedEditorValidation.hidden = false;
       }
 
       function updateExpandedEditorStatusFromCodeMirror(view = codeMirrorView) {
@@ -1825,12 +2363,24 @@
             return;
           }
           updateExpandedEditorStatusFromCodeMirror(update.view);
+          if (update.docChanged) {
+            renderExpandedEditorValidation();
+          }
+          syncHoveredLineFromExpandedEditor({ source: "editor" });
         });
 
         const keyHandlers = deps.EditorView.domEventHandlers({
           keydown(event, view) {
             if (!(event instanceof KeyboardEvent)) {
               return false;
+            }
+            const hotkeyAction = resolveExpandedEditorHotkeyAction(event);
+            if (hotkeyAction) {
+              const applied = applyMarkdownAction(hotkeyAction);
+              if (applied) {
+                event.preventDefault();
+              }
+              return applied;
             }
             if (event.key !== "Enter") {
               return false;
@@ -1877,6 +2427,8 @@
       function closeExpandedEditor() {
         state.expandedEditorLayoutId = null;
         expandedEditor.hidden = true;
+        renderExpandedEditorValidation();
+        refreshExpandedEditorToolbar();
       }
 
       function openExpandedEditor(layoutId) {
@@ -1896,6 +2448,7 @@
         expandedEditor.hidden = false;
         const content = String(output.content ?? "");
         setExpandedEditorWrapButtonState(editorWrapEnabled);
+        refreshExpandedEditorToolbar();
         if (codeMirrorView) {
           expandedEditorCmHost.hidden = false;
           expandedEditorTextarea.hidden = true;
@@ -1903,6 +2456,8 @@
           setCodeMirrorContent(content, { moveCursorToEnd: true });
           updateExpandedEditorStatusFromCodeMirror(codeMirrorView);
           codeMirrorView.focus();
+          renderExpandedEditorValidation();
+          syncHoveredLineFromExpandedEditor({ source: "editor" });
           return;
         }
         setExpandedEditorModeBadge("loading");
@@ -1915,6 +2470,8 @@
         const end = content.length;
         expandedEditorTextarea.setSelectionRange(end, end);
         updateExpandedEditorStatusFromTextarea();
+        renderExpandedEditorValidation();
+        syncHoveredLineFromExpandedEditor({ source: "editor" });
         void ensureCodeMirrorView({ initialText: content, moveCursorToEnd: true });
       }
 
@@ -1931,6 +2488,7 @@
         if (expandedEditor.hidden) {
           expandedEditor.hidden = false;
         }
+        refreshExpandedEditorToolbar();
         const content = String(output.content ?? "");
         if (document.activeElement !== expandedEditorTextarea) {
           expandedEditorTextarea.value = content;
@@ -1943,6 +2501,8 @@
         } else {
           updateExpandedEditorStatusFromCodeMirror();
         }
+        renderExpandedEditorValidation();
+        syncHoveredLineFromExpandedEditor({ source: "editor" });
       }
 
       function normalizeClassName(className) {
@@ -2325,6 +2885,11 @@
         return state.outputs.find((output) => Number(output.layout_id) === Number(layoutId)) || null;
       }
 
+      function outputLineCount(layoutId) {
+        const output = outputByLayoutId(layoutId);
+        return countTextLines(output ? output.content : "");
+      }
+
       function clearLineHoverHighlights() {
         for (const marker of reconstructionSurface.querySelectorAll(".recon-line-highlight")) {
           marker.remove();
@@ -2376,7 +2941,135 @@
         }
       }
 
-      function setHoveredLine(layoutId, lineBand) {
+      function setExpandedEditorCaretToLine(layoutId, lineIndex) {
+        const normalizedLayoutId = Number(layoutId);
+        const normalizedLineIndex = Number(lineIndex);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return false;
+        }
+        if (!Number.isFinite(normalizedLineIndex)) {
+          return false;
+        }
+        if (Number(state.expandedEditorLayoutId) !== normalizedLayoutId || expandedEditor.hidden) {
+          return false;
+        }
+
+        if (codeMirrorView && !expandedEditorCmHost.hidden) {
+          const totalLines = Math.max(1, Number(codeMirrorView.state.doc.lines));
+          const targetLine = Math.max(1, Math.min(totalLines, Math.floor(normalizedLineIndex) + 1));
+          const currentLine = Number(codeMirrorView.state.doc.lineAt(codeMirrorView.state.selection.main.head).number);
+          if (currentLine === targetLine) {
+            return true;
+          }
+          const lineInfo = codeMirrorView.state.doc.line(targetLine);
+          codeMirrorView.dispatch({
+            selection: { anchor: lineInfo.from },
+            scrollIntoView: true,
+          });
+          updateExpandedEditorStatusFromCodeMirror(codeMirrorView);
+          return true;
+        }
+
+        const text = String(expandedEditorTextarea.value ?? "");
+        const totalLines = countTextLines(text);
+        const targetIndex = Math.max(0, Math.min(totalLines - 1, Math.floor(normalizedLineIndex)));
+        const currentOffset = Number.isInteger(expandedEditorTextarea.selectionStart)
+          ? expandedEditorTextarea.selectionStart
+          : text.length;
+        const currentIndex = lineIndexFromTextOffset(text, currentOffset);
+        if (currentIndex === targetIndex) {
+          return true;
+        }
+        const targetOffset = textOffsetForLineIndex(text, targetIndex);
+        expandedEditorTextarea.setSelectionRange(targetOffset, targetOffset);
+        updateExpandedEditorStatusFromTextarea();
+        return true;
+      }
+
+      function reconstructedContentNodeByLayout(layoutId) {
+        const normalized = Number(layoutId);
+        if (!Number.isInteger(normalized) || normalized <= 0) {
+          return null;
+        }
+        return reconstructionSurface.querySelector(`.recon-item[data-layout-id="${normalized}"] .recon-item-content`);
+      }
+
+      function resolveLineBandForLayout(layoutId, lineIndex) {
+        const normalizedLayoutId = Number(layoutId);
+        const normalizedLineIndex = Number(lineIndex);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return null;
+        }
+        if (!Number.isFinite(normalizedLineIndex)) {
+          return null;
+        }
+
+        const contentNode = reconstructedContentNodeByLayout(normalizedLayoutId);
+        if (contentNode) {
+          const rect = contentNode.getBoundingClientRect();
+          const lineHeight = lineHeightForContentNode(contentNode);
+          if (rect && rect.height > 0 && lineHeight) {
+            const renderedBand = computeApproxLineBandByIndex({
+              lineIndex: Math.floor(normalizedLineIndex),
+              contentHeight: rect.height,
+              lineHeight,
+              minLineHeight: 6,
+            });
+            if (renderedBand) {
+              return renderedBand;
+            }
+          }
+        }
+
+        const totalLines = outputLineCount(normalizedLayoutId);
+        return lineBandFromLineIndex(normalizedLineIndex, totalLines);
+      }
+
+      function syncExpandedEditorCaretFromHoveredLine({ source = null } = {}) {
+        if (source === "editor" || expandedEditor.hidden) {
+          return;
+        }
+        if (isCodeMirrorFocused() || document.activeElement === expandedEditorTextarea) {
+          return;
+        }
+        const hovered = state.hoveredLine;
+        if (!hovered || typeof hovered !== "object") {
+          return;
+        }
+        const hoveredLayoutId = Number(hovered.layoutId);
+        const hoveredLineIndex = Number(hovered.lineIndex);
+        if (!Number.isInteger(hoveredLayoutId) || hoveredLayoutId <= 0 || !Number.isFinite(hoveredLineIndex)) {
+          return;
+        }
+        setExpandedEditorCaretToLine(hoveredLayoutId, hoveredLineIndex);
+      }
+
+      function syncHoveredLineFromExpandedEditor({ source = "editor" } = {}) {
+        if (expandedEditor.hidden) {
+          return;
+        }
+        const layoutId = Number(state.expandedEditorLayoutId);
+        if (!Number.isInteger(layoutId) || layoutId <= 0) {
+          return;
+        }
+
+        let lineIndex = null;
+        if (codeMirrorView && !expandedEditorCmHost.hidden) {
+          const lineNumber = Number(codeMirrorView.state.doc.lineAt(codeMirrorView.state.selection.main.head).number);
+          lineIndex = Number.isFinite(lineNumber) ? lineNumber - 1 : 0;
+        } else {
+          const text = String(expandedEditorTextarea.value ?? "");
+          const caretOffset = Number.isInteger(expandedEditorTextarea.selectionStart)
+            ? expandedEditorTextarea.selectionStart
+            : text.length;
+          lineIndex = lineIndexFromTextOffset(text, caretOffset);
+        }
+
+        const lineBand = resolveLineBandForLayout(layoutId, lineIndex);
+        setHoveredLine(layoutId, lineBand, { source });
+      }
+
+      function setHoveredLine(layoutId, lineBand, { source = null } = {}) {
         const normalizedId = Number(layoutId);
         if (!Number.isInteger(normalizedId) || normalizedId <= 0 || !lineBand) {
           if (state.hoveredLine === null) {
@@ -2384,6 +3077,7 @@
           }
           state.hoveredLine = null;
           applyLineHoverHighlights();
+          syncExpandedEditorCaretFromHoveredLine({ source });
           return;
         }
         const next = {
@@ -2402,6 +3096,7 @@
         }
         state.hoveredLine = next;
         applyLineHoverHighlights();
+        syncExpandedEditorCaretFromHoveredLine({ source });
       }
 
       function applyReextractHoverStyles() {
@@ -2631,28 +3326,24 @@
         if (!rect || rect.height <= 0) {
           return;
         }
-        const lineHeight = lineHeightForContentNode(contentNode);
-        if (!lineHeight) {
-          return;
-        }
         const offsetY = Number(clientY) - rect.top;
-        const band = computeApproxLineBand({
-          offsetY,
-          contentHeight: rect.height,
-          lineHeight,
-          minLineHeight: 6,
-        });
-        setHoveredLine(layoutId, band);
-      }
-
-      function markdownContentNodeByLayout(layoutId) {
-        const normalized = Number(layoutId);
-        if (!Number.isInteger(normalized) || normalized <= 0) {
-          return null;
+        const lineHeight = lineHeightForContentNode(contentNode);
+        let band = null;
+        if (lineHeight) {
+          band = computeApproxLineBand({
+            offsetY,
+            contentHeight: rect.height,
+            lineHeight,
+            minLineHeight: 6,
+          });
         }
-        return reconstructionSurface.querySelector(
-          `.recon-item[data-layout-id="${normalized}"] .recon-item-content.markdown`,
-        );
+        if (!band) {
+          const totalLines = outputLineCount(layoutId);
+          const safeOffsetY = Math.max(0, Math.min(rect.height - 0.001, offsetY));
+          const roughIndex = Math.floor((safeOffsetY / rect.height) * totalLines);
+          band = resolveLineBandForLayout(layoutId, roughIndex);
+        }
+        setHoveredLine(layoutId, band, { source: "reconstructed" });
       }
 
       function isInteractiveTextTarget(target) {
@@ -2678,7 +3369,7 @@
         if (!output || String(output.output_format || "").toLowerCase() !== "markdown") {
           return false;
         }
-        const contentNode = markdownContentNodeByLayout(candidateLayoutId);
+        const contentNode = reconstructedContentNodeByLayout(candidateLayoutId);
         if (!contentNode) {
           return false;
         }
@@ -2701,7 +3392,7 @@
         if (!nextBand) {
           return false;
         }
-        setHoveredLine(candidateLayoutId, nextBand);
+        setHoveredLine(candidateLayoutId, nextBand, { source: "keyboard" });
         return true;
       }
 
@@ -2890,14 +3581,12 @@
           item.appendChild(header);
 
           const contentNode = appendStructuredContent(item, output);
-          if (String(output.output_format || "").toLowerCase() === "markdown") {
-            contentNode.addEventListener("pointermove", (event) => {
-              updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
-            });
-            contentNode.addEventListener("pointerleave", () => {
-              setHoveredLine(null, null);
-            });
-          }
+          contentNode.addEventListener("pointermove", (event) => {
+            updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
+          });
+          contentNode.addEventListener("pointerleave", () => {
+            setHoveredLine(null, null, { source: "reconstructed" });
+          });
           reconstructionSurface.appendChild(item);
           fitReconstructedContent(item, contentNode, output);
         }
@@ -2926,6 +3615,20 @@
           box.addEventListener("dblclick", (event) => {
             event.preventDefault();
             openExpandedEditor(output.layout_id);
+          });
+          box.addEventListener("pointermove", (event) => {
+            const rect = box.getBoundingClientRect();
+            if (!rect || rect.height <= 0) {
+              return;
+            }
+            const safeOffsetY = Math.max(0, Math.min(rect.height - 0.001, Number(event.clientY) - rect.top));
+            const totalLines = outputLineCount(output.layout_id);
+            const roughIndex = Math.floor((safeOffsetY / rect.height) * totalLines);
+            const band = resolveLineBandForLayout(output.layout_id, roughIndex);
+            setHoveredLine(output.layout_id, band, { source: "source" });
+          });
+          box.addEventListener("pointerleave", () => {
+            setHoveredLine(null, null, { source: "source" });
           });
 
           const label = document.createElement("div");
@@ -2965,6 +3668,8 @@
           if (source !== "codemirror" && !isCodeMirrorFocused()) {
             setCodeMirrorContent(nextDraft.content);
           }
+          renderExpandedEditorValidation();
+          refreshExpandedEditorToolbar();
         }
         renderReconstruction();
         persistDraftState();
@@ -3180,6 +3885,8 @@
         }
 
         applyStoredZoomSettings();
+        applyStoredEditorFontSize();
+        applyStoredEditorDrawerWidth();
         state.reconstructedRenderMode = normalizeReconstructedRenderMode(
           readStorage(STORAGE_KEYS.reconstructedRenderMode),
         );
@@ -3383,13 +4090,46 @@
           closeReextractModal();
         }
       });
+      expandedEditorResizeHandle.addEventListener("pointerdown", beginEditorDrawerResize);
+      expandedEditorResizeHandle.addEventListener("pointermove", updateEditorDrawerResize);
+      expandedEditorResizeHandle.addEventListener("pointerup", endEditorDrawerResize);
+      expandedEditorResizeHandle.addEventListener("pointercancel", endEditorDrawerResize);
+      expandedEditorResizeHandle.addEventListener("lostpointercapture", endEditorDrawerResize);
       expandedEditorCloseBtn.addEventListener("click", () => {
         closeExpandedEditor();
+      });
+      editorActionBoldBtn.addEventListener("click", () => {
+        applyMarkdownAction("bold");
+      });
+      editorActionItalicBtn.addEventListener("click", () => {
+        applyMarkdownAction("italic");
+      });
+      editorActionInlineFormulaBtn.addEventListener("click", () => {
+        applyMarkdownAction("inline_formula");
+      });
+      editorActionListItemBtn.addEventListener("click", () => {
+        applyMarkdownAction("list_item");
+      });
+      editorActionOrderedListItemBtn.addEventListener("click", () => {
+        applyMarkdownAction("ordered_list_item");
+      });
+      editorFontSizeDecreaseBtn.addEventListener("click", () => {
+        setExpandedEditorFontSize(state.editorFontSize - EDITOR_FONT_SIZE_STEP);
+      });
+      editorFontSizeIncreaseBtn.addEventListener("click", () => {
+        setExpandedEditorFontSize(state.editorFontSize + EDITOR_FONT_SIZE_STEP);
       });
       expandedEditorWrapBtn.addEventListener("click", () => {
         toggleExpandedEditorWrap();
       });
       expandedEditorTextarea.addEventListener("keydown", (event) => {
+        const hotkeyAction = resolveExpandedEditorHotkeyAction(event);
+        if (hotkeyAction) {
+          if (applyMarkdownAction(hotkeyAction)) {
+            event.preventDefault();
+            return;
+          }
+        }
         if (event.key !== "Enter") {
           return;
         }
@@ -3407,6 +4147,7 @@
             updateOutputFromInput(layoutId, expandedEditorTextarea);
           }
           updateExpandedEditorStatusFromTextarea();
+          syncHoveredLineFromExpandedEditor({ source: "editor" });
           return;
         }
         event.preventDefault();
@@ -3419,12 +4160,15 @@
         }
         updateOutputFromInput(layoutId, expandedEditorTextarea);
         updateExpandedEditorStatusFromTextarea();
+        syncHoveredLineFromExpandedEditor({ source: "editor" });
       });
       expandedEditorTextarea.addEventListener("click", () => {
         updateExpandedEditorStatusFromTextarea();
+        syncHoveredLineFromExpandedEditor({ source: "editor" });
       });
       expandedEditorTextarea.addEventListener("keyup", () => {
         updateExpandedEditorStatusFromTextarea();
+        syncHoveredLineFromExpandedEditor({ source: "editor" });
       });
       reviewBtn.addEventListener("click", markReviewed);
 
@@ -3455,8 +4199,12 @@
           updateReconstructedFloatingControlsPosition();
         });
       }
+      window.addEventListener("resize", () => {
+        applyExpandedEditorDrawerWidth({ persist: false });
+      });
       window.addEventListener("beforeunload", () => {
         clearReconstructedControlsIdleTimer();
+        document.body.classList.remove("editor-resizing");
       });
 
       init().catch((error) => {
