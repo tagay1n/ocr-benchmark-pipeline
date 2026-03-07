@@ -494,26 +494,34 @@
         min-height: 0;
         display: flex;
         flex-direction: column;
+        position: relative;
       }
 
       .panel-hidden {
         display: none !important;
       }
 
-      .image-panel-header {
-        margin: 0 0 8px;
-        min-height: 28px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-
-      .reconstructed-controls {
+      .reconstructed-floating-controls {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        z-index: 7;
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        margin-left: auto;
+        opacity: 1;
+        transform: translateY(0);
+        transition: opacity 180ms ease, transform 180ms ease;
+        visibility: visible;
+      }
+
+      .reconstructed-floating-controls.is-idle {
+        opacity: 0.36;
+        transform: translateY(-2px);
+        pointer-events: none;
+      }
+
+      .reconstructed-floating-controls .render-mode-toggle {
+        box-shadow: 0 1px 6px rgba(26, 30, 34, 0.18);
       }
 
       .render-mode-toggle {
@@ -929,14 +937,12 @@
         </section>
 
         <section id="reconstructed-panel" class="panel image-panel">
-          <header class="image-panel-header">
-            <div class="reconstructed-controls">
-              <div class="render-mode-toggle" role="group" aria-label="Reconstructed content mode">
-                <button id="render-markdown-btn" class="render-mode-btn active" type="button" aria-pressed="true">Markdown</button>
-                <button id="render-raw-btn" class="render-mode-btn" type="button" aria-pressed="false">Raw</button>
-              </div>
+          <div id="reconstructed-floating-controls" class="reconstructed-floating-controls">
+            <div class="render-mode-toggle" role="group" aria-label="Reconstructed content mode">
+              <button id="render-markdown-btn" class="render-mode-btn active" type="button" aria-pressed="true">Markdown</button>
+              <button id="render-raw-btn" class="render-mode-btn" type="button" aria-pressed="false">Raw</button>
             </div>
-          </header>
+          </div>
           <div id="reconstructed-viewport" class="preview-viewport">
             <div id="reconstructed-wrap" class="preview-wrap">
               <div id="reconstruction-surface"></div>
@@ -1008,7 +1014,9 @@
         renderMarkdownInto,
       } from "./js/reconstructed_markdown.mjs";
       import {
+        computeFloatingControlPlacement,
         hasLocalDraftForLayout,
+        isRectOnscreen,
         isReconstructedRestoreDisabled,
         normalizeReconstructedRenderMode,
       } from "./js/ocr_review_utils.mjs";
@@ -1050,6 +1058,7 @@
       const grid = document.querySelector(".grid");
       const sourcePanel = document.getElementById("source-panel");
       const reconstructedPanel = document.getElementById("reconstructed-panel");
+      const reconstructedFloatingControls = document.getElementById("reconstructed-floating-controls");
       const renderMarkdownBtn = document.getElementById("render-markdown-btn");
       const renderRawBtn = document.getElementById("render-raw-btn");
       const pageImage = document.getElementById("page-image");
@@ -1099,6 +1108,8 @@
         },
       };
       let reconstructionRefitScheduled = false;
+      const RECONSTRUCTED_CONTROLS_IDLE_MS = 2500;
+      let reconstructedControlsIdleTimer = null;
 
       function readStorage(key) {
         try {
@@ -1170,6 +1181,64 @@
         renderReconstruction();
       }
 
+      function clearReconstructedControlsIdleTimer() {
+        if (reconstructedControlsIdleTimer !== null) {
+          window.clearTimeout(reconstructedControlsIdleTimer);
+          reconstructedControlsIdleTimer = null;
+        }
+      }
+
+      function setReconstructedControlsIdle(idle) {
+        if (!reconstructedFloatingControls) {
+          return;
+        }
+        reconstructedFloatingControls.classList.toggle("is-idle", Boolean(idle));
+      }
+
+      function notifyReconstructedControlsActivity() {
+        if (!reconstructedFloatingControls || !state.panelVisibility.reconstructed) {
+          return;
+        }
+        setReconstructedControlsIdle(false);
+        clearReconstructedControlsIdleTimer();
+        reconstructedControlsIdleTimer = window.setTimeout(() => {
+          setReconstructedControlsIdle(true);
+          reconstructedControlsIdleTimer = null;
+        }, RECONSTRUCTED_CONTROLS_IDLE_MS);
+      }
+
+      function updateReconstructedFloatingControlsPosition() {
+        if (!reconstructedFloatingControls) {
+          return;
+        }
+        if (!state.panelVisibility.reconstructed) {
+          reconstructedFloatingControls.style.visibility = "hidden";
+          return;
+        }
+        const anchorRect = reconstructedViewport.getBoundingClientRect();
+        if (!isRectOnscreen(anchorRect, { windowWidth: window.innerWidth, windowHeight: window.innerHeight })) {
+          reconstructedFloatingControls.style.visibility = "hidden";
+          return;
+        }
+
+        const controlRect = reconstructedFloatingControls.getBoundingClientRect();
+        const controlHeight = Number.isFinite(controlRect.height) && controlRect.height > 0 ? controlRect.height : 0;
+        const placement = computeFloatingControlPlacement({
+          anchorRect,
+          controlHeight,
+          windowWidth: window.innerWidth,
+          windowHeight: window.innerHeight,
+          desiredTop: 10,
+          edgeInset: 6,
+        });
+        reconstructedFloatingControls.style.visibility = placement.visible ? "visible" : "hidden";
+        if (!placement.visible) {
+          return;
+        }
+        reconstructedFloatingControls.style.top = `${placement.top}px`;
+        reconstructedFloatingControls.style.right = `${placement.right}px`;
+      }
+
       function visiblePanelCount() {
         return Number(state.panelVisibility.source) + Number(state.panelVisibility.reconstructed);
       }
@@ -1199,6 +1268,13 @@
         toggleReconstructedBtn.setAttribute("aria-pressed", state.panelVisibility.reconstructed ? "true" : "false");
 
         grid.style.gridTemplateColumns = gridTemplateColumnsForVisiblePanels();
+        if (state.panelVisibility.reconstructed) {
+          notifyReconstructedControlsActivity();
+        } else {
+          clearReconstructedControlsIdleTimer();
+          setReconstructedControlsIdle(false);
+        }
+        updateReconstructedFloatingControlsPosition();
         requestAnimationFrame(() => {
           applyZoom();
         });
@@ -2695,6 +2771,8 @@
           selectOutput(state.outputs[0].layout_id, { scrollImageToLayout: false });
         }
         updateReviewUiState();
+        notifyReconstructedControlsActivity();
+        updateReconstructedFloatingControlsPosition();
         setStatus("Ready.");
         await loadForthAvailability();
       }
@@ -2723,6 +2801,53 @@
 
       toggleSourceBtn.addEventListener("click", () => togglePanel("source"));
       toggleReconstructedBtn.addEventListener("click", () => togglePanel("reconstructed"));
+      reconstructedViewport.addEventListener("pointermove", () => {
+        notifyReconstructedControlsActivity();
+      });
+      reconstructedViewport.addEventListener("pointerdown", () => {
+        notifyReconstructedControlsActivity();
+      });
+      reconstructedViewport.addEventListener(
+        "wheel",
+        () => {
+          notifyReconstructedControlsActivity();
+        },
+        { passive: true },
+      );
+      reconstructedViewport.addEventListener(
+        "scroll",
+        () => {
+          notifyReconstructedControlsActivity();
+        },
+        { passive: true },
+      );
+      reconstructedViewport.addEventListener(
+        "touchstart",
+        () => {
+          notifyReconstructedControlsActivity();
+        },
+        { passive: true },
+      );
+      reconstructedViewport.addEventListener(
+        "touchmove",
+        () => {
+          notifyReconstructedControlsActivity();
+        },
+        { passive: true },
+      );
+      reconstructedViewport.addEventListener("mouseenter", () => {
+        notifyReconstructedControlsActivity();
+      });
+      window.addEventListener(
+        "scroll",
+        () => {
+          updateReconstructedFloatingControlsPosition();
+          if (state.panelVisibility.reconstructed) {
+            notifyReconstructedControlsActivity();
+          }
+        },
+        { passive: true },
+      );
       zoomTrigger.addEventListener("click", () => {
         if (zoomMenu.hidden) {
           openZoomMenu();
@@ -2767,6 +2892,9 @@
         closeZoomMenu();
       });
       document.addEventListener("keydown", (event) => {
+        if (state.panelVisibility.reconstructed) {
+          notifyReconstructedControlsActivity();
+        }
         if (event.key === "ArrowUp" || event.key === "ArrowDown") {
           if (!reextractModal.hidden) {
             return;
@@ -2795,9 +2923,11 @@
       });
       renderMarkdownBtn.addEventListener("click", () => {
         setReconstructedRenderMode("markdown");
+        notifyReconstructedControlsActivity();
       });
       renderRawBtn.addEventListener("click", () => {
         setReconstructedRenderMode("raw");
+        notifyReconstructedControlsActivity();
       });
       reextractModalRunBtn.addEventListener("click", async () => {
         if (state.reextractInProgress) {
@@ -2835,6 +2965,8 @@
       pageImage.addEventListener("load", () => {
         applyZoom();
         renderReconstruction();
+        notifyReconstructedControlsActivity();
+        updateReconstructedFloatingControlsPosition();
         if (state.selectedLayoutId !== null) {
           ensureLayoutVisible(state.selectedLayoutId);
         }
@@ -2845,6 +2977,7 @@
           if (state.zoomMode !== "custom") {
             applyZoom();
           }
+          updateReconstructedFloatingControlsPosition();
         });
         viewportResizeObserver.observe(sourceViewport);
         viewportResizeObserver.observe(reconstructedViewport);
@@ -2853,8 +2986,12 @@
           if (state.zoomMode !== "custom") {
             applyZoom();
           }
+          updateReconstructedFloatingControlsPosition();
         });
       }
+      window.addEventListener("beforeunload", () => {
+        clearReconstructedControlsIdleTimer();
+      });
 
       init().catch((error) => {
         setStatus(`Initialization failed: ${error.message}`, { isError: true });
