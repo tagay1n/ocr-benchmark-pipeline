@@ -492,6 +492,21 @@
       </div>
     </div>
 
+    <div id="remove-modal" class="modal-backdrop" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="remove-modal-title">
+        <h2 id="remove-modal-title">Remove image</h2>
+        <p>
+          Remove this image file from input folder and delete all related DB records?
+          <br />
+          <code id="remove-modal-rel-path">—</code>
+        </p>
+        <div class="modal-actions">
+          <button id="remove-cancel-btn" class="secondary" type="button">Cancel</button>
+          <button id="remove-confirm-btn" class="danger-btn" type="button">Remove image</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module">
       const STORAGE_KEYS = {
         pipelinePanelExpanded: "dashboard.pipeline_panel_expanded",
@@ -532,6 +547,10 @@
       const wipeConfirmInput = document.getElementById("wipe-confirm-input");
       const wipeCancelBtn = document.getElementById("wipe-cancel-btn");
       const wipeConfirmBtn = document.getElementById("wipe-confirm-btn");
+      const removeModal = document.getElementById("remove-modal");
+      const removeModalRelPath = document.getElementById("remove-modal-rel-path");
+      const removeCancelBtn = document.getElementById("remove-cancel-btn");
+      const removeConfirmBtn = document.getElementById("remove-confirm-btn");
 
       const pagesBody = document.getElementById("pages-body");
       const duplicatePanel = document.getElementById("duplicate-panel");
@@ -550,6 +569,7 @@
       let activityStream = null;
       let streamReconnectTimer = null;
       let lastProcessedEventId = 0;
+      let pendingRemovePageId = null;
       let runtimeOptions = {
         enable_background_jobs: true,
         auto_detect_layouts_after_discovery: false,
@@ -728,6 +748,9 @@
                   page.is_missing ? " disabled" : ""
                 }>
                   OCR
+                </button>
+                <button class="danger-btn row-open-btn" type="button" data-target="remove">
+                  Remove
                 </button>
               </div>
             </td>
@@ -1088,6 +1111,44 @@
         wipeConfirmBtn.disabled = true;
       }
 
+      function openRemoveModal(pageId) {
+        const page = currentPages.find((row) => Number(row.id) === Number(pageId));
+        if (!page) {
+          return;
+        }
+        pendingRemovePageId = Number(page.id);
+        removeModalRelPath.textContent = page.rel_path || "—";
+        removeModal.hidden = false;
+      }
+
+      function closeRemoveModal() {
+        removeModal.hidden = true;
+        pendingRemovePageId = null;
+        removeModalRelPath.textContent = "—";
+      }
+
+      async function runRemovePage() {
+        const pageId = Number(pendingRemovePageId);
+        if (!Number.isInteger(pageId) || pageId <= 0) {
+          return;
+        }
+        closeRemoveModal();
+        scanBtn.disabled = true;
+        reviewLayoutsBtn.disabled = true;
+        reviewOcrBtn.disabled = true;
+        exportFinalBtn.disabled = true;
+        wipeBtn.disabled = true;
+        try {
+          await fetchJson(`/api/pages/${pageId}`, { method: "DELETE" });
+          await reloadDashboard();
+        } catch (error) {
+          console.error(`Remove failed: ${error.message}`);
+        } finally {
+          scanBtn.disabled = false;
+          wipeBtn.disabled = false;
+        }
+      }
+
       async function runWipe() {
         closeWipeModal();
         scanBtn.disabled = true;
@@ -1173,6 +1234,10 @@
         }
         if (reviewTarget === "ocr") {
           window.location.href = `/static/ocr_review.html?page_id=${pageId}`;
+          return;
+        }
+        if (reviewTarget === "remove") {
+          openRemoveModal(pageId);
         }
       });
       autoDetectLayoutsToggle.addEventListener("change", async () => {
@@ -1215,6 +1280,8 @@
       wipeBtn.addEventListener("click", openWipeModal);
       wipeCancelBtn.addEventListener("click", closeWipeModal);
       wipeConfirmBtn.addEventListener("click", runWipe);
+      removeCancelBtn.addEventListener("click", closeRemoveModal);
+      removeConfirmBtn.addEventListener("click", runRemovePage);
 
       wipeConfirmInput.addEventListener("input", () => {
         wipeConfirmBtn.disabled = wipeConfirmInput.value.trim().toLowerCase() !== "wipe";
@@ -1225,10 +1292,22 @@
           closeWipeModal();
         }
       });
+      removeModal.addEventListener("click", (event) => {
+        if (event.target === removeModal) {
+          closeRemoveModal();
+        }
+      });
 
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && !wipeModal.hidden) {
+        if (event.key !== "Escape") {
+          return;
+        }
+        if (!wipeModal.hidden) {
           closeWipeModal();
+          return;
+        }
+        if (!removeModal.hidden) {
+          closeRemoveModal();
         }
       });
 

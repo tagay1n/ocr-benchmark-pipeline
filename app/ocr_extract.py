@@ -18,6 +18,15 @@ from .models import CaptionBinding, Layout, OcrOutput, Page
 
 GEMINI_MODEL = "gemini-3-flash-preview"
 MAX_RETRIES_PER_LAYOUT = 3
+DEFAULT_GEMINI_TEMPERATURE = 0.0
+DEFAULT_PROMPT_TEMPLATE = (
+    "Layout class: {class_name}.{caption_line}\n"
+    "Extract only the content inside this crop.\n"
+    "Return only extracted content, without explanations.\n"
+    "Preserve line breaks exactly as shown in the crop.\n"
+    "Do not dehyphenate words split by line breaks.\n"
+    "{format_rule}"
+)
 
 MARKDOWN_CLASSES = {
     "caption",
@@ -130,7 +139,9 @@ def _extract_text_from_response(payload: dict[str, Any]) -> str:
     return "\n".join(fragments).strip()
 
 
-def _gemini_generate_content(api_key: str, prompt: str, image_bytes: bytes) -> str:
+def _gemini_generate_content(
+    api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = DEFAULT_GEMINI_TEMPERATURE
+) -> str:
     endpoint = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{urllib_parse.quote(GEMINI_MODEL)}:generateContent?key={urllib_parse.quote(api_key)}"
@@ -145,7 +156,7 @@ def _gemini_generate_content(api_key: str, prompt: str, image_bytes: bytes) -> s
                 ],
             }
         ],
-        "generationConfig": {"temperature": 0.0},
+        "generationConfig": {"temperature": float(temperature)},
     }
     request_payload = json.dumps(payload, ensure_ascii=True).encode("utf-8")
     request = urllib_request.Request(
@@ -182,7 +193,9 @@ def _is_quota_error(message: str) -> bool:
     )
 
 
-def _prompt_for_layout(layout: dict[str, Any], caption_targets: list[str]) -> tuple[str, str]:
+def _prompt_for_layout(
+    layout: dict[str, Any], caption_targets: list[str], *, prompt_template: str
+) -> tuple[str, str]:
     class_name = _normalize_class_name(str(layout["class_name"]))
     if class_name in MARKDOWN_CLASSES:
         output_format = "markdown"
@@ -198,25 +211,26 @@ def _prompt_for_layout(layout: dict[str, Any], caption_targets: list[str]) -> tu
     if output_format == "skip":
         return ("", "skip")
 
-    rules = [
-        "Extract only the content inside this crop.",
-        "Return only extracted content, without explanations.",
-        "Preserve line breaks exactly as shown in the crop.",
-        "Do not dehyphenate words split by line breaks.",
-    ]
+    format_rule = ""
     if output_format == "markdown":
-        rules.append("Output must be valid Markdown and preserve visible emphasis like bold/italic.")
+        format_rule = "Output must be valid Markdown and preserve visible emphasis like bold/italic."
     elif output_format == "html":
-        rules.append("Output must be only one HTML <table>...</table> block.")
+        format_rule = "Output must be only one HTML <table>...</table> block."
     elif output_format == "latex":
-        rules.append("Output must be only LaTeX expression(s), no markdown wrapper.")
+        format_rule = "Output must be only LaTeX expression(s), no markdown wrapper."
 
-    class_line = f"Layout class: {class_name}."
     caption_line = ""
     if class_name == "caption" and caption_targets:
         caption_line = f" Caption targets: {', '.join(caption_targets)}."
 
-    prompt = " ".join([class_line + caption_line, *rules]).strip()
+    prompt = str(prompt_template)
+    prompt = prompt.replace("{class_name}", class_name)
+    prompt = prompt.replace("{caption_line}", caption_line)
+    prompt = prompt.replace("{caption_targets}", ", ".join(caption_targets))
+    prompt = prompt.replace("{format_rule}", format_rule)
+    prompt = prompt.strip()
+    if not prompt:
+        raise RuntimeError("OCR prompt template produced an empty prompt.")
     return (prompt, output_format)
 
 
@@ -288,7 +302,13 @@ def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
     ]
 
 
-def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
+def extract_ocr_for_page(
+    page_id: int,
+    *,
+    prompt_template: str | None = None,
+    temperature: float | None = None,
+    max_retries_per_layout: int | None = None,
+) -> dict[str, Any]:
     with get_session() as session:
         page = session.get(Page, page_id)
         if page is None:
@@ -307,6 +327,20 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
     if not layouts:
         raise ValueError("No layouts found for OCR extraction.")
 
+    resolved_prompt_template = (
+        DEFAULT_PROMPT_TEMPLATE
+        if prompt_template is None or not str(prompt_template).strip()
+        else str(prompt_template)
+    )
+    resolved_temperature = DEFAULT_GEMINI_TEMPERATURE if temperature is None else float(temperature)
+    if resolved_temperature < 0 or resolved_temperature > 2:
+        raise ValueError("temperature must be between 0 and 2.")
+    resolved_max_retries = (
+        MAX_RETRIES_PER_LAYOUT if max_retries_per_layout is None else int(max_retries_per_layout)
+    )
+    if resolved_max_retries < 1:
+        raise ValueError("max_retries_per_layout must be >= 1.")
+
     exhausted_keys = _load_usage_state()
 
     pending_outputs: list[dict[str, Any]] = []
@@ -314,7 +348,11 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
     skipped_count = 0
     request_count = 0
     for layout in layouts:
-        prompt, output_format = _prompt_for_layout(layout, layout["caption_targets"])
+        prompt, output_format = _prompt_for_layout(
+            layout,
+            layout["caption_targets"],
+            prompt_template=resolved_prompt_template,
+        )
         if output_format == "skip":
             pending_outputs.append(
                 {
@@ -332,10 +370,15 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
         last_error: str | None = None
         response_text = ""
         used_key = ""
-        for _ in range(MAX_RETRIES_PER_LAYOUT):
+        for _ in range(resolved_max_retries):
             key = _next_available_key(exhausted_keys)
             try:
-                response_text = _gemini_generate_content(key, prompt, image_bytes)
+                response_text = _gemini_generate_content(
+                    key,
+                    prompt,
+                    image_bytes,
+                    temperature=resolved_temperature,
+                )
                 request_count += 1
                 used_key = key
                 last_error = None
@@ -392,4 +435,9 @@ def extract_ocr_for_page(page_id: int) -> dict[str, Any]:
         "extracted_count": extracted_count,
         "skipped_count": skipped_count,
         "requests_count": request_count,
+        "inference_params": {
+            "temperature": resolved_temperature,
+            "max_retries_per_layout": resolved_max_retries,
+            "prompt_template": resolved_prompt_template,
+        },
     }

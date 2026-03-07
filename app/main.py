@@ -25,7 +25,7 @@ from .layouts import (
     update_layout,
 )
 from .ocr_extract import extract_ocr_for_page
-from .models import DuplicateFile, Layout, Page, PipelineEvent, PipelineJob
+from .models import DuplicateFile, Layout, OcrOutput, Page, PipelineEvent, PipelineJob
 from .pipeline_runtime import (
     emit_event,
     enqueue_job,
@@ -177,6 +177,12 @@ class ReplaceCaptionBindingsRequest(BaseModel):
 
 class UpdateOcrOutputRequest(BaseModel):
     content: str = ""
+
+
+class ReextractOcrRequest(BaseModel):
+    prompt_template: str | None = Field(default=None, max_length=20000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_retries_per_layout: int | None = Field(default=None, ge=1, le=10)
 
 
 class RuntimeOptionsUpdateRequest(BaseModel):
@@ -379,6 +385,84 @@ def list_pages() -> dict[str, object]:
         "allowed_extensions": list(settings.allowed_extensions),
         "count": len(pages),
         "pages": pages,
+    }
+
+
+@app.delete("/api/pages/{page_id}")
+def remove_page(page_id: int) -> dict[str, object]:
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
+        if page_row is None:
+            raise HTTPException(status_code=404, detail="Page not found.")
+
+        rel_path = str(page_row.rel_path)
+        source_root = settings.source_dir.resolve()
+        image_path = (source_root / rel_path).resolve()
+        try:
+            image_path.relative_to(source_root)
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="Invalid page image path.") from error
+
+        related_counts = {
+            "layouts": int(session.query(Layout).filter(Layout.page_id == page_id).count()),
+            "ocr_outputs": int(session.query(OcrOutput).filter(OcrOutput.page_id == page_id).count()),
+            "duplicate_files": int(
+                session.query(DuplicateFile)
+                .filter(
+                    (DuplicateFile.canonical_page_id == page_id)
+                    | (DuplicateFile.rel_path == rel_path)
+                )
+                .count()
+            ),
+            "pipeline_jobs": int(session.query(PipelineJob).filter(PipelineJob.page_id == page_id).count()),
+        }
+
+    file_existed = image_path.exists()
+    file_deleted = False
+    if file_existed:
+        if not image_path.is_file():
+            raise HTTPException(status_code=400, detail="Page image path is not a file.")
+        try:
+            image_path.unlink()
+            file_deleted = True
+        except OSError as error:
+            raise HTTPException(status_code=400, detail=f"Failed to remove image file: {error}") from error
+
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
+        if page_row is None:
+            raise HTTPException(status_code=404, detail="Page not found.")
+
+        session.execute(
+            delete(DuplicateFile).where(
+                (DuplicateFile.canonical_page_id == page_id)
+                | (DuplicateFile.rel_path == rel_path)
+            )
+        )
+        session.delete(page_row)
+
+    stats_snapshot = _pipeline_stats_snapshot()
+    emit_event(
+        stage="discovery",
+        event_type="page_removed",
+        message=f"Removed page {rel_path} from dashboard dataset.",
+        data={
+            "page_id": page_id,
+            "rel_path": rel_path,
+            "file_existed": file_existed,
+            "file_deleted": file_deleted,
+            "related_counts": related_counts,
+            **stats_snapshot,
+        },
+    )
+    return {
+        "deleted": True,
+        "page_id": page_id,
+        "rel_path": rel_path,
+        "file_existed": file_existed,
+        "file_deleted": file_deleted,
+        "related_counts": related_counts,
+        **stats_snapshot,
     }
 
 
@@ -771,10 +855,12 @@ def complete_ocr_review(page_id: int) -> dict[str, object]:
 
 
 @app.post("/api/pages/{page_id}/ocr/reextract")
-def reextract_ocr(page_id: int) -> dict[str, object]:
+def reextract_ocr(page_id: int, payload: ReextractOcrRequest | None = None) -> dict[str, object]:
     page = get_page(page_id)
     if page is None:
         raise HTTPException(status_code=404, detail="Page not found.")
+
+    params = payload or ReextractOcrRequest()
 
     with get_session() as session:
         page_row = session.get(Page, page_id)
@@ -784,7 +870,7 @@ def reextract_ocr(page_id: int) -> dict[str, object]:
             raise HTTPException(status_code=400, detail="Page is marked as missing.")
 
         current_status = str(page_row.status)
-        if current_status not in {"layout_reviewed", "ocr_done", "ocr_reviewed", "ocr_failed"}:
+        if current_status not in {"layout_reviewed", "ocr_done", "ocr_reviewed", "ocr_failed", "ocr_extracting"}:
             raise HTTPException(
                 status_code=400,
                 detail=f"Page status must allow OCR extraction (got {current_status}).",
@@ -798,10 +884,20 @@ def reextract_ocr(page_id: int) -> dict[str, object]:
         event_type="job_started",
         page_id=page_id,
         message="Manual OCR reextraction started.",
-        data={"trigger": "manual_reextract"},
+        data={
+            "trigger": "manual_reextract",
+            "temperature": params.temperature,
+            "max_retries_per_layout": params.max_retries_per_layout,
+            "prompt_template": params.prompt_template,
+        },
     )
     try:
-        result = extract_ocr_for_page(page_id)
+        result = extract_ocr_for_page(
+            page_id,
+            prompt_template=params.prompt_template,
+            temperature=params.temperature,
+            max_retries_per_layout=params.max_retries_per_layout,
+        )
     except Exception as error:
         with get_session() as session:
             page_row = session.get(Page, page_id)

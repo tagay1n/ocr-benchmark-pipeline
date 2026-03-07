@@ -1,19 +1,44 @@
-# OCR Pipeline (Discovery + Layout Review V1)
+# OCR Benchmark Pipeline
 
-FastAPI + SQLite app for OCR benchmark dataset preparation.
-Current implemented slices are image discovery and first layout-review workflow.
+FastAPI + SQLite application for building an OCR benchmark dataset from document page images.
 
-## Defaults
+## Goal
 
-- Source folder: `input`
-- DB file: `data/ocr_dataset.db`
-- Extensions: `.jpg,.jpeg,.png,.tif,.tiff,.webp`
+Prepare high-quality, reviewer-validated OCR data with this workflow:
 
-Change defaults in `config.yaml`:
+1. Discover images in `input/` and index them.
+2. Detect document layouts (DocLayNet YOLO model).
+3. Review and fix layouts manually.
+4. Extract OCR content from reviewed layouts (Gemini).
+5. Review and fix extracted OCR content manually.
+
+## Current Product Surface
+
+- Dashboard (`/`):
+  - Pipeline actions: `Scan -> Review layouts -> Review OCR -> Export`.
+  - Live backend activity panel (SSE stream).
+  - Duplicate-file warnings.
+  - Per-row actions: open Layout/OCR review and remove an image (with confirmation).
+- Layout review (`/static/layouts.html?page_id=<id>`):
+  - Editable class, reading order, bbox.
+  - Drag-and-drop reading order.
+  - Bbox editing from table and by canvas handles.
+  - Caption binding to table/picture/formula.
+  - `Detect again` modal with model params and in-flight busy state.
+- OCR review (`/static/ocr_review.html?page_id=<id>`):
+  - Source + reconstructed + extracted-content panels.
+  - Draft editing and restore per OCR item.
+  - `Detect again` modal with editable prompt template + generation params.
+  - Manual detect is always allowed regardless of auto-mode toggles.
+
+## Configuration
+
+Defaults are loaded from `config.yaml` (or `APP_CONFIG_PATH`).
 
 ```yaml
 source_dir: input
 db_path: data/ocr_dataset.db
+result_dir: result
 allowed_image_extensions:
   - .jpg
   - .jpeg
@@ -24,23 +49,26 @@ allowed_image_extensions:
 enable_background_jobs: true
 auto_detect_layouts_after_discovery: false
 auto_extract_text_after_layout_review: false
+gemini_keys: []
 ```
 
-Optional env overrides:
+Environment overrides:
 
 - `SOURCE_DIR`
 - `DB_PATH`
+- `RESULT_DIR`
 - `ALLOWED_IMAGE_EXTENSIONS` (comma-separated)
-- `APP_CONFIG_PATH` (path to config file)
-- `ENABLE_BACKGROUND_JOBS` (`true/false`)
+- `APP_CONFIG_PATH`
+- `ENABLE_BACKGROUND_JOBS`
+- `GEMINI_KEYS` (comma-separated)
+- `GEMINI_USAGE_PATH`
 
-Runtime automation toggles:
+Runtime toggles in dashboard are process-local:
 
-- Dashboard exposes runtime-only toggles for:
-  - `Auto-detect layouts after discovery`
-  - `Auto-extract text after layout review`cl
-- Their initial values come from `config.yaml`.
-- Changing them in the UI does not rewrite `config.yaml`; changes apply only to the current app process.
+- `Auto-detect layouts after discovery`
+- `Auto-extract text after layout review`
+
+They do not rewrite `config.yaml`.
 
 ## Run
 
@@ -55,50 +83,36 @@ Open `http://127.0.0.1:8000`.
 
 ## Tests
 
-Backend unit tests:
+Backend:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Frontend unit tests:
+Frontend:
 
 ```bash
 node --test frontend_tests/*.test.mjs
 ```
 
-## Implemented So Far
+## API Quick Reference
 
-- Deep recursive scan is enabled.
-- One canonical file is indexed per unique file hash.
-- Duplicate files are skipped and shown in dashboard warning until removed.
-- On backend startup, scan runs automatically.
-- On dashboard load, a scan also runs automatically.
-- Manual scan is available via dashboard button.
-- Wipe DB state is available via dashboard danger button and requires typing `wipe` in a confirmation modal.
-- Dashboard has a collapsible left pipeline-stage sidebar with stage tabs and per-stage pending counts.
-- Stage tabs turn green when their pending count is `0`.
-- Stage tabs remain clickable even with `0` pending items and show stage-specific empty-state content.
-- Discovery tab shows all indexed documents, including already processed docs from later stages.
-- For each stage tab: the number in parentheses is pending count, while the table shows all historical docs that reached that stage.
-- Layout detection is auto-started by backend worker after discovery (no separate detection tab).
-- Dashboard includes backend pipeline activity panel (running job, queue, recent events).
-- Pipeline activity panel updates via server-sent events (SSE) stream.
-- Dashboard rows link to a layout review screen (`/static/layouts.html?page_id=<id>`).
-- Layout review API supports listing, manual create/edit/delete, real DocLayNet detection, and review completion.
-- Redetect supports configurable confidence/IoU thresholds from the UI.
-- Layout class editing in review UI uses a dropdown with known DocLayNet classes.
+- `POST /api/discovery/scan`
+- `POST /api/state/wipe`
+- `GET /api/pages`
+- `DELETE /api/pages/{page_id}`
+- `GET /api/pages/{page_id}/layouts`
+- `POST /api/pages/{page_id}/layouts/detect`
+- `POST /api/pages/{page_id}/layouts/review-complete`
+- `GET /api/pages/{page_id}/ocr-outputs`
+- `POST /api/pages/{page_id}/ocr/reextract`
+- `POST /api/pages/{page_id}/ocr/review-complete`
+- `GET /api/pipeline/activity`
+- `GET /api/pipeline/activity/stream`
 
-## Pipeline Activity API
+## Documentation Policy
 
-- `GET /api/pipeline/activity`: worker state, queue snapshot, and recent backend events.
-- `GET /api/pipeline/activity/stream`: live SSE feed of the same activity snapshot.
+This repository keeps active project documentation in only two files:
 
-## Important Note About Detection
-
-`POST /api/pages/{page_id}/layouts/detect` uses `hantian/yolo-doclaynet` (`yolo26m-doclaynet.pt`) via Ultralytics.
-Model inference runs on CPU by default. First detection may take longer because checkpoint download happens once and is then cached.
-
-## Project Context
-
-Persistent context is tracked in `PROJECT_CONTEXT.md` and should be updated as implementation evolves.
+- `README.md` (product + usage)
+- `AGENTS.md` (engineering collaboration rules)

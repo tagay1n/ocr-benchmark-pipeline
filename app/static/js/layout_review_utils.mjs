@@ -133,6 +133,58 @@ export function reorderReadingOrderIds({
   return nextIds;
 }
 
+export function mergeLayoutsForReview({
+  layouts,
+  localEditsById = {},
+  deletedLayoutIds = [],
+} = {}) {
+  const inputLayouts = Array.isArray(layouts) ? layouts : [];
+  const deletedSet = new Set(
+    (Array.isArray(deletedLayoutIds) ? deletedLayoutIds : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0),
+  );
+
+  const serverLayoutsById = {};
+  const mergedLayouts = [];
+  const cloneLayout = (layout) => {
+    const bbox = layout?.bbox && typeof layout.bbox === "object" ? { ...layout.bbox } : null;
+    const boundTargetIds = Array.isArray(layout?.bound_target_ids) ? [...layout.bound_target_ids] : [];
+    return {
+      ...layout,
+      bbox,
+      bound_target_ids: boundTargetIds,
+    };
+  };
+
+  for (const layout of inputLayouts) {
+    const layoutId = Number(layout?.id);
+    if (!Number.isInteger(layoutId) || layoutId <= 0) {
+      continue;
+    }
+
+    const serverLayout = cloneLayout(layout);
+    serverLayoutsById[String(layoutId)] = serverLayout;
+    if (deletedSet.has(layoutId)) {
+      continue;
+    }
+
+    const draft = localEditsById[String(layoutId)];
+    if (!draft) {
+      mergedLayouts.push(cloneLayout(serverLayout));
+      continue;
+    }
+    mergedLayouts.push({
+      ...serverLayout,
+      class_name: draft.class_name,
+      reading_order: draft.reading_order,
+      bbox: { ...draft.bbox },
+    });
+  }
+
+  return { serverLayoutsById, mergedLayouts };
+}
+
 export function computeViewportScrollToCenterBBox({
   bbox,
   contentWidth,

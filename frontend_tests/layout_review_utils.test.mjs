@@ -5,6 +5,7 @@ import {
   clampZoomPercent,
   compactReadingOrdersAfterDeletion,
   computeDraggedBBox,
+  mergeLayoutsForReview,
   computeViewportCenterPadding,
   computeViewportScrollTargetForLayoutId,
   computeViewportScrollToCenterBBox,
@@ -147,6 +148,27 @@ test("reorderReadingOrderIds supports drop to end and rejects invalid payload", 
     }),
     null,
   );
+});
+
+test("mergeLayoutsForReview keeps editable layouts isolated from server baseline", () => {
+  const sourceLayouts = [
+    {
+      id: 101,
+      class_name: "text",
+      reading_order: 1,
+      bbox: { x1: 0.1, y1: 0.2, x2: 0.8, y2: 0.6 },
+      bound_target_ids: [],
+    },
+  ];
+
+  const { serverLayoutsById, mergedLayouts } = mergeLayoutsForReview({
+    layouts: sourceLayouts,
+    localEditsById: {},
+    deletedLayoutIds: [],
+  });
+
+  mergedLayouts[0].bbox.x1 = 0.3333;
+  assert.equal(serverLayoutsById["101"].bbox.x1, 0.1);
 });
 
 test("computeViewportScrollToCenterBBox centers target and clamps at edges", () => {

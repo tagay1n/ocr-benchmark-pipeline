@@ -77,6 +77,42 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(duplicate["duplicate_rel_path"], "dup/a-copy.png")
         self.assertEqual(duplicate["canonical_rel_path"], "a.png")
 
+    def test_remove_page_deletes_file_and_related_records(self) -> None:
+        self._write_image("remove/a.png", b"same-content")
+        self._write_image("remove/dup/a-copy.png", b"same-content")
+        main.scan_images()
+        page_id = self._first_page_id()
+
+        layout_payload = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.2, x2=0.9, y2=0.4),
+            ),
+        )
+        self.assertIn("layout", layout_payload)
+
+        image_path = self.test_settings.source_dir / "remove/a.png"
+        self.assertTrue(image_path.exists())
+
+        removed = main.remove_page(page_id)
+        self.assertTrue(removed["deleted"])
+        self.assertEqual(removed["page_id"], page_id)
+        self.assertEqual(removed["rel_path"], "remove/a.png")
+        self.assertTrue(removed["file_existed"])
+        self.assertTrue(removed["file_deleted"])
+        self.assertEqual(removed["related_counts"]["layouts"], 1)
+        self.assertEqual(removed["related_counts"]["duplicate_files"], 1)
+
+        self.assertFalse(image_path.exists())
+        self.assertEqual(main.list_pages()["count"], 0)
+        self.assertEqual(main.list_duplicates()["count"], 0)
+
+        with self.assertRaises(main.HTTPException) as page_error:
+            main.page_details(page_id)
+        self.assertEqual(page_error.exception.status_code, 404)
+
     def test_settings_loads_gemini_keys_from_yaml_map(self) -> None:
         config_path = self.project_root / "config.yaml"
         config_path.write_text(
@@ -166,6 +202,38 @@ class PipelineStagesTests(unittest.TestCase):
 
         page_payload = main.page_details(page_id)
         self.assertEqual(page_payload["page"]["status"], "layout_detected")
+
+    def test_manual_layout_detect_works_when_auto_detect_disabled(self) -> None:
+        self._write_image("manual-detect.png", b"manual-detect-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+
+        runtime_payload = main.runtime_options()
+        self.assertFalse(runtime_payload["auto_detect_layouts_after_discovery"])
+
+        fake_rows = [
+            {
+                "class_name": "text",
+                "confidence": 0.88,
+                "x1": 0.1,
+                "y1": 0.2,
+                "x2": 0.8,
+                "y2": 0.9,
+            }
+        ]
+        fake_inference_params = {
+            "confidence_threshold": 0.25,
+            "iou_threshold": 0.45,
+            "image_size": 1024,
+            "max_detections": 300,
+            "agnostic_nms": False,
+        }
+
+        with patch.object(layouts, "_detect_doclaynet_layouts", return_value=(fake_rows, fake_inference_params)):
+            result = main.detect_page_layouts(page_id, main.DetectLayoutsRequest(replace_existing=True))
+
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["inference_params"]["image_size"], 1024)
 
     def test_layout_review_stage_marks_page_reviewed(self) -> None:
         self._write_image("review.png", b"review-image")
@@ -488,10 +556,13 @@ class PipelineStagesTests(unittest.TestCase):
         )
         main.complete_layout_review(page_id)
 
-        def fake_gemini_call(api_key: str, prompt: str, image_bytes: bytes) -> str:
+        def fake_gemini_call(
+            api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0
+        ) -> str:
             del prompt, image_bytes
             if api_key == "k1":
                 raise RuntimeError("HTTP 429 quota exceeded")
+            self.assertEqual(temperature, 0.0)
             return "Extracted text"
 
         with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
@@ -623,6 +694,130 @@ class PipelineStagesTests(unittest.TestCase):
         outputs_payload = main.page_ocr_outputs(page_id)
         self.assertEqual(outputs_payload["count"], 1)
         self.assertEqual(outputs_payload["outputs"][0]["content"], "Reextracted text")
+
+    def test_manual_ocr_reextract_accepts_prompt_and_generation_params(self) -> None:
+        self._write_image("ocr-reextract-params.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        fake_result = {
+            "page_id": page_id,
+            "status": "ocr_done",
+            "model": "gemini-3-flash-preview",
+            "layouts_total": 1,
+            "extracted_count": 1,
+            "skipped_count": 0,
+            "requests_count": 1,
+            "inference_params": {
+                "temperature": 0.2,
+                "max_retries_per_layout": 5,
+                "prompt_template": "Layout class: {class_name}. {format_rule}",
+            },
+        }
+        request_payload = main.ReextractOcrRequest(
+            prompt_template="Layout class: {class_name}. {format_rule}",
+            temperature=0.2,
+            max_retries_per_layout=5,
+        )
+        with patch.object(main, "extract_ocr_for_page", return_value=fake_result) as extract_mock:
+            result = main.reextract_ocr(page_id, request_payload)
+
+        self.assertEqual(result, fake_result)
+        extract_mock.assert_called_once_with(
+            page_id,
+            prompt_template="Layout class: {class_name}. {format_rule}",
+            temperature=0.2,
+            max_retries_per_layout=5,
+        )
+
+    def test_manual_ocr_reextract_works_when_auto_extract_disabled(self) -> None:
+        self._write_image("ocr-reextract-auto-disabled.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        runtime_payload = main.runtime_options()
+        self.assertFalse(runtime_payload["auto_extract_text_after_layout_review"])
+
+        fake_result = {
+            "page_id": page_id,
+            "status": "ocr_done",
+            "model": "gemini-3-flash-preview",
+            "layouts_total": 1,
+            "extracted_count": 1,
+            "skipped_count": 0,
+            "requests_count": 1,
+            "inference_params": {
+                "temperature": 0.0,
+                "max_retries_per_layout": 3,
+                "prompt_template": "default",
+            },
+        }
+        with patch.object(main, "extract_ocr_for_page", return_value=fake_result) as extract_mock:
+            result = main.reextract_ocr(page_id, main.ReextractOcrRequest())
+
+        self.assertEqual(result["status"], "ocr_done")
+        extract_mock.assert_called_once_with(
+            page_id,
+            prompt_template=None,
+            temperature=None,
+            max_retries_per_layout=None,
+        )
+
+    def test_manual_ocr_reextract_allows_ocr_extracting_status(self) -> None:
+        self._write_image("ocr-reextract-from-extracting.png", b"fake-image")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        with db.get_session() as session:
+            page_row = session.get(main.Page, page_id)
+            self.assertIsNotNone(page_row)
+            page_row.status = "ocr_extracting"
+
+        fake_result = {
+            "page_id": page_id,
+            "status": "ocr_done",
+            "model": "gemini-3-flash-preview",
+            "layouts_total": 1,
+            "extracted_count": 1,
+            "skipped_count": 0,
+            "requests_count": 1,
+            "inference_params": {
+                "temperature": 0.0,
+                "max_retries_per_layout": 3,
+                "prompt_template": "default",
+            },
+        }
+        with patch.object(main, "extract_ocr_for_page", return_value=fake_result):
+            result = main.reextract_ocr(page_id, main.ReextractOcrRequest())
+
+        self.assertEqual(result["status"], "ocr_done")
 
     def test_manual_ocr_reextract_failure_keeps_previous_outputs(self) -> None:
         self.test_settings = Settings(

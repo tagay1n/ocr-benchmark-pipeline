@@ -303,13 +303,105 @@
         cursor: default;
       }
 
-      .status-line {
-        margin-top: 10px;
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(18, 23, 25, 0.52);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        z-index: 30;
+      }
+
+      .modal-backdrop[hidden] {
+        display: none;
+      }
+
+      .modal-card {
+        width: min(620px, 100%);
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+      }
+
+      .modal-card h2 {
+        margin: 0 0 8px;
+      }
+
+      .modal-hint {
+        margin: 0 0 12px;
         color: var(--muted);
       }
 
-      .status-line.error {
-        color: var(--danger);
+      .modal-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .modal-field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .modal-field label {
+        font-size: 13px;
+        color: var(--muted);
+      }
+
+      .modal-input,
+      .modal-textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        font-size: 14px;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        background: #fff;
+      }
+
+      .modal-textarea {
+        min-height: 168px;
+        resize: vertical;
+        white-space: pre-wrap;
+      }
+
+      .modal-actions {
+        margin-top: 12px;
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      #reextract-modal-run-btn {
+        position: relative;
+      }
+
+      #reextract-modal-run-btn.is-busy {
+        padding-right: 34px;
+      }
+
+      #reextract-modal-run-btn.is-busy::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: 12px;
+        width: 14px;
+        height: 14px;
+        margin-top: -7px;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.36);
+        border-top-color: rgba(255, 255, 255, 0.96);
+        animation: reextract-modal-spin 720ms linear infinite;
+      }
+
+      @keyframes reextract-modal-spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
 
       .grid {
@@ -651,8 +743,6 @@
         </div>
       </section>
 
-      <p id="status-line" class="status-line"></p>
-
       <section class="grid">
         <section id="source-panel" class="panel image-panel">
           <header class="image-panel-header">
@@ -696,6 +786,40 @@
         </section>
       </section>
     </main>
+
+    <div id="reextract-modal" class="modal-backdrop" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="reextract-modal-title">
+        <h2 id="reextract-modal-title">Detect again</h2>
+        <p class="modal-hint">Adjust OCR extraction prompt and generation parameters.</p>
+        <div class="modal-field">
+          <label for="reextract-modal-prompt-template">Prompt template</label>
+          <textarea
+            id="reextract-modal-prompt-template"
+            class="modal-textarea"
+            spellcheck="false"
+          >Layout class: {class_name}.{caption_line}
+Extract only the content inside this crop.
+Return only extracted content, without explanations.
+Preserve line breaks exactly as shown in the crop.
+Do not dehyphenate words split by line breaks.
+{format_rule}</textarea>
+        </div>
+        <div class="modal-grid">
+          <div class="modal-field">
+            <label for="reextract-modal-temperature">Temperature (0..2)</label>
+            <input id="reextract-modal-temperature" class="modal-input" type="number" min="0" max="2" step="0.1" value="0" />
+          </div>
+          <div class="modal-field">
+            <label for="reextract-modal-max-retries">Max retries per layout</label>
+            <input id="reextract-modal-max-retries" class="modal-input" type="number" min="1" max="10" step="1" value="3" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="reextract-modal-cancel-btn" class="secondary" type="button">Cancel</button>
+          <button id="reextract-modal-run-btn" type="button">Run detection</button>
+        </div>
+      </div>
+    </div>
 
     <script type="module">
       import {
@@ -754,10 +878,15 @@
       const sourceWrap = document.getElementById("source-wrap");
       const reconstructedWrap = document.getElementById("reconstructed-wrap");
       const pageMeta = document.getElementById("page-meta");
-      const statusLine = document.getElementById("status-line");
       const reviewStateBadge = document.getElementById("review-state-badge");
       const historyBackBtn = document.getElementById("history-back-btn");
       const historyForthBtn = document.getElementById("history-forth-btn");
+      const reextractModal = document.getElementById("reextract-modal");
+      const reextractModalPromptTemplateInput = document.getElementById("reextract-modal-prompt-template");
+      const reextractModalTemperatureInput = document.getElementById("reextract-modal-temperature");
+      const reextractModalMaxRetriesInput = document.getElementById("reextract-modal-max-retries");
+      const reextractModalCancelBtn = document.getElementById("reextract-modal-cancel-btn");
+      const reextractModalRunBtn = document.getElementById("reextract-modal-run-btn");
 
       const state = {
         pageId: null,
@@ -1023,8 +1152,9 @@
       }
 
       function setStatus(message, { isError = false } = {}) {
-        statusLine.textContent = message;
-        statusLine.classList.toggle("error", isError);
+        if (isError) {
+          console.error(message);
+        }
       }
 
       function draftStorageKey() {
@@ -1139,6 +1269,53 @@
         updateReviewBadge();
         updateReviewButtonState();
         updateReextractButtonState();
+      }
+
+      function setReextractModalBusy(busy) {
+        const inProgress = Boolean(busy);
+        reextractModalRunBtn.disabled = inProgress;
+        reextractModalRunBtn.classList.toggle("is-busy", inProgress);
+        reextractModalCancelBtn.disabled = inProgress;
+        reextractModalPromptTemplateInput.disabled = inProgress;
+        reextractModalTemperatureInput.disabled = inProgress;
+        reextractModalMaxRetriesInput.disabled = inProgress;
+      }
+
+      function openReextractModal() {
+        if (state.reviewSubmitInProgress || state.reextractInProgress) {
+          return;
+        }
+        reextractModal.hidden = false;
+      }
+
+      function closeReextractModal() {
+        if (state.reextractInProgress) {
+          return;
+        }
+        reextractModal.hidden = true;
+      }
+
+      function parseReextractPayload() {
+        const promptTemplate = String(reextractModalPromptTemplateInput.value ?? "").trim();
+        if (!promptTemplate) {
+          throw new Error("Prompt template cannot be empty.");
+        }
+
+        const temperature = Number(reextractModalTemperatureInput.value);
+        if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) {
+          throw new Error("Temperature must be between 0 and 2.");
+        }
+
+        const maxRetries = Number(reextractModalMaxRetriesInput.value);
+        if (!Number.isInteger(maxRetries) || maxRetries < 1 || maxRetries > 10) {
+          throw new Error("Max retries per layout must be an integer between 1 and 10.");
+        }
+
+        return {
+          prompt_template: promptTemplate,
+          temperature,
+          max_retries_per_layout: maxRetries,
+        };
       }
 
       function toDraftShape(output) {
@@ -1679,20 +1856,24 @@
         }
       }
 
-      async function reextractContent() {
+      async function reextractContent(payloadBody) {
         if (state.reviewSubmitInProgress || state.reextractInProgress) {
           return;
         }
 
         state.reextractInProgress = true;
+        setReextractModalBusy(true);
         updateReviewUiState();
-        setStatus("Detecting OCR content...");
 
         const selectedLayoutId = Number(state.selectedLayoutId);
+        let shouldCloseModal = false;
         try {
           const result = await fetchJson(`/api/pages/${state.pageId}/ocr/reextract`, {
             method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payloadBody),
           });
+          shouldCloseModal = true;
 
           clearDraftState();
           await loadPageData();
@@ -1719,7 +1900,11 @@
           setStatus(`Reextraction failed: ${error.message}`, { isError: true });
         } finally {
           state.reextractInProgress = false;
+          setReextractModalBusy(false);
           updateReviewUiState();
+          if (shouldCloseModal) {
+            closeReextractModal();
+          }
         }
       }
 
@@ -1842,10 +2027,34 @@
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           closeZoomMenu();
+          closeReextractModal();
         }
       });
 
-      reextractBtn.addEventListener("click", reextractContent);
+      reextractBtn.addEventListener("click", () => {
+        openReextractModal();
+      });
+      reextractModalRunBtn.addEventListener("click", async () => {
+        if (state.reextractInProgress) {
+          return;
+        }
+        let payloadBody;
+        try {
+          payloadBody = parseReextractPayload();
+        } catch (error) {
+          setStatus(`Reextraction failed: ${error.message}`, { isError: true });
+          return;
+        }
+        await reextractContent(payloadBody);
+      });
+      reextractModalCancelBtn.addEventListener("click", () => {
+        closeReextractModal();
+      });
+      reextractModal.addEventListener("pointerdown", (event) => {
+        if (event.target === reextractModal) {
+          closeReextractModal();
+        }
+      });
       reviewBtn.addEventListener("click", markReviewed);
 
       pageImage.addEventListener("load", () => {

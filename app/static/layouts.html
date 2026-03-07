@@ -756,6 +756,34 @@
         gap: 8px;
       }
 
+      #detect-modal-run-btn {
+        position: relative;
+      }
+
+      #detect-modal-run-btn.is-busy {
+        padding-right: 34px;
+      }
+
+      #detect-modal-run-btn.is-busy::after {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: 12px;
+        width: 14px;
+        height: 14px;
+        margin-top: -7px;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.36);
+        border-top-color: rgba(255, 255, 255, 0.96);
+        animation: detect-modal-spin 720ms linear infinite;
+      }
+
+      @keyframes detect-modal-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
       @media (max-width: 980px) {
         .grid {
           grid-template-columns: 1fr;
@@ -949,6 +977,7 @@
         computeDraggedBBox,
         computeViewportScrollTargetForLayoutId,
         computeZoomScale,
+        mergeLayoutsForReview,
         normalizeReviewHistory,
         nextLayoutReviewUrl,
         pointHandleForCoordinateKey,
@@ -1044,6 +1073,7 @@
         dragOverLayoutId: null,
         dragOverPosition: null,
         reviewSubmitInProgress: false,
+        detectInProgress: false,
         layoutsLoaded: false,
       };
 
@@ -1498,8 +1528,6 @@
       }
 
       function updateReviewButtonState() {
-        const hasDraftChanges = hasPendingLayoutDraftChanges();
-        const alreadyReviewed = state.page?.status === "layout_reviewed";
         const unboundCaptionIds = findUnboundCaptionIds();
         if (state.reviewSubmitInProgress) {
           reviewBtn.textContent = "Saving...";
@@ -1514,15 +1542,10 @@
             "Each caption must be bound to at least one table, picture, or formula before review.";
           return;
         }
-        if (alreadyReviewed && !hasDraftChanges) {
-          reviewBtn.textContent = "REVIEWED";
-          reviewBtn.disabled = true;
-          reviewBtn.title = "This page is already reviewed.";
-          return;
-        }
 
         reviewBtn.textContent = "Mark reviewed";
         reviewBtn.disabled = false;
+        const alreadyReviewed = state.page?.status === "layout_reviewed";
         reviewBtn.title = alreadyReviewed
           ? "Submit current changes and keep this page reviewed."
           : "Mark this page as reviewed.";
@@ -1640,6 +1663,16 @@
         if (scrollImageToLayout) {
           ensureLayoutVisible(normalizedId);
         }
+      }
+
+      function clearSelectedLayout() {
+        if (state.selectedLayoutId === null && state.activePointHighlight === null) {
+          return;
+        }
+        state.selectedLayoutId = null;
+        state.activePointHighlight = null;
+        applySelectedLayoutStyles();
+        applyActivePointHighlightStyles();
       }
 
       function clearActivePointHighlightIfMissing() {
@@ -2553,35 +2586,19 @@
 
       async function loadLayouts() {
         const payload = await fetchJson(`/api/pages/${pageId}/layouts`);
-        state.serverLayoutsById = {};
+        const merged = mergeLayoutsForReview({
+          layouts: payload.layouts,
+          localEditsById: state.localEditsById,
+          deletedLayoutIds: Array.from(state.deletedLayoutIds),
+        });
+        state.serverLayoutsById = merged.serverLayoutsById;
         state.serverCaptionBindingsByCaptionId = {};
         for (const layout of payload.layouts) {
-          state.serverLayoutsById[String(layout.id)] = layout;
           if (isCaptionClass(layout.class_name)) {
             state.serverCaptionBindingsByCaptionId[String(layout.id)] = normalizeLayoutIdList(
               layout.bound_target_ids,
             );
           }
-        }
-
-        const mergedLayouts = [];
-        for (const layout of payload.layouts) {
-          const layoutId = Number(layout.id);
-          if (state.deletedLayoutIds.has(layoutId)) {
-            continue;
-          }
-
-          const draft = state.localEditsById[String(layoutId)];
-          if (!draft) {
-            mergedLayouts.push(layout);
-            continue;
-          }
-          mergedLayouts.push({
-            ...layout,
-            class_name: draft.class_name,
-            reading_order: draft.reading_order,
-            bbox: { ...draft.bbox },
-          });
         }
 
         for (const key of Object.keys(state.localEditsById)) {
@@ -2595,7 +2612,7 @@
           }
         }
 
-        state.layouts = mergedLayouts;
+        state.layouts = merged.mergedLayouts;
         state.layoutsLoaded = true;
         persistLayoutDraftState();
         renderLayouts();
@@ -2614,11 +2631,32 @@
         updateHistoryNavButtons();
       }
 
+      function setDetectModalBusy(busy) {
+        const inProgress = Boolean(busy);
+        state.detectInProgress = inProgress;
+        detectBtn.disabled = inProgress;
+        detectModalRunBtn.disabled = inProgress;
+        detectModalRunBtn.classList.toggle("is-busy", inProgress);
+        detectModalCancelBtn.disabled = inProgress;
+        detectModalConfInput.disabled = inProgress;
+        detectModalIouInput.disabled = inProgress;
+        detectModalImgszInput.disabled = inProgress;
+        detectModalMaxDetInput.disabled = inProgress;
+        detectModalReplaceExistingInput.disabled = inProgress;
+        detectModalAgnosticNmsInput.disabled = inProgress;
+      }
+
       function openDetectModal() {
+        if (state.detectInProgress) {
+          return;
+        }
         detectModal.hidden = false;
       }
 
       function closeDetectModal() {
+        if (state.detectInProgress) {
+          return;
+        }
         detectModal.hidden = true;
       }
 
@@ -2650,8 +2688,11 @@
       }
 
       async function detectLayouts(payloadBody) {
-        detectBtn.disabled = true;
-        detectModalRunBtn.disabled = true;
+        if (state.detectInProgress) {
+          return;
+        }
+        setDetectModalBusy(true);
+        let shouldCloseModal = false;
         try {
           const payload = await fetchJson(`/api/pages/${pageId}/layouts/detect`, {
             method: "POST",
@@ -2659,7 +2700,7 @@
             body: JSON.stringify(payloadBody),
           });
           clearLayoutDraftState();
-          closeDetectModal();
+          shouldCloseModal = true;
           const params = payload.inference_params || {};
           setStatus(
             `Detection finished. Created ${payload.created} layouts. conf=${params.confidence_threshold}, iou=${params.iou_threshold}, imgsz=${params.image_size}, max_det=${params.max_detections}, agnostic_nms=${params.agnostic_nms}.`,
@@ -2670,8 +2711,10 @@
         } catch (error) {
           setStatus(`Detection failed: ${error.message}`, { isError: true });
         } finally {
-          detectBtn.disabled = false;
-          detectModalRunBtn.disabled = false;
+          setDetectModalBusy(false);
+          if (shouldCloseModal) {
+            closeDetectModal();
+          }
         }
       }
 
@@ -2949,6 +2992,9 @@
         window.location.href = `/static/layouts.html?page_id=${nextPageId}`;
       });
       detectModalRunBtn.addEventListener("click", async () => {
+        if (state.detectInProgress) {
+          return;
+        }
         let payloadBody;
         try {
           payloadBody = parseDetectModalPayload();
@@ -2959,23 +3005,29 @@
         await detectLayouts(payloadBody);
       });
       detectModalCancelBtn.addEventListener("click", () => {
+        if (state.detectInProgress) {
+          return;
+        }
         closeDetectModal();
       });
       detectModal.addEventListener("pointerdown", (event) => {
-        if (event.target === detectModal) {
+        if (event.target === detectModal && !state.detectInProgress) {
           closeDetectModal();
         }
       });
       function selectLayoutFromPanelEventTarget(target) {
         if (!(target instanceof Element)) {
+          clearSelectedLayout();
           return;
         }
         const row = target.closest("tr[data-layout-id]");
         if (!row) {
+          clearSelectedLayout();
           return;
         }
         const layoutId = Number(row.dataset.layoutId);
         if (!Number.isInteger(layoutId) || layoutId <= 0) {
+          clearSelectedLayout();
           return;
         }
         selectLayout(layoutId, { scrollImageToLayout: true });
@@ -2989,6 +3041,14 @@
       });
       layoutsBody.addEventListener("focusin", (event) => {
         selectLayoutFromPanelEventTarget(event.target);
+      });
+      overlay.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) {
+          return;
+        }
+        if (event.target === overlay) {
+          clearSelectedLayout();
+        }
       });
       layoutsBody.addEventListener("dragover", (event) => {
         const draggingLayoutId = Number(state.draggingLayoutId);
@@ -3075,10 +3135,13 @@
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           closeZoomMenu();
-          closeDetectModal();
+          if (!state.detectInProgress) {
+            closeDetectModal();
+          }
           if (state.drawModeActive) {
             exitDrawMode();
           }
+          clearSelectedLayout();
         }
       });
       pageImage.addEventListener("load", () => {
