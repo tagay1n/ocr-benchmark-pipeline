@@ -7,12 +7,14 @@ import {
   countTextLines,
   computeFloatingControlPlacement,
   detectEditorValidationIssues,
+  findBestTokenOccurrence,
   hasLocalDraftForLayout,
   isRectOnscreen,
   isReconstructedRestoreDisabled,
   lineBandFromLineIndex,
   lineIndexFromTextOffset,
   normalizeReconstructedRenderMode,
+  tokenBoundsAtOffset,
   textOffsetForLineIndex,
 } from "../app/static/js/ocr_review_utils.mjs";
 
@@ -176,6 +178,64 @@ test("applyLinePrefixMarkdown prefixes selected lines for ordered list", () => {
     selectionStart: 3,
     selectionEnd: 16,
   });
+});
+
+test("tokenBoundsAtOffset detects words and punctuation runs", () => {
+  const text = "Hello, world!!";
+  assert.deepEqual(tokenBoundsAtOffset(text, 1), {
+    start: 0,
+    end: 5,
+    token: "Hello",
+    kind: "word",
+  });
+  assert.deepEqual(tokenBoundsAtOffset(text, 5), {
+    start: 5,
+    end: 6,
+    token: ",",
+    kind: "punct",
+  });
+  assert.deepEqual(tokenBoundsAtOffset(text, 12), {
+    start: 12,
+    end: 14,
+    token: "!!",
+    kind: "punct",
+  });
+});
+
+test("tokenBoundsAtOffset skips whitespace when selecting token", () => {
+  const text = "alpha  beta";
+  assert.deepEqual(tokenBoundsAtOffset(text, 5), {
+    start: 0,
+    end: 5,
+    token: "alpha",
+    kind: "word",
+  });
+  assert.deepEqual(tokenBoundsAtOffset(text, 6), {
+    start: 7,
+    end: 11,
+    token: "beta",
+    kind: "word",
+  });
+});
+
+test("findBestTokenOccurrence chooses nearest whole-word token", () => {
+  const text = "abc abcd abc";
+  assert.deepEqual(
+    findBestTokenOccurrence(text, "abc", { preferredOffset: 10, wholeWord: true }),
+    { start: 9, end: 12 },
+  );
+  assert.deepEqual(
+    findBestTokenOccurrence(text, "abc", { preferredOffset: 2, wholeWord: true }),
+    { start: 0, end: 3 },
+  );
+});
+
+test("findBestTokenOccurrence supports punctuation and non-word matches", () => {
+  const text = "a, b, c";
+  assert.deepEqual(
+    findBestTokenOccurrence(text, ",", { preferredOffset: 4, wholeWord: false }),
+    { start: 4, end: 5 },
+  );
 });
 
 test("isReconstructedRestoreDisabled disables for busy states and skip format", () => {

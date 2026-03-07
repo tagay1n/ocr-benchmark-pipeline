@@ -1250,12 +1250,14 @@
         computeFloatingControlPlacement,
         countTextLines,
         detectEditorValidationIssues,
+        findBestTokenOccurrence,
         hasLocalDraftForLayout,
         isRectOnscreen,
         isReconstructedRestoreDisabled,
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
         normalizeReconstructedRenderMode,
+        tokenBoundsAtOffset,
         textOffsetForLineIndex,
       } from "./js/ocr_review_utils.mjs";
 
@@ -2986,6 +2988,123 @@
         return true;
       }
 
+      function setExpandedEditorSelectionRange(layoutId, selectionStart, selectionEnd) {
+        const normalizedLayoutId = Number(layoutId);
+        const start = Number(selectionStart);
+        const end = Number(selectionEnd);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return false;
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end)) {
+          return false;
+        }
+        if (Number(state.expandedEditorLayoutId) !== normalizedLayoutId || expandedEditor.hidden) {
+          return false;
+        }
+
+        if (codeMirrorView && !expandedEditorCmHost.hidden) {
+          codeMirrorView.dispatch({
+            selection: {
+              anchor: Math.max(0, Math.floor(start)),
+              head: Math.max(0, Math.floor(end)),
+            },
+            scrollIntoView: true,
+          });
+          updateExpandedEditorStatusFromCodeMirror(codeMirrorView);
+          codeMirrorView.focus();
+          syncHoveredLineFromExpandedEditor({ source: "editor" });
+          return true;
+        }
+
+        const text = String(expandedEditorTextarea.value ?? "");
+        const clampedStart = Math.max(0, Math.min(text.length, Math.floor(start)));
+        const clampedEnd = Math.max(0, Math.min(text.length, Math.floor(end)));
+        expandedEditorTextarea.setSelectionRange(clampedStart, clampedEnd);
+        expandedEditorTextarea.focus();
+        updateExpandedEditorStatusFromTextarea();
+        syncHoveredLineFromExpandedEditor({ source: "editor" });
+        return true;
+      }
+
+      function extractReconstructedTokenAtPoint(contentNode, clientX, clientY) {
+        if (!(contentNode instanceof Element)) {
+          return null;
+        }
+        let textNode = null;
+        let offset = null;
+
+        if (typeof document.caretPositionFromPoint === "function") {
+          const caretPosition = document.caretPositionFromPoint(clientX, clientY);
+          if (caretPosition && caretPosition.offsetNode && caretPosition.offsetNode.nodeType === Node.TEXT_NODE) {
+            textNode = caretPosition.offsetNode;
+            offset = caretPosition.offset;
+          }
+        } else if (typeof document.caretRangeFromPoint === "function") {
+          const caretRange = document.caretRangeFromPoint(clientX, clientY);
+          if (caretRange && caretRange.startContainer && caretRange.startContainer.nodeType === Node.TEXT_NODE) {
+            textNode = caretRange.startContainer;
+            offset = caretRange.startOffset;
+          }
+        }
+
+        if (!(textNode instanceof Text)) {
+          const selected = String(window.getSelection()?.toString() ?? "").trim();
+          return selected || null;
+        }
+        if (!contentNode.contains(textNode)) {
+          return null;
+        }
+        const bounds = tokenBoundsAtOffset(textNode.textContent ?? "", Number(offset));
+        if (!bounds || !bounds.token) {
+          return null;
+        }
+        return String(bounds.token).trim() || null;
+      }
+
+      function selectTokenInExpandedEditor(layoutId, rawToken, preferredLineIndex = null) {
+        const normalizedLayoutId = Number(layoutId);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return false;
+        }
+        if (Number(state.expandedEditorLayoutId) !== normalizedLayoutId || expandedEditor.hidden) {
+          return false;
+        }
+        const output = outputByLayoutId(normalizedLayoutId);
+        if (!output) {
+          return false;
+        }
+        const token = String(rawToken ?? "").replace(/\u00A0/g, " ").trim();
+        if (!token) {
+          return false;
+        }
+        const content = String(output.content ?? "");
+        const preferredOffset = Number.isFinite(Number(preferredLineIndex))
+          ? textOffsetForLineIndex(content, Number(preferredLineIndex))
+          : 0;
+        const wholeWord = /[\p{L}\p{N}_]/u.test(token);
+        const match = findBestTokenOccurrence(content, token, {
+          preferredOffset,
+          wholeWord,
+        });
+        if (!match) {
+          return false;
+        }
+        return setExpandedEditorSelectionRange(normalizedLayoutId, match.start, match.end);
+      }
+
+      function selectTokenInExpandedEditorWithRetry(layoutId, token, preferredLineIndex = null, retries = 6) {
+        const applied = selectTokenInExpandedEditor(layoutId, token, preferredLineIndex);
+        if (applied && codeMirrorView && !expandedEditorCmHost.hidden) {
+          return;
+        }
+        if (retries <= 0) {
+          return;
+        }
+        window.setTimeout(() => {
+          selectTokenInExpandedEditorWithRetry(layoutId, token, preferredLineIndex, retries - 1);
+        }, 80);
+      }
+
       function reconstructedContentNodeByLayout(layoutId) {
         const normalized = Number(layoutId);
         if (!Number.isInteger(normalized) || normalized <= 0) {
@@ -3586,6 +3705,20 @@
           });
           contentNode.addEventListener("pointerleave", () => {
             setHoveredLine(null, null, { source: "reconstructed" });
+          });
+          contentNode.addEventListener("dblclick", (event) => {
+            const token = extractReconstructedTokenAtPoint(contentNode, event.clientX, event.clientY);
+            if (!token) {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            const preferredLineIndex =
+              state.hoveredLine && Number(state.hoveredLine.layoutId) === Number(output.layout_id)
+                ? Number(state.hoveredLine.lineIndex)
+                : null;
+            openExpandedEditor(output.layout_id);
+            selectTokenInExpandedEditorWithRetry(output.layout_id, token, preferredLineIndex);
           });
           reconstructionSurface.appendChild(item);
           fitReconstructedContent(item, contentNode, output);

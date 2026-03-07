@@ -268,6 +268,123 @@ export function lineBandFromLineIndex(lineIndex, totalLines) {
   };
 }
 
+function isWordTokenChar(char) {
+  return /[\p{L}\p{N}_]/u.test(char);
+}
+
+function classifyTokenChar(char) {
+  if (!char || /\s/.test(char)) {
+    return "space";
+  }
+  return isWordTokenChar(char) ? "word" : "punct";
+}
+
+export function tokenBoundsAtOffset(content, offset) {
+  const text = String(content ?? "");
+  if (!text) {
+    return null;
+  }
+
+  const rawOffset = Number(offset);
+  let index = Number.isFinite(rawOffset) ? Math.floor(rawOffset) : 0;
+  if (index < 0) index = 0;
+  if (index >= text.length) index = text.length - 1;
+
+  let charClass = classifyTokenChar(text[index]);
+  if (charClass === "space") {
+    let left = index - 1;
+    while (left >= 0 && classifyTokenChar(text[left]) === "space") {
+      left -= 1;
+    }
+    let right = index + 1;
+    while (right < text.length && classifyTokenChar(text[right]) === "space") {
+      right += 1;
+    }
+    if (left < 0 && right >= text.length) {
+      return null;
+    }
+    if (left < 0) {
+      index = right;
+    } else if (right >= text.length) {
+      index = left;
+    } else {
+      const leftDistance = Math.abs(index - left);
+      const rightDistance = Math.abs(right - index);
+      index = rightDistance < leftDistance ? right : left;
+    }
+    charClass = classifyTokenChar(text[index]);
+  }
+
+  if (charClass === "space") {
+    return null;
+  }
+
+  let start = index;
+  let end = index + 1;
+  while (start > 0 && classifyTokenChar(text[start - 1]) === charClass) {
+    start -= 1;
+  }
+  while (end < text.length && classifyTokenChar(text[end]) === charClass) {
+    end += 1;
+  }
+
+  const token = text.slice(start, end);
+  if (!token) {
+    return null;
+  }
+  return {
+    start,
+    end,
+    token,
+    kind: charClass,
+  };
+}
+
+function isWholeWordMatch(content, start, end) {
+  const text = String(content ?? "");
+  const leftChar = start > 0 ? text[start - 1] : "";
+  const rightChar = end < text.length ? text[end] : "";
+  return !isWordTokenChar(leftChar) && !isWordTokenChar(rightChar);
+}
+
+export function findBestTokenOccurrence(content, token, { preferredOffset = 0, wholeWord = true } = {}) {
+  const text = String(content ?? "");
+  const needle = String(token ?? "");
+  if (!text || !needle) {
+    return null;
+  }
+  const targetOffset = Number.isFinite(Number(preferredOffset)) ? Number(preferredOffset) : 0;
+
+  let cursor = 0;
+  let best = null;
+  while (cursor <= text.length - needle.length) {
+    const index = text.indexOf(needle, cursor);
+    if (index === -1) {
+      break;
+    }
+    const end = index + needle.length;
+    if (!wholeWord || isWholeWordMatch(text, index, end)) {
+      const score = Math.abs(index - targetOffset);
+      if (!best || score < best.score || (score === best.score && index < best.start)) {
+        best = {
+          start: index,
+          end,
+          score,
+        };
+      }
+    }
+    cursor = index + 1;
+  }
+
+  if (!best) {
+    return null;
+  }
+  return {
+    start: best.start,
+    end: best.end,
+  };
+}
+
 export function hasLocalDraftForLayout(localEditsByLayoutId, layoutId) {
   const normalized = Number(layoutId);
   if (!Number.isInteger(normalized) || normalized <= 0) {
