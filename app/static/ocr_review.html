@@ -471,9 +471,12 @@
 
       .grid {
         margin-top: 14px;
+        margin-left: -22px;
+        margin-right: -22px;
+        width: calc(100% + 44px);
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-        gap: 16px;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 2px;
         align-items: stretch;
         flex: 1 1 auto;
         min-height: 0;
@@ -493,21 +496,57 @@
         flex-direction: column;
       }
 
-      .outputs-panel {
-        min-height: 0;
-        overflow: auto;
-      }
-
       .panel-hidden {
         display: none !important;
       }
 
       .image-panel-header {
         margin: 0 0 8px;
+        min-height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
 
-      .image-panel-header h2 {
-        margin: 0;
+      .reconstructed-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+
+      .render-mode-toggle {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #efece2;
+      }
+
+      .render-mode-btn {
+        border: 0;
+        border-right: 1px solid var(--border);
+        border-radius: 0;
+        min-height: 28px;
+        padding: 0 10px;
+        font-size: 12px;
+        color: #5f5b50;
+        background: transparent;
+      }
+
+      .render-mode-btn:last-child {
+        border-right: 0;
+      }
+
+      .render-mode-btn:hover:not(:disabled) {
+        background: #e7e2d4;
+      }
+
+      .render-mode-btn.active {
+        background: #0b7a75;
+        color: #ffffff;
       }
 
       .preview-viewport {
@@ -544,7 +583,7 @@
         border: 1px dashed #9ca8a2;
         border-radius: 4px;
         padding: 0;
-        overflow: hidden;
+        overflow: visible;
         display: flex;
         align-items: stretch;
         justify-content: stretch;
@@ -707,100 +746,97 @@
         max-width: 240px;
         overflow: hidden;
         text-overflow: ellipsis;
+        pointer-events: none;
+        z-index: 3;
       }
 
-      .outputs-header {
-        margin-bottom: 8px;
+      .recon-label {
+        position: static;
+        top: auto;
+        left: auto;
+        max-width: 240px;
       }
 
-      .outputs-header h2 {
-        margin: 0;
-      }
-
-      table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-
-      th,
-      td {
-        text-align: left;
-        padding: 8px;
-        border-bottom: 1px solid var(--border);
-        vertical-align: top;
-      }
-
-      th {
-        font-size: 13px;
-        color: var(--muted);
-      }
-
-      .outputs-table tr.output-selected {
-        background: #f1f7f6;
-      }
-
-      .order-col {
-        width: 1%;
-        white-space: nowrap;
-      }
-
-      .class-col {
-        width: 1%;
-        white-space: nowrap;
-      }
-
-      .format-col {
-        width: 1%;
-        white-space: nowrap;
-      }
-
-      .actions-col {
-        width: 1%;
-        white-space: nowrap;
-      }
-
-      .format-badge {
-        border: 1px solid var(--border);
-        border-radius: 999px;
-        padding: 2px 8px;
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--muted);
-        background: #f1eee5;
-        text-transform: lowercase;
-      }
-
-      .content-input {
-        width: 100%;
-        min-height: 96px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 8px;
-        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-        font-size: 12px;
-        line-height: 1.4;
-        resize: vertical;
-      }
-
-      .content-input:disabled {
-        background: #f2efe6;
-        color: #7a7770;
-      }
-
-      .icon-btn {
-        width: 36px;
-        height: 36px;
-        border-radius: 10px;
-        padding: 0;
-        line-height: 1;
-        font-size: 16px;
+      .recon-header {
+        position: absolute;
+        top: -20px;
+        left: 0;
         display: inline-flex;
         align-items: center;
-        justify-content: center;
+        gap: 2px;
+        z-index: 4;
       }
 
-      .empty-state {
+      .recon-restore-btn {
+        position: static;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border-radius: 6px;
+        font-size: 12px;
+        line-height: 1;
+      }
+
+      .editor-drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(780px, 52vw);
+        background: var(--surface);
+        border-left: 1px solid var(--border);
+        box-shadow: -10px 0 28px rgba(24, 31, 37, 0.18);
+        z-index: 60;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .editor-drawer[hidden] {
+        display: none;
+      }
+
+      .editor-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .editor-header h2 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .editor-meta {
+        margin-top: 4px;
         color: var(--muted);
+        font-size: 12px;
+      }
+
+      .editor-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        padding: 12px;
+      }
+
+      .editor-textarea {
+        width: 100%;
+        height: 100%;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.45;
+        resize: none;
+      }
+
+      @media (max-width: 1120px) {
+        .editor-drawer {
+          width: 100%;
+        }
       }
 
       @media (max-width: 1120px) {
@@ -876,7 +912,6 @@
           <div class="panel-toggles" role="group" aria-label="Panel visibility">
             <button id="toggle-source-btn" class="toggle-btn active" type="button" aria-pressed="true">Source</button>
             <button id="toggle-reconstructed-btn" class="toggle-btn active" type="button" aria-pressed="true">Reconstructed</button>
-            <button id="toggle-content-btn" class="toggle-btn active" type="button" aria-pressed="true">Content</button>
           </div>
           <button id="reextract-btn" type="button">Detect again</button>
           <button id="review-btn" type="button">Mark reviewed</button>
@@ -885,9 +920,6 @@
 
       <section class="grid">
         <section id="source-panel" class="panel image-panel">
-          <header class="image-panel-header">
-            <h2>Source image</h2>
-          </header>
           <div id="source-viewport" class="preview-viewport">
             <div id="source-wrap" class="preview-wrap">
               <img id="page-image" alt="Source page image" />
@@ -898,31 +930,18 @@
 
         <section id="reconstructed-panel" class="panel image-panel">
           <header class="image-panel-header">
-            <h2>Reconstructed</h2>
+            <div class="reconstructed-controls">
+              <div class="render-mode-toggle" role="group" aria-label="Reconstructed content mode">
+                <button id="render-markdown-btn" class="render-mode-btn active" type="button" aria-pressed="true">Markdown</button>
+                <button id="render-raw-btn" class="render-mode-btn" type="button" aria-pressed="false">Raw</button>
+              </div>
+            </div>
           </header>
           <div id="reconstructed-viewport" class="preview-viewport">
             <div id="reconstructed-wrap" class="preview-wrap">
               <div id="reconstruction-surface"></div>
             </div>
           </div>
-        </section>
-
-        <section id="content-panel" class="panel outputs-panel">
-          <div class="outputs-header">
-            <h2>Extracted content</h2>
-          </div>
-          <table class="outputs-table">
-            <thead>
-              <tr>
-                <th class="order-col">Order</th>
-                <th class="class-col">Class</th>
-                <th class="format-col">Format</th>
-                <th>Content</th>
-                <th class="actions-col">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="outputs-body"></tbody>
-          </table>
         </section>
       </section>
     </main>
@@ -951,6 +970,19 @@
         </div>
       </div>
     </div>
+
+    <aside id="expanded-editor" class="editor-drawer" role="dialog" aria-modal="true" aria-labelledby="expanded-editor-title" hidden>
+      <div class="editor-header">
+        <div>
+          <h2 id="expanded-editor-title">Edit content</h2>
+          <div id="expanded-editor-meta" class="editor-meta"></div>
+        </div>
+        <button id="expanded-editor-close-btn" type="button" aria-label="Close expanded editor">✕</button>
+      </div>
+      <div class="editor-body">
+        <textarea id="expanded-editor-textarea" class="editor-textarea" spellcheck="false"></textarea>
+      </div>
+    </aside>
 
     <script type="module">
       import {
@@ -983,6 +1015,7 @@
         panelVisibility: "ocrReview.panelVisibility",
         zoomMode: "ocrReview.zoom.mode",
         zoomPercent: "ocrReview.zoom.percent",
+        reconstructedRenderMode: "ocrReview.reconstructed.render_mode",
       };
 
       const CLASS_COLORS = {
@@ -1009,12 +1042,11 @@
       const zoomPercentInput = document.getElementById("zoom-percent-input");
       const toggleSourceBtn = document.getElementById("toggle-source-btn");
       const toggleReconstructedBtn = document.getElementById("toggle-reconstructed-btn");
-      const toggleContentBtn = document.getElementById("toggle-content-btn");
       const grid = document.querySelector(".grid");
       const sourcePanel = document.getElementById("source-panel");
       const reconstructedPanel = document.getElementById("reconstructed-panel");
-      const contentPanel = document.getElementById("content-panel");
-      const outputsBody = document.getElementById("outputs-body");
+      const renderMarkdownBtn = document.getElementById("render-markdown-btn");
+      const renderRawBtn = document.getElementById("render-raw-btn");
       const pageImage = document.getElementById("page-image");
       const reconstructionSurface = document.getElementById("reconstruction-surface");
       const sourceOverlay = document.getElementById("source-overlay");
@@ -1032,6 +1064,10 @@
       const reextractModalMaxRetriesInput = document.getElementById("reextract-modal-max-retries");
       const reextractModalCancelBtn = document.getElementById("reextract-modal-cancel-btn");
       const reextractModalRunBtn = document.getElementById("reextract-modal-run-btn");
+      const expandedEditor = document.getElementById("expanded-editor");
+      const expandedEditorMeta = document.getElementById("expanded-editor-meta");
+      const expandedEditorTextarea = document.getElementById("expanded-editor-textarea");
+      const expandedEditorCloseBtn = document.getElementById("expanded-editor-close-btn");
 
       const state = {
         pageId: null,
@@ -1043,8 +1079,10 @@
         selectedLayoutId: null,
         reextractHoverLayoutId: null,
         hoveredLine: null,
+        expandedEditorLayoutId: null,
         reviewSubmitInProgress: false,
         reextractInProgress: false,
+        reconstructedRenderMode: "markdown",
         zoomMode: "automatic",
         zoomPercent: 100,
         zoomAppliedPercent: 100,
@@ -1053,7 +1091,6 @@
         panelVisibility: {
           source: true,
           reconstructed: true,
-          content: true,
         },
       };
       let reconstructionRefitScheduled = false;
@@ -1094,37 +1131,77 @@
         const next = {
           source: true,
           reconstructed: true,
-          content: true,
         };
         if (parsed && typeof parsed === "object") {
           if (typeof parsed.source === "boolean") next.source = parsed.source;
           if (typeof parsed.reconstructed === "boolean") next.reconstructed = parsed.reconstructed;
-          if (typeof parsed.content === "boolean") next.content = parsed.content;
         }
-        if (!next.source && !next.reconstructed && !next.content) {
-          next.content = true;
+        if (!next.source && !next.reconstructed) {
+          next.reconstructed = true;
         }
         return next;
       }
 
+      function normalizeReconstructedRenderMode(rawValue) {
+        const value = String(rawValue || "").trim().toLowerCase();
+        if (value === "raw") {
+          return "raw";
+        }
+        return "markdown";
+      }
+
+      function applyRenderModeUi() {
+        const isMarkdown = state.reconstructedRenderMode === "markdown";
+        renderMarkdownBtn.classList.toggle("active", isMarkdown);
+        renderMarkdownBtn.setAttribute("aria-pressed", isMarkdown ? "true" : "false");
+        renderRawBtn.classList.toggle("active", !isMarkdown);
+        renderRawBtn.setAttribute("aria-pressed", isMarkdown ? "false" : "true");
+      }
+
+      function persistReconstructedRenderMode() {
+        writeStorage(STORAGE_KEYS.reconstructedRenderMode, state.reconstructedRenderMode);
+      }
+
+      function setReconstructedRenderMode(mode) {
+        const nextMode = normalizeReconstructedRenderMode(mode);
+        if (nextMode === state.reconstructedRenderMode) {
+          return;
+        }
+        state.reconstructedRenderMode = nextMode;
+        persistReconstructedRenderMode();
+        applyRenderModeUi();
+        renderReconstruction();
+      }
+
       function visiblePanelCount() {
-        return Number(state.panelVisibility.source) + Number(state.panelVisibility.reconstructed) + Number(state.panelVisibility.content);
+        return Number(state.panelVisibility.source) + Number(state.panelVisibility.reconstructed);
+      }
+
+      function visiblePanelOrder() {
+        const order = [];
+        if (state.panelVisibility.source) order.push("source");
+        if (state.panelVisibility.reconstructed) order.push("reconstructed");
+        return order;
+      }
+
+      function gridTemplateColumnsForVisiblePanels() {
+        const order = visiblePanelOrder();
+        if (order.length === 0) {
+          return "minmax(0, 1fr)";
+        }
+        return order.map(() => "minmax(0, 1fr)").join(" ");
       }
 
       function applyPanelVisibility() {
         sourcePanel.classList.toggle("panel-hidden", !state.panelVisibility.source);
         reconstructedPanel.classList.toggle("panel-hidden", !state.panelVisibility.reconstructed);
-        contentPanel.classList.toggle("panel-hidden", !state.panelVisibility.content);
 
         toggleSourceBtn.classList.toggle("active", state.panelVisibility.source);
         toggleSourceBtn.setAttribute("aria-pressed", state.panelVisibility.source ? "true" : "false");
         toggleReconstructedBtn.classList.toggle("active", state.panelVisibility.reconstructed);
         toggleReconstructedBtn.setAttribute("aria-pressed", state.panelVisibility.reconstructed ? "true" : "false");
-        toggleContentBtn.classList.toggle("active", state.panelVisibility.content);
-        toggleContentBtn.setAttribute("aria-pressed", state.panelVisibility.content ? "true" : "false");
 
-        const visibleCount = Math.max(1, visiblePanelCount());
-        grid.style.gridTemplateColumns = new Array(visibleCount).fill("minmax(0, 1fr)").join(" ");
+        grid.style.gridTemplateColumns = gridTemplateColumnsForVisiblePanels();
         requestAnimationFrame(() => {
           applyZoom();
         });
@@ -1309,6 +1386,60 @@
 
       function draftStorageKey() {
         return `${STORAGE_KEYS.draftPrefix}:${state.pageId}`;
+      }
+
+      function updateExpandedEditorMeta(output) {
+        if (!output) {
+          expandedEditorMeta.textContent = "";
+          return;
+        }
+        expandedEditorMeta.textContent = `Order ${output.reading_order} | ${formatClassLabel(output.class_name)}`;
+      }
+
+      function closeExpandedEditor() {
+        state.expandedEditorLayoutId = null;
+        expandedEditor.hidden = true;
+      }
+
+      function openExpandedEditor(layoutId) {
+        const normalized = Number(layoutId);
+        if (!Number.isInteger(normalized) || normalized <= 0) {
+          return;
+        }
+        const output = outputByLayoutId(normalized);
+        if (!output) {
+          return;
+        }
+        if (String(output.output_format || "").toLowerCase() === "skip") {
+          return;
+        }
+        selectOutput(normalized, { scrollImageToLayout: true });
+        state.expandedEditorLayoutId = normalized;
+        expandedEditor.hidden = false;
+        expandedEditorTextarea.value = String(output.content ?? "");
+        updateExpandedEditorMeta(output);
+        expandedEditorTextarea.focus();
+        const end = expandedEditorTextarea.value.length;
+        expandedEditorTextarea.setSelectionRange(end, end);
+      }
+
+      function syncExpandedEditorFromState() {
+        const layoutId = Number(state.expandedEditorLayoutId);
+        if (!Number.isInteger(layoutId) || layoutId <= 0) {
+          return;
+        }
+        const output = outputByLayoutId(layoutId);
+        if (!output) {
+          closeExpandedEditor();
+          return;
+        }
+        if (expandedEditor.hidden) {
+          expandedEditor.hidden = false;
+        }
+        if (document.activeElement !== expandedEditorTextarea) {
+          expandedEditorTextarea.value = String(output.content ?? "");
+        }
+        updateExpandedEditorMeta(output);
       }
 
       function normalizeClassName(className) {
@@ -1691,6 +1822,14 @@
         return state.outputs.find((output) => Number(output.layout_id) === Number(layoutId)) || null;
       }
 
+      function hasLocalDraftForLayout(layoutId) {
+        const normalized = Number(layoutId);
+        if (!Number.isInteger(normalized) || normalized <= 0) {
+          return false;
+        }
+        return Object.prototype.hasOwnProperty.call(state.localEditsByLayoutId, String(normalized));
+      }
+
       function clearLineHoverHighlights() {
         for (const marker of reconstructionSurface.querySelectorAll(".recon-line-highlight")) {
           marker.remove();
@@ -1788,9 +1927,6 @@
 
       function applySelectedStyles() {
         const selectedId = Number(state.selectedLayoutId);
-        for (const row of outputsBody.querySelectorAll("tr[data-layout-id]")) {
-          row.classList.toggle("output-selected", Number(row.dataset.layoutId) === selectedId);
-        }
         for (const box of sourceOverlay.querySelectorAll(".box[data-layout-id]")) {
           box.classList.toggle("layout-selected", Number(box.dataset.layoutId) === selectedId);
         }
@@ -1838,16 +1974,12 @@
         });
       }
 
-      function selectOutput(layoutId, { scrollRowIntoView = false, scrollImageToLayout = false } = {}) {
+      function selectOutput(layoutId, { scrollImageToLayout = false } = {}) {
         const normalized = Number(layoutId);
         if (!Number.isInteger(normalized) || normalized <= 0) return;
         if (!outputByLayoutId(normalized)) return;
         state.selectedLayoutId = normalized;
         applySelectedStyles();
-        if (scrollRowIntoView) {
-          const row = outputsBody.querySelector(`tr[data-layout-id="${normalized}"]`);
-          row?.scrollIntoView({ block: "nearest" });
-        }
         if (scrollImageToLayout) {
           ensureLayoutVisible(normalized);
         }
@@ -1937,7 +2069,9 @@
           return block;
         }
         if (format === "markdown") {
-          const block = appendPlainContent(container, content, "markdown");
+          const mode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
+          const className = mode === "markdown" ? "markdown" : "markdown raw-view";
+          const block = appendPlainContent(container, content, className);
           const hasMarkdownTable = containsMarkdownTable(content);
           if (hasMarkdownTable) {
             container.classList.add("markdown-table-warning");
@@ -1947,7 +2081,9 @@
             badge.textContent = "TABLE MD";
             container.appendChild(badge);
           }
-          renderMarkdownInto(block, content, { onRendered: scheduleReconstructionRefit });
+          if (mode === "markdown") {
+            renderMarkdownInto(block, content, { onRendered: scheduleReconstructionRefit });
+          }
           return block;
         }
         return appendPlainContent(container, content, "markdown");
@@ -2214,8 +2350,48 @@
           item.style.borderColor = hexToRgba(color, 0.6);
           item.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) return;
-            selectOutput(output.layout_id, { scrollRowIntoView: true });
+            selectOutput(output.layout_id);
           });
+          item.addEventListener("dblclick", (event) => {
+            event.preventDefault();
+            openExpandedEditor(output.layout_id);
+          });
+
+          const header = document.createElement("div");
+          header.className = "recon-header";
+          const showRestore = hasLocalDraftForLayout(output.layout_id);
+          let restoreBtn = null;
+          if (showRestore) {
+            restoreBtn = document.createElement("button");
+            restoreBtn.className = "secondary recon-restore-btn";
+            restoreBtn.type = "button";
+            restoreBtn.textContent = "↺";
+            restoreBtn.title = "Restore value";
+            restoreBtn.setAttribute("aria-label", "Restore value");
+            restoreBtn.disabled =
+              state.reviewSubmitInProgress ||
+              state.reextractInProgress ||
+              String(output.output_format || "").toLowerCase() === "skip";
+            restoreBtn.addEventListener("pointerdown", (event) => {
+              event.stopPropagation();
+            });
+            restoreBtn.addEventListener("click", (event) => {
+              event.stopPropagation();
+              restoreOutputByLayoutId(output.layout_id);
+            });
+          }
+
+          const label = document.createElement("div");
+          label.className = "box-label recon-label";
+          label.style.color = color;
+          label.style.borderColor = hexToRgba(color, 0.62);
+          label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}`;
+          header.appendChild(label);
+
+          if (showRestore) {
+            header.appendChild(restoreBtn);
+          }
+          item.appendChild(header);
 
           const contentNode = appendStructuredContent(item, output);
           if (String(output.output_format || "").toLowerCase() === "markdown") {
@@ -2233,6 +2409,7 @@
       }
 
       function renderOverlay() {
+        sortOutputsInPlace();
         sourceOverlay.innerHTML = "";
         for (const output of state.outputs) {
           const color = colorForClass(output.class_name);
@@ -2248,7 +2425,11 @@
           box.style.background = hexToRgba(color, 0.16);
           box.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) return;
-            selectOutput(output.layout_id, { scrollRowIntoView: true });
+            selectOutput(output.layout_id);
+          });
+          box.addEventListener("dblclick", (event) => {
+            event.preventDefault();
+            openExpandedEditor(output.layout_id);
           });
 
           const label = document.createElement("div");
@@ -2261,12 +2442,13 @@
         }
         renderReconstruction();
         applySelectedStyles();
+        syncExpandedEditorFromState();
       }
 
-      function updateOutputFromInput(layoutId, textarea) {
+      function updateOutputContent(layoutId, nextContent, { source = null } = {}) {
         const output = outputByLayoutId(layoutId);
         if (!output) return;
-        const nextDraft = { content: String(textarea.value ?? "") };
+        const nextDraft = { content: String(nextContent ?? "") };
         output.content = nextDraft.content;
         const baseline = state.serverOutputsByLayoutId[String(layoutId)]
           ? toDraftShape(state.serverOutputsByLayoutId[String(layoutId)])
@@ -2278,85 +2460,33 @@
           state.localEditsByLayoutId[String(layoutId)] = nextDraft;
           setStatus("Draft saved locally.");
         }
+        if (
+          Number(state.expandedEditorLayoutId) === Number(layoutId) &&
+          source !== expandedEditorTextarea &&
+          document.activeElement !== expandedEditorTextarea
+        ) {
+          expandedEditorTextarea.value = nextDraft.content;
+        }
         renderReconstruction();
         persistDraftState();
       }
 
-      function renderOutputs() {
-        sortOutputsInPlace();
-        outputsBody.innerHTML = "";
-        if (state.outputs.length === 0) {
-          const row = document.createElement("tr");
-          const cell = document.createElement("td");
-          cell.colSpan = 5;
-          cell.className = "empty-state";
-          cell.textContent = "No OCR outputs found for this page.";
-          row.appendChild(cell);
-          outputsBody.appendChild(row);
+      function updateOutputFromInput(layoutId, textarea) {
+        updateOutputContent(layoutId, textarea?.value ?? "", { source: textarea });
+      }
+
+      function restoreOutputByLayoutId(layoutId) {
+        const normalized = Number(layoutId);
+        if (!Number.isInteger(normalized) || normalized <= 0) {
           return;
         }
-
-        for (const output of state.outputs) {
-          const row = document.createElement("tr");
-          row.dataset.layoutId = String(output.layout_id);
-          row.addEventListener("pointerdown", () => {
-            selectOutput(output.layout_id, { scrollImageToLayout: true });
-          });
-
-          const orderTd = document.createElement("td");
-          orderTd.className = "order-col";
-          orderTd.textContent = String(output.reading_order);
-          row.appendChild(orderTd);
-
-          const classTd = document.createElement("td");
-          classTd.className = "class-col";
-          classTd.textContent = formatClassLabel(output.class_name);
-          row.appendChild(classTd);
-
-          const formatTd = document.createElement("td");
-          formatTd.className = "format-col";
-          const formatBadge = document.createElement("span");
-          formatBadge.className = "format-badge";
-          formatBadge.textContent = output.output_format;
-          formatTd.appendChild(formatBadge);
-          row.appendChild(formatTd);
-
-          const contentTd = document.createElement("td");
-          const textarea = document.createElement("textarea");
-          textarea.className = "content-input";
-          textarea.value = String(output.content ?? "");
-          textarea.disabled = output.output_format === "skip";
-          textarea.addEventListener("focus", () => {
-            selectOutput(output.layout_id, { scrollImageToLayout: true });
-          });
-          textarea.addEventListener("input", () => {
-            updateOutputFromInput(output.layout_id, textarea);
-          });
-          contentTd.appendChild(textarea);
-          row.appendChild(contentTd);
-
-          const actionsTd = document.createElement("td");
-          actionsTd.className = "actions-col";
-          const restoreBtn = document.createElement("button");
-          restoreBtn.className = "secondary icon-btn";
-          restoreBtn.type = "button";
-          restoreBtn.textContent = "↺";
-          restoreBtn.title = "Restore value";
-          restoreBtn.setAttribute("aria-label", "Restore value");
-          restoreBtn.disabled = output.output_format === "skip";
-          restoreBtn.addEventListener("click", () => {
-            const baselineOutput = state.serverOutputsByLayoutId[String(output.layout_id)];
-            const baseline = baselineOutput ? toDraftShape(baselineOutput) : { content: "" };
-            textarea.value = baseline.content;
-            updateOutputFromInput(output.layout_id, textarea);
-          });
-          actionsTd.appendChild(restoreBtn);
-          row.appendChild(actionsTd);
-
-          outputsBody.appendChild(row);
+        const output = outputByLayoutId(normalized);
+        if (!output || String(output.output_format || "").toLowerCase() === "skip") {
+          return;
         }
-
-        applySelectedStyles();
+        const baselineOutput = state.serverOutputsByLayoutId[String(normalized)];
+        const baseline = baselineOutput ? toDraftShape(baselineOutput) : { content: "" };
+        updateOutputContent(normalized, baseline.content);
       }
 
       function updateHistoryControls() {
@@ -2499,7 +2629,6 @@
           clearDraftState();
           await loadPageData();
           renderHeaderMeta();
-          renderOutputs();
           renderOverlay();
 
           if (
@@ -2552,6 +2681,10 @@
         }
 
         applyStoredZoomSettings();
+        state.reconstructedRenderMode = normalizeReconstructedRenderMode(
+          readStorage(STORAGE_KEYS.reconstructedRenderMode),
+        );
+        applyRenderModeUi();
         state.panelVisibility = normalizePanelVisibility(readStorage(STORAGE_KEYS.panelVisibility));
         applyPanelVisibility();
         state.pageId = pageId;
@@ -2567,7 +2700,6 @@
         }
 
         renderHeaderMeta();
-        renderOutputs();
         renderOverlay();
         if (state.outputs.length > 0) {
           selectOutput(state.outputs[0].layout_id, { scrollImageToLayout: false });
@@ -2601,7 +2733,6 @@
 
       toggleSourceBtn.addEventListener("click", () => togglePanel("source"));
       toggleReconstructedBtn.addEventListener("click", () => togglePanel("reconstructed"));
-      toggleContentBtn.addEventListener("click", () => togglePanel("content"));
       zoomTrigger.addEventListener("click", () => {
         if (zoomMenu.hidden) {
           openZoomMenu();
@@ -2660,6 +2791,10 @@
           }
         }
         if (event.key === "Escape") {
+          if (!expandedEditor.hidden) {
+            closeExpandedEditor();
+            return;
+          }
           closeZoomMenu();
           closeReextractModal();
         }
@@ -2667,6 +2802,12 @@
 
       reextractBtn.addEventListener("click", () => {
         openReextractModal();
+      });
+      renderMarkdownBtn.addEventListener("click", () => {
+        setReconstructedRenderMode("markdown");
+      });
+      renderRawBtn.addEventListener("click", () => {
+        setReconstructedRenderMode("raw");
       });
       reextractModalRunBtn.addEventListener("click", async () => {
         if (state.reextractInProgress) {
@@ -2688,6 +2829,16 @@
         if (event.target === reextractModal) {
           closeReextractModal();
         }
+      });
+      expandedEditorCloseBtn.addEventListener("click", () => {
+        closeExpandedEditor();
+      });
+      expandedEditorTextarea.addEventListener("input", () => {
+        const layoutId = Number(state.expandedEditorLayoutId);
+        if (!Number.isInteger(layoutId) || layoutId <= 0) {
+          return;
+        }
+        updateOutputFromInput(layoutId, expandedEditorTextarea);
       });
       reviewBtn.addEventListener("click", markReviewed);
 
