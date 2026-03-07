@@ -1007,6 +1007,11 @@
         renderLatexInto,
         renderMarkdownInto,
       } from "./js/reconstructed_markdown.mjs";
+      import {
+        hasLocalDraftForLayout,
+        isReconstructedRestoreDisabled,
+        normalizeReconstructedRenderMode,
+      } from "./js/ocr_review_utils.mjs";
 
       const STORAGE_KEYS = {
         draftPrefix: "ocrReview.drafts",
@@ -1140,14 +1145,6 @@
           next.reconstructed = true;
         }
         return next;
-      }
-
-      function normalizeReconstructedRenderMode(rawValue) {
-        const value = String(rawValue || "").trim().toLowerCase();
-        if (value === "raw") {
-          return "raw";
-        }
-        return "markdown";
       }
 
       function applyRenderModeUi() {
@@ -1822,14 +1819,6 @@
         return state.outputs.find((output) => Number(output.layout_id) === Number(layoutId)) || null;
       }
 
-      function hasLocalDraftForLayout(layoutId) {
-        const normalized = Number(layoutId);
-        if (!Number.isInteger(normalized) || normalized <= 0) {
-          return false;
-        }
-        return Object.prototype.hasOwnProperty.call(state.localEditsByLayoutId, String(normalized));
-      }
-
       function clearLineHoverHighlights() {
         for (const marker of reconstructionSurface.querySelectorAll(".recon-line-highlight")) {
           marker.remove();
@@ -2359,7 +2348,7 @@
 
           const header = document.createElement("div");
           header.className = "recon-header";
-          const showRestore = hasLocalDraftForLayout(output.layout_id);
+          const showRestore = hasLocalDraftForLayout(state.localEditsByLayoutId, output.layout_id);
           let restoreBtn = null;
           if (showRestore) {
             restoreBtn = document.createElement("button");
@@ -2368,10 +2357,11 @@
             restoreBtn.textContent = "↺";
             restoreBtn.title = "Restore value";
             restoreBtn.setAttribute("aria-label", "Restore value");
-            restoreBtn.disabled =
-              state.reviewSubmitInProgress ||
-              state.reextractInProgress ||
-              String(output.output_format || "").toLowerCase() === "skip";
+            restoreBtn.disabled = isReconstructedRestoreDisabled({
+              reviewSubmitInProgress: state.reviewSubmitInProgress,
+              reextractInProgress: state.reextractInProgress,
+              outputFormat: output.output_format,
+            });
             restoreBtn.addEventListener("pointerdown", (event) => {
               event.stopPropagation();
             });
