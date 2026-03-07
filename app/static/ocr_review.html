@@ -805,11 +805,17 @@
 
       .editor-header {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         justify-content: space-between;
         gap: 8px;
         padding: 12px;
         border-bottom: 1px solid var(--border);
+      }
+
+      .editor-title-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
       }
 
       .editor-header-actions {
@@ -828,14 +834,7 @@
         font-size: 16px;
       }
 
-      .editor-meta {
-        margin-top: 4px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
       .editor-mode-badge {
-        margin-top: 6px;
         display: inline-flex;
         align-items: center;
         border-radius: 999px;
@@ -1061,10 +1060,9 @@
 
     <aside id="expanded-editor" class="editor-drawer" role="dialog" aria-modal="true" aria-labelledby="expanded-editor-title" hidden>
       <div class="editor-header">
-        <div>
+        <div class="editor-title-row">
           <h2 id="expanded-editor-title">Edit content</h2>
-          <div id="expanded-editor-meta" class="editor-meta"></div>
-          <div id="expanded-editor-mode-badge" class="editor-mode-badge">Loading editor…</div>
+          <div id="expanded-editor-mode-badge" class="editor-mode-badge" hidden>CodeMirror</div>
         </div>
         <div class="editor-header-actions">
           <button id="expanded-editor-wrap-btn" class="secondary editor-wrap-btn" type="button">Wrap on</button>
@@ -1167,7 +1165,6 @@
       const reextractModalCancelBtn = document.getElementById("reextract-modal-cancel-btn");
       const reextractModalRunBtn = document.getElementById("reextract-modal-run-btn");
       const expandedEditor = document.getElementById("expanded-editor");
-      const expandedEditorMeta = document.getElementById("expanded-editor-meta");
       const expandedEditorModeBadge = document.getElementById("expanded-editor-mode-badge");
       const expandedEditorWrapBtn = document.getElementById("expanded-editor-wrap-btn");
       const expandedEditorStatus = document.getElementById("expanded-editor-status");
@@ -1558,14 +1555,6 @@
         return `${STORAGE_KEYS.draftPrefix}:${state.pageId}`;
       }
 
-      function updateExpandedEditorMeta(output) {
-        if (!output) {
-          expandedEditorMeta.textContent = "";
-          return;
-        }
-        expandedEditorMeta.textContent = `Order ${output.reading_order} | ${formatClassLabel(output.class_name)}`;
-      }
-
       function setExpandedEditorModeBadge(mode) {
         if (!expandedEditorModeBadge) {
           return;
@@ -1573,16 +1562,12 @@
         const normalized = String(mode || "").trim().toLowerCase();
         expandedEditorModeBadge.classList.remove("codemirror", "fallback");
         if (normalized === "codemirror") {
+          expandedEditorModeBadge.hidden = false;
           expandedEditorModeBadge.textContent = "CodeMirror";
           expandedEditorModeBadge.classList.add("codemirror");
           return;
         }
-        if (normalized === "fallback") {
-          expandedEditorModeBadge.textContent = "Textarea fallback";
-          expandedEditorModeBadge.classList.add("fallback");
-          return;
-        }
-        expandedEditorModeBadge.textContent = "Loading editor…";
+        expandedEditorModeBadge.hidden = true;
       }
 
       function setExpandedEditorWrapButtonState(enabled) {
@@ -1847,27 +1832,6 @@
             if (!(event instanceof KeyboardEvent)) {
               return false;
             }
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g") {
-              event.preventDefault();
-              const totalLines = view.state.doc.lines;
-              const currentLine = view.state.doc.lineAt(view.state.selection.main.head).number;
-              const raw = window.prompt(`Go to line (1-${totalLines})`, String(currentLine));
-              if (raw === null) {
-                return true;
-              }
-              const requested = Number.parseInt(String(raw).trim(), 10);
-              if (!Number.isInteger(requested)) {
-                return true;
-              }
-              const targetLine = Math.max(1, Math.min(totalLines, requested));
-              const lineInfo = view.state.doc.line(targetLine);
-              view.dispatch({
-                selection: { anchor: lineInfo.from },
-                scrollIntoView: true,
-              });
-              updateExpandedEditorStatusFromCodeMirror(view);
-              return true;
-            }
             if (event.key !== "Enter") {
               return false;
             }
@@ -1931,7 +1895,6 @@
         state.expandedEditorLayoutId = normalized;
         expandedEditor.hidden = false;
         const content = String(output.content ?? "");
-        updateExpandedEditorMeta(output);
         setExpandedEditorWrapButtonState(editorWrapEnabled);
         if (codeMirrorView) {
           expandedEditorCmHost.hidden = false;
@@ -1980,7 +1943,6 @@
         } else {
           updateExpandedEditorStatusFromCodeMirror();
         }
-        updateExpandedEditorMeta(output);
       }
 
       function normalizeClassName(className) {
@@ -3428,33 +3390,6 @@
         toggleExpandedEditorWrap();
       });
       expandedEditorTextarea.addEventListener("keydown", (event) => {
-        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "g") {
-          event.preventDefault();
-          const text = String(expandedEditorTextarea.value ?? "");
-          const totalLines = text.split("\n").length;
-          const cursor = Number.isInteger(expandedEditorTextarea.selectionStart)
-            ? expandedEditorTextarea.selectionStart
-            : 0;
-          const currentLine = text.slice(0, cursor).split("\n").length;
-          const raw = window.prompt(`Go to line (1-${totalLines})`, String(currentLine));
-          if (raw === null) {
-            return;
-          }
-          const requested = Number.parseInt(String(raw).trim(), 10);
-          if (!Number.isInteger(requested)) {
-            return;
-          }
-          const targetLine = Math.max(1, Math.min(totalLines, requested));
-          const lines = text.split("\n");
-          let targetIndex = 0;
-          for (let index = 0; index < targetLine - 1; index += 1) {
-            targetIndex += lines[index].length + 1;
-          }
-          expandedEditorTextarea.focus();
-          expandedEditorTextarea.setSelectionRange(targetIndex, targetIndex);
-          updateExpandedEditorStatusFromTextarea();
-          return;
-        }
         if (event.key !== "Enter") {
           return;
         }
