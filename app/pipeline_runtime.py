@@ -16,6 +16,7 @@ JobHandler = Callable[[dict[str, Any]], dict[str, Any] | None]
 
 _HANDLERS: dict[str, JobHandler] = {}
 _HANDLERS_LOCK = Lock()
+_ENQUEUE_LOCK = Lock()
 
 _WORKER_THREAD: Thread | None = None
 _WORKER_LOCK = Lock()
@@ -231,30 +232,32 @@ def _worker_loop() -> None:
 
 def enqueue_job(stage: str, *, page_id: int | None, payload: dict[str, Any] | None = None) -> bool:
     payload_json = None if payload is None else _json_dumps(payload)
-    with get_session() as session:
-        existing_query = select(PipelineJob.id).where(PipelineJob.stage == stage).where(
-            PipelineJob.status.in_(("queued", "running"))
-        )
-        if page_id is None:
-            existing_query = existing_query.where(PipelineJob.page_id.is_(None))
-        else:
-            existing_query = existing_query.where(PipelineJob.page_id == page_id)
-        existing = session.execute(existing_query.limit(1)).scalar_one_or_none()
-        if existing is not None:
-            return False
-
-        now = _utc_now()
-        session.add(
-            PipelineJob(
-                stage=stage,
-                page_id=page_id,
-                status="queued",
-                payload_json=payload_json,
-                created_at=now,
-                updated_at=now,
-                attempts=0,
+    # Serialize enqueue dedup checks and inserts to avoid duplicate queued jobs under concurrent requests.
+    with _ENQUEUE_LOCK:
+        with get_session() as session:
+            existing_query = select(PipelineJob.id).where(PipelineJob.stage == stage).where(
+                PipelineJob.status.in_(("queued", "running"))
             )
-        )
+            if page_id is None:
+                existing_query = existing_query.where(PipelineJob.page_id.is_(None))
+            else:
+                existing_query = existing_query.where(PipelineJob.page_id == page_id)
+            existing = session.execute(existing_query.limit(1)).scalar_one_or_none()
+            if existing is not None:
+                return False
+
+            now = _utc_now()
+            session.add(
+                PipelineJob(
+                    stage=stage,
+                    page_id=page_id,
+                    status="queued",
+                    payload_json=payload_json,
+                    created_at=now,
+                    updated_at=now,
+                    attempts=0,
+                )
+            )
 
     emit_event(
         stage=stage,

@@ -14,6 +14,7 @@ from sqlalchemy import delete, func, select
 from .config import settings
 from .db import get_session, init_db
 from .discovery import discover_images
+from .final_export import export_final_dataset
 from .layouts import (
     create_layout,
     delete_layout,
@@ -189,6 +190,10 @@ class ReextractOcrRequest(BaseModel):
 class RuntimeOptionsUpdateRequest(BaseModel):
     auto_detect_layouts_after_discovery: bool | None = None
     auto_extract_text_after_layout_review: bool | None = None
+
+
+class FinalExportRequest(BaseModel):
+    confirm: bool = False
 
 
 @app.get("/")
@@ -926,6 +931,43 @@ def reextract_ocr(page_id: int, payload: ReextractOcrRequest | None = None) -> d
             f"Gemini requests {result['requests_count']}."
         ),
         data={"trigger": "manual_reextract", "result": result},
+    )
+    return result
+
+
+@app.post("/api/final/export")
+def run_final_export(payload: FinalExportRequest) -> dict[str, object]:
+    if not payload.confirm:
+        raise HTTPException(status_code=400, detail="Final export not confirmed.")
+    emit_event(
+        stage="finalization",
+        event_type="export_started",
+        message="Final dataset export started.",
+    )
+    try:
+        result = export_final_dataset()
+    except ValueError as error:
+        emit_event(
+            stage="finalization",
+            event_type="export_failed",
+            message=f"Final dataset export failed: {error}",
+        )
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    emit_event(
+        stage="finalization",
+        event_type="export_completed",
+        message=(
+            "Final dataset export completed. "
+            f"Pages: {result['page_count']}, images: {result['image_count']}, reconstructed: {result['reconstructed_count']}."
+        ),
+        data={
+            "export_dir": result["export_dir"],
+            "metadata_file": result["metadata_file"],
+            "page_count": result["page_count"],
+            "image_count": result["image_count"],
+            "reconstructed_count": result["reconstructed_count"],
+        },
     )
     return result
 

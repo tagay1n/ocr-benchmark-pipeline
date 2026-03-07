@@ -542,3 +542,66 @@ test("previousHistoryPageId returns previous page only when available", () => {
   assert.equal(previousHistoryPageId([100], 0), null);
   assert.equal(previousHistoryPageId([], -1), null);
 });
+
+test("reorderReadingOrderIds preserves id set across randomized moves", () => {
+  const seed = 1337;
+  let state = seed;
+  function rand(max) {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state % max;
+  }
+
+  const original = Array.from({ length: 20 }, (_, index) => index + 1);
+  let ordered = original.slice();
+  for (let iteration = 0; iteration < 200; iteration += 1) {
+    const draggedId = ordered[rand(ordered.length)];
+    const maybeTarget = rand(10) < 2 ? null : ordered[rand(ordered.length)];
+    const position = rand(2) === 0 ? "before" : "after";
+    const next = reorderReadingOrderIds({
+      orderedIds: ordered,
+      draggedId,
+      targetId: maybeTarget,
+      position,
+    });
+    assert.ok(Array.isArray(next));
+    assert.equal(next.length, ordered.length);
+    assert.deepEqual([...next].sort((a, b) => a - b), original);
+    ordered = next;
+  }
+});
+
+test("computeDraggedBBox randomized invariants", () => {
+  const seed = 20260307;
+  let state = seed;
+  function rand(max) {
+    state = (state * 1103515245 + 12345) >>> 0;
+    return state % max;
+  }
+
+  for (let iteration = 0; iteration < 200; iteration += 1) {
+    const width = 300 + rand(1700);
+    const height = 300 + rand(1500);
+    const startX = rand(width + 200) - 100;
+    const startY = rand(height + 200) - 100;
+    const endX = rand(width + 200) - 100;
+    const endY = rand(height + 200) - 100;
+    const bbox = computeDraggedBBox({
+      startX,
+      startY,
+      endX,
+      endY,
+      contentWidth: width,
+      contentHeight: height,
+      minPixels: 5,
+    });
+    if (bbox === null) {
+      continue;
+    }
+    assert.ok(bbox.x1 >= 0 && bbox.x1 <= 1);
+    assert.ok(bbox.y1 >= 0 && bbox.y1 <= 1);
+    assert.ok(bbox.x2 >= 0 && bbox.x2 <= 1);
+    assert.ok(bbox.y2 >= 0 && bbox.y2 <= 1);
+    assert.ok(bbox.x2 > bbox.x1);
+    assert.ok(bbox.y2 > bbox.y1);
+  }
+});

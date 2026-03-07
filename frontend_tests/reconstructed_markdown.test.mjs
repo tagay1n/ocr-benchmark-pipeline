@@ -41,6 +41,32 @@ test("containsMarkdownTable ignores table-like lines inside fenced code blocks",
   assert.equal(containsMarkdownTable(markdown), false);
 });
 
+test("containsMarkdownTable ignores table-like lines inside tilde fences", () => {
+  const markdown = [
+    "~~~",
+    "a | b",
+    "--- | ---",
+    "1 | 2",
+    "~~~",
+  ].join("\n");
+  assert.equal(containsMarkdownTable(markdown), false);
+});
+
+test("containsMarkdownTable detects table after fenced block closes", () => {
+  const markdown = [
+    "```md",
+    "| inside | fence |",
+    "| --- | --- |",
+    "| x | y |",
+    "```",
+    "",
+    "| real | table |",
+    "| --- | --- |",
+    "| a | b |",
+  ].join("\n");
+  assert.equal(containsMarkdownTable(markdown), true);
+});
+
 test("containsMarkdownTable ignores empty values", () => {
   assert.equal(containsMarkdownTable(""), false);
   assert.equal(containsMarkdownTable(null), false);

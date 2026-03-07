@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import ExitStack
 import json
 import os
@@ -8,7 +9,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from app import config, db, discovery, layouts, main, ocr_extract, pipeline_runtime, runtime_options
+from app import config, db, discovery, final_export, layouts, main, ocr_extract, pipeline_runtime, runtime_options
 from app.config import DEFAULT_EXTENSIONS, Settings
 
 
@@ -30,6 +31,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.stack.enter_context(patch.object(config, "settings", self.test_settings))
         self.stack.enter_context(patch.object(db, "settings", self.test_settings))
         self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(final_export, "settings", self.test_settings))
         self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
         self.stack.enter_context(patch.object(main, "settings", self.test_settings))
         self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
@@ -50,6 +52,32 @@ class PipelineStagesTests(unittest.TestCase):
         pages_payload = main.list_pages()
         self.assertGreaterEqual(pages_payload["count"], 1)
         return int(pages_payload["pages"][0]["id"])
+
+    def _set_page_ocr_done_with_outputs(
+        self,
+        page_id: int,
+        outputs: list[tuple[int, str, str, str]],
+    ) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            for layout_id, class_name, output_format, content in outputs:
+                session.add(
+                    main.OcrOutput(
+                        layout_id=int(layout_id),
+                        page_id=int(page_id),
+                        class_name=str(class_name),
+                        output_format=str(output_format),
+                        content=str(content),
+                        model_name="gemini-3-flash-preview",
+                        key_alias="test-key",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            page_row = session.get(main.Page, page_id)
+            self.assertIsNotNone(page_row)
+            page_row.status = "ocr_done"
+            page_row.updated_at = now
 
     def test_discovery_scan_stage_tracks_duplicates(self) -> None:
         self._write_image("a.png", b"same-content")
@@ -1098,6 +1126,519 @@ class PipelineStagesTests(unittest.TestCase):
         payload = main.next_layout_review_page_global()
         self.assertTrue(payload["has_next"])
         self.assertEqual(payload["next_page_id"], min(page_ids))
+
+    def test_next_ocr_review_page_wraparound_and_global_progress(self) -> None:
+        self._write_image("ocr-next/a.png", b"a")
+        self._write_image("ocr-next/b.png", b"b")
+        main.scan_images()
+
+        pages = sorted(main.list_pages()["pages"], key=lambda row: int(row["id"]))
+        self.assertEqual(len(pages), 2)
+        page_ids = [int(page["id"]) for page in pages]
+
+        for page_id in page_ids:
+            layout_payload = main.create_page_layout(
+                page_id,
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=1,
+                    bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.3),
+                ),
+            )
+            main.complete_layout_review(page_id)
+            self._set_page_ocr_done_with_outputs(
+                page_id,
+                [
+                    (
+                        int(layout_payload["layout"]["id"]),
+                        "text",
+                        "markdown",
+                        f"text-{page_id}",
+                    )
+                ],
+            )
+
+        first_id, second_id = page_ids
+        next_from_first = main.next_ocr_review_page(first_id)
+        self.assertTrue(next_from_first["has_next"])
+        self.assertEqual(next_from_first["next_page_id"], second_id)
+
+        next_from_second = main.next_ocr_review_page(second_id)
+        self.assertTrue(next_from_second["has_next"])
+        self.assertEqual(next_from_second["next_page_id"], first_id)
+
+        global_next = main.next_ocr_review_page_global()
+        self.assertTrue(global_next["has_next"])
+        self.assertEqual(global_next["next_page_id"], first_id)
+
+        main.complete_ocr_review(first_id)
+        global_after_first_review = main.next_ocr_review_page_global()
+        self.assertTrue(global_after_first_review["has_next"])
+        self.assertEqual(global_after_first_review["next_page_id"], second_id)
+
+        main.complete_ocr_review(second_id)
+        global_after_all_reviews = main.next_ocr_review_page_global()
+        self.assertFalse(global_after_all_reviews["has_next"])
+        self.assertIsNone(global_after_all_reviews["next_page_id"])
+
+    def test_complete_ocr_review_requires_ocr_done_and_is_repeatable(self) -> None:
+        self._write_image("ocr-review-repeatable.png", b"img")
+        main.scan_images()
+        page_id = self._first_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.3),
+            ),
+        )
+        main.complete_layout_review(page_id)
+
+        with self.assertRaises(main.HTTPException) as review_error:
+            main.complete_ocr_review(page_id)
+        self.assertEqual(review_error.exception.status_code, 400)
+        self.assertIn("ocr_done", str(review_error.exception.detail))
+
+        layouts_payload = main.page_layouts(page_id)
+        self.assertEqual(layouts_payload["count"], 1)
+        layout_id = int(layouts_payload["layouts"][0]["id"])
+        self._set_page_ocr_done_with_outputs(
+            page_id,
+            [(layout_id, "text", "markdown", "extracted")],
+        )
+
+        first = main.complete_ocr_review(page_id)
+        second = main.complete_ocr_review(page_id)
+        self.assertEqual(first["status"], "ocr_reviewed")
+        self.assertEqual(second["status"], "ocr_reviewed")
+        self.assertEqual(first["output_count"], 1)
+        self.assertEqual(second["output_count"], 1)
+
+    def test_pipeline_activity_stream_sends_valid_sse_json_payload(self) -> None:
+        self._write_image("sse.png", b"sse")
+        main.scan_images()
+
+        class _RequestStub:
+            def __init__(self) -> None:
+                self._checks = 0
+
+            async def is_disconnected(self) -> bool:
+                self._checks += 1
+                return self._checks > 1
+
+        async def _read_first_chunk() -> tuple[object, bytes | str]:
+            response = await main.pipeline_activity_stream(_RequestStub(), limit=3)
+            iterator = response.body_iterator
+            first_chunk = await anext(iterator)
+            await iterator.aclose()
+            return response, first_chunk
+
+        response, chunk = asyncio.run(_read_first_chunk())
+        self.assertEqual(response.headers.get("content-type"), "text/event-stream; charset=utf-8")
+        text = chunk.decode("utf-8") if isinstance(chunk, bytes) else str(chunk)
+        self.assertTrue(text.startswith("data: "))
+        self.assertTrue(text.endswith("\n\n"))
+        payload = json.loads(text[len("data: ") : -2])
+        self.assertIn("worker_running", payload)
+        self.assertIn("in_progress", payload)
+        self.assertIn("queued", payload)
+        self.assertIn("recent_events", payload)
+        self.assertLessEqual(len(payload["recent_events"]), 3)
+
+    def test_enqueue_job_deduplicates_by_stage_and_page(self) -> None:
+        self._write_image("queue/a.png", b"a")
+        self._write_image("queue/b.png", b"b")
+        main.scan_images()
+        pages = sorted(main.list_pages()["pages"], key=lambda row: int(row["id"]))
+        self.assertEqual(len(pages), 2)
+        page_a = int(pages[0]["id"])
+        page_b = int(pages[1]["id"])
+
+        with patch.object(pipeline_runtime, "_ensure_worker_running", return_value=None):
+            self.assertTrue(pipeline_runtime.enqueue_job("layout_detect", page_id=page_a, payload={"trigger": "x"}))
+            self.assertFalse(pipeline_runtime.enqueue_job("layout_detect", page_id=page_a, payload={"trigger": "y"}))
+            self.assertTrue(pipeline_runtime.enqueue_job("layout_detect", page_id=page_b, payload={"trigger": "z"}))
+            self.assertTrue(pipeline_runtime.enqueue_job("layout_detect", page_id=None, payload={"global": True}))
+            self.assertFalse(pipeline_runtime.enqueue_job("layout_detect", page_id=None, payload={"global": False}))
+
+        with db.get_session() as session:
+            rows = session.query(main.PipelineJob).order_by(main.PipelineJob.id.asc()).all()
+            self.assertEqual(len(rows), 3)
+            self.assertEqual([str(row.status) for row in rows], ["queued", "queued", "queued"])
+            self.assertEqual([row.page_id for row in rows], [page_a, page_b, None])
+
+    def test_claim_next_job_moves_to_running_and_increments_attempts(self) -> None:
+        self._write_image("claim-next.png", b"x")
+        main.scan_images()
+        page_id = self._first_page_id()
+
+        with patch.object(pipeline_runtime, "_ensure_worker_running", return_value=None):
+            enqueued = pipeline_runtime.enqueue_job("layout_detect", page_id=page_id, payload={"trigger": "test"})
+        self.assertTrue(enqueued)
+
+        claimed = pipeline_runtime._claim_next_job()
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed["stage"], "layout_detect")
+        self.assertEqual(claimed["page_id"], page_id)
+        self.assertEqual(claimed["payload"], {"trigger": "test"})
+
+        with db.get_session() as session:
+            row = session.get(main.PipelineJob, int(claimed["id"]))
+            self.assertIsNotNone(row)
+            self.assertEqual(str(row.status), "running")
+            self.assertEqual(int(row.attempts), 1)
+            self.assertIsNotNone(row.started_at)
+
+    def test_worker_loop_finalizes_success_and_failure_jobs(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            success_job = main.PipelineJob(
+                stage="stage_ok",
+                page_id=None,
+                status="queued",
+                payload_json=None,
+                result_json=None,
+                error=None,
+                attempts=0,
+                created_at=now,
+                updated_at=now,
+                started_at=None,
+                finished_at=None,
+            )
+            failed_job = main.PipelineJob(
+                stage="stage_fail",
+                page_id=None,
+                status="queued",
+                payload_json=None,
+                result_json=None,
+                error=None,
+                attempts=0,
+                created_at=now,
+                updated_at=now,
+                started_at=None,
+                finished_at=None,
+            )
+            session.add(success_job)
+            session.add(failed_job)
+            session.flush()
+            success_job_id = int(success_job.id)
+            failed_job_id = int(failed_job.id)
+
+        def _ok_handler(_job: dict[str, object]) -> dict[str, object]:
+            return {"done": True}
+
+        def _fail_handler(_job: dict[str, object]) -> dict[str, object]:
+            raise RuntimeError("boom")
+
+        with patch.dict(pipeline_runtime._HANDLERS, {"stage_ok": _ok_handler, "stage_fail": _fail_handler}, clear=True), patch.object(
+            pipeline_runtime,
+            "_claim_next_job",
+            side_effect=[
+                {"id": success_job_id, "stage": "stage_ok", "page_id": None, "payload": {}},
+                {"id": failed_job_id, "stage": "stage_fail", "page_id": None, "payload": {}},
+                None,
+            ],
+        ):
+            pipeline_runtime._worker_loop()
+
+        with db.get_session() as session:
+            success_row = session.get(main.PipelineJob, success_job_id)
+            failed_row = session.get(main.PipelineJob, failed_job_id)
+            self.assertIsNotNone(success_row)
+            self.assertIsNotNone(failed_row)
+            self.assertEqual(str(success_row.status), "completed")
+            self.assertIn('"done":true', str(success_row.result_json))
+            self.assertEqual(str(failed_row.status), "failed")
+            self.assertEqual(str(failed_row.error), "boom")
+
+            completed_events = (
+                session.query(main.PipelineEvent)
+                .filter(main.PipelineEvent.event_type == "job_completed")
+                .count()
+            )
+            failed_events = (
+                session.query(main.PipelineEvent)
+                .filter(main.PipelineEvent.event_type == "job_failed")
+                .count()
+            )
+            self.assertGreaterEqual(int(completed_events), 1)
+            self.assertGreaterEqual(int(failed_events), 1)
+
+    def test_caption_binding_rejects_cross_page_target(self) -> None:
+        self._write_image("cross-page/caption-page.png", b"a")
+        self._write_image("cross-page/target-page.png", b"b")
+        main.scan_images()
+
+        pages = sorted(main.list_pages()["pages"], key=lambda row: row["rel_path"])
+        caption_page_id = int(pages[0]["id"])
+        target_page_id = int(pages[1]["id"])
+
+        caption_layout = main.create_page_layout(
+            caption_page_id,
+            main.CreateLayoutRequest(
+                class_name="caption",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.7, x2=0.9, y2=0.9),
+            ),
+        )["layout"]
+        target_layout = main.create_page_layout(
+            target_page_id,
+            main.CreateLayoutRequest(
+                class_name="table",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.2, x2=0.9, y2=0.6),
+            ),
+        )["layout"]
+
+        with self.assertRaises(main.HTTPException) as bind_error:
+            main.put_page_caption_bindings(
+                caption_page_id,
+                main.ReplaceCaptionBindingsRequest(
+                    bindings=[
+                        main.CaptionBindingPayload(
+                            caption_layout_id=int(caption_layout["id"]),
+                            target_layout_ids=[int(target_layout["id"])],
+                        )
+                    ]
+                ),
+            )
+        self.assertEqual(bind_error.exception.status_code, 400)
+        self.assertIn("same page", str(bind_error.exception.detail).lower())
+
+    def test_caption_binding_requires_rebind_after_target_deletion(self) -> None:
+        self._write_image("caption-delete-target.png", b"img")
+        main.scan_images()
+        page_id = self._first_page_id()
+
+        caption_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="caption",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.7, x2=0.9, y2=0.9),
+            ),
+        )["layout"]
+        table_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="table",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.6),
+            ),
+        )["layout"]
+
+        main.put_page_caption_bindings(
+            page_id,
+            main.ReplaceCaptionBindingsRequest(
+                bindings=[
+                    main.CaptionBindingPayload(
+                        caption_layout_id=int(caption_layout["id"]),
+                        target_layout_ids=[int(table_layout["id"])],
+                    )
+                ]
+            ),
+        )
+
+        main.remove_layout(int(table_layout["id"]))
+        layouts_payload = main.page_layouts(page_id)
+        caption_rows = [row for row in layouts_payload["layouts"] if row["class_name"] == "caption"]
+        self.assertEqual(len(caption_rows), 1)
+        self.assertEqual(caption_rows[0]["bound_target_ids"], [])
+
+        with self.assertRaises(main.HTTPException) as review_error:
+            main.complete_layout_review(page_id)
+        self.assertEqual(review_error.exception.status_code, 400)
+        self.assertIn("caption layouts must be bound", str(review_error.exception.detail).lower())
+
+    def test_settings_parse_bool_extensions_and_env_overrides(self) -> None:
+        config_path = self.project_root / "config.yml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "source_dir: input",
+                    "db_path: data/test.db",
+                    "result_dir: result",
+                    "allowed_image_extensions:",
+                    "  - png",
+                    "  - .JPG",
+                    "enable_background_jobs: \"off\"",
+                    "auto_detect_layouts_after_discovery: \"yes\"",
+                    "auto_extract_text_after_layout_review: \"no\"",
+                    "gemini_keys:",
+                    "  batch_a:",
+                    "    - key-a",
+                    "    - key-b",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict(
+            os.environ,
+            {"PROJECT_ROOT": str(self.project_root), "APP_CONFIG_PATH": str(config_path)},
+            clear=False,
+        ):
+            loaded = config.load_settings()
+
+        self.assertEqual(loaded.allowed_extensions, (".png", ".jpg"))
+        self.assertFalse(loaded.enable_background_jobs)
+        self.assertTrue(loaded.auto_detect_layouts_after_discovery)
+        self.assertFalse(loaded.auto_extract_text_after_layout_review)
+        self.assertEqual(loaded.gemini_keys, ("key-a", "key-b"))
+
+        with patch.dict(
+            os.environ,
+            {
+                "PROJECT_ROOT": str(self.project_root),
+                "APP_CONFIG_PATH": str(config_path),
+                "ALLOWED_IMAGE_EXTENSIONS": "webp, tif",
+                "GEMINI_KEYS": "env-a, env-a, env-b ",
+            },
+            clear=False,
+        ):
+            loaded_env = config.load_settings()
+
+        self.assertEqual(loaded_env.allowed_extensions, (".webp", ".tif"))
+        self.assertEqual(loaded_env.gemini_keys, ("env-a", "env-b"))
+
+    def test_runtime_options_reset_uses_current_settings_defaults(self) -> None:
+        custom_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=True,
+            auto_detect_layouts_after_discovery=True,
+            auto_extract_text_after_layout_review=True,
+        )
+        with patch.object(runtime_options, "settings", custom_settings):
+            snapshot = runtime_options.reset_runtime_options_from_settings()
+
+        self.assertTrue(snapshot.enable_background_jobs)
+        self.assertTrue(snapshot.auto_detect_layouts_after_discovery)
+        self.assertTrue(snapshot.auto_extract_text_after_layout_review)
+        runtime_options.reset_runtime_options_from_settings()
+
+    def test_final_export_contract_and_page_filtering(self) -> None:
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is required for final export tests.")
+
+        def write_png(rel_path: str, color: tuple[int, int, int]) -> None:
+            path = self.test_settings.source_dir / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            image = Image.new("RGB", (16, 12), color)
+            image.save(path, format="PNG")
+
+        write_png("export/reviewed.png", (70, 90, 110))
+        self._write_image("export/pending.png", b"pending-non-image")
+        main.scan_images()
+        pages_by_path = {str(page["rel_path"]): int(page["id"]) for page in main.list_pages()["pages"]}
+        reviewed_page_id = pages_by_path["export/reviewed.png"]
+        pending_page_id = pages_by_path["export/pending.png"]
+
+        text_layout = main.create_page_layout(
+            reviewed_page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.05, y1=0.05, x2=0.95, y2=0.3),
+            ),
+        )["layout"]
+        picture_layout = main.create_page_layout(
+            reviewed_page_id,
+            main.CreateLayoutRequest(
+                class_name="picture",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.35, x2=0.9, y2=0.8),
+            ),
+        )["layout"]
+        caption_layout = main.create_page_layout(
+            reviewed_page_id,
+            main.CreateLayoutRequest(
+                class_name="caption",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.82, x2=0.9, y2=0.95),
+            ),
+        )["layout"]
+        main.put_page_caption_bindings(
+            reviewed_page_id,
+            main.ReplaceCaptionBindingsRequest(
+                bindings=[
+                    main.CaptionBindingPayload(
+                        caption_layout_id=int(caption_layout["id"]),
+                        target_layout_ids=[int(picture_layout["id"])],
+                    )
+                ]
+            ),
+        )
+        main.complete_layout_review(reviewed_page_id)
+        self._set_page_ocr_done_with_outputs(
+            reviewed_page_id,
+            [
+                (int(text_layout["id"]), "text", "markdown", "body"),
+                (int(picture_layout["id"]), "picture", "skip", ""),
+                (int(caption_layout["id"]), "caption", "markdown", "caption"),
+            ],
+        )
+        main.complete_ocr_review(reviewed_page_id)
+
+        main.create_page_layout(
+            pending_page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.3),
+            ),
+        )
+        main.complete_layout_review(pending_page_id)
+        pending_layout_id = int(main.page_layouts(pending_page_id)["layouts"][0]["id"])
+        self._set_page_ocr_done_with_outputs(
+            pending_page_id,
+            [(pending_layout_id, "text", "markdown", "pending")],
+        )
+
+        result = final_export.export_final_dataset()
+        self.assertEqual(result["page_count"], 1)
+        self.assertEqual(result["image_count"], 1)
+        self.assertEqual(result["reconstructed_count"], 1)
+
+        metadata_path = Path(result["metadata_file"])
+        self.assertTrue(metadata_path.exists())
+        rows = [
+            json.loads(line)
+            for line in metadata_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(int(row["page_id"]), reviewed_page_id)
+        self.assertEqual(row["file_name"], "images/export/reviewed.png")
+        self.assertEqual(row["reconstructed_file_name"], "reconstructed/export/reviewed.png")
+        self.assertEqual(int(row["width"]), 16)
+        self.assertEqual(int(row["height"]), 12)
+
+        items = list(row["items"])
+        self.assertEqual([int(item["order"]) for item in items], [1, 2, 3])
+        text_item = next(item for item in items if item["class_name"] == "text")
+        picture_item = next(item for item in items if item["class_name"] == "picture")
+        caption_item = next(item for item in items if item["class_name"] == "caption")
+        self.assertEqual(text_item["content"], "body")
+        self.assertEqual(text_item["content_format"], "markdown")
+        self.assertNotIn("content", picture_item)
+        self.assertNotIn("content_format", picture_item)
+        self.assertEqual(caption_item["content"], "caption")
+        self.assertEqual(caption_item["caption_targets"], [int(picture_layout["id"])])
+
+        for item in items:
+            for coord in ("x1", "y1", "x2", "y2"):
+                value = float(item["bbox"][coord])
+                self.assertGreaterEqual(value, 0.0)
+                self.assertLessEqual(value, 1.0)
 
 
 if __name__ == "__main__":

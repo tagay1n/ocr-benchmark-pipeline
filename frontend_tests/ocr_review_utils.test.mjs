@@ -240,6 +240,11 @@ test("findBestTokenOccurrence supports punctuation and non-word matches", () => 
   );
 });
 
+test("findBestTokenOccurrence returns null when token is missing or empty", () => {
+  assert.equal(findBestTokenOccurrence("abc def", "xyz", { preferredOffset: 0 }), null);
+  assert.equal(findBestTokenOccurrence("abc def", "", { preferredOffset: 0 }), null);
+});
+
 test("computeEditorToolbarState toggles visibility and markdown action availability", () => {
   assert.deepEqual(computeEditorToolbarState({ editorHidden: true, outputFormat: "markdown" }), {
     toolbarHidden: true,
@@ -301,6 +306,19 @@ test("resolveEditorDrawerLayout keeps resizable state with null width for invali
       responsiveBreakpoint: 1120,
     }),
     { resizable: true, width: null },
+  );
+});
+
+test("resolveEditorDrawerLayout returns non-resizable for invalid viewport", () => {
+  assert.deepEqual(
+    resolveEditorDrawerLayout({
+      requestedWidth: 600,
+      viewportWidth: 0,
+      minWidth: 420,
+      maxRatio: 0.9,
+      responsiveBreakpoint: 1120,
+    }),
+    { resizable: false, width: null },
   );
 });
 

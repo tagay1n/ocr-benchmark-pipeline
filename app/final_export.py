@@ -11,7 +11,7 @@ from sqlalchemy import select
 from .config import settings
 from .db import get_session
 from .models import CaptionBinding, Layout, OcrOutput, Page
-from .statuses import STATUS_OCR_REVIEWED
+from .statuses import STATUS_OCR_REVIEWED, to_api_status
 
 
 def _timestamp_folder_name() -> str:
@@ -88,6 +88,7 @@ def _draw_reconstructed_image(
 
 
 def _load_export_rows() -> list[dict[str, Any]]:
+    reviewed_status_values = (STATUS_OCR_REVIEWED, to_api_status(STATUS_OCR_REVIEWED))
     with get_session() as session:
         rows = session.execute(
             select(
@@ -106,7 +107,7 @@ def _load_export_rows() -> list[dict[str, Any]]:
             .join(Layout, Layout.page_id == Page.id)
             .outerjoin(OcrOutput, OcrOutput.layout_id == Layout.id)
             .where(Page.is_missing.is_(False))
-            .where(Page.status == STATUS_OCR_REVIEWED)
+            .where(Page.status.in_(reviewed_status_values))
             .order_by(Page.id.asc(), Layout.reading_order.asc(), Layout.id.asc())
         ).all()
 
@@ -115,7 +116,7 @@ def _load_export_rows() -> list[dict[str, Any]]:
             .join(Layout, Layout.id == CaptionBinding.caption_layout_id)
             .join(Page, Page.id == Layout.page_id)
             .where(Page.is_missing.is_(False))
-            .where(Page.status == STATUS_OCR_REVIEWED)
+            .where(Page.status.in_(reviewed_status_values))
             .order_by(Layout.page_id.asc(), CaptionBinding.caption_layout_id.asc(), CaptionBinding.target_layout_id.asc())
         ).all()
 
