@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from .db import get_session
 from .layouts import get_page
+from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import OcrOutput, Page, Layout
 
 
@@ -15,16 +16,27 @@ def _utc_now() -> str:
 
 
 def _output_row_to_dict(output: OcrOutput, layout: Layout) -> dict[str, Any]:
+    output_format = str(output.output_format)
+    normalized_content = normalize_text_nfc(str(output.content))
+    lookalike_warnings = (
+        detect_suspicious_lookalikes(normalized_content, markdown_code_aware=True)
+        if output_format.lower() == "markdown"
+        else []
+    )
+    lookalike_line_indexes = sorted({int(item["line_index"]) for item in lookalike_warnings})
     return {
         "layout_id": int(output.layout_id),
         "page_id": int(output.page_id),
         "class_name": str(output.class_name),
-        "output_format": str(output.output_format),
-        "content": str(output.content),
+        "output_format": output_format,
+        "content": normalized_content,
         "model_name": str(output.model_name),
         "key_alias": output.key_alias,
         "created_at": str(output.created_at),
         "updated_at": str(output.updated_at),
+        "lookalike_warning_count": len(lookalike_warnings),
+        "lookalike_warning_line_indexes": lookalike_line_indexes,
+        "lookalike_warnings": lookalike_warnings,
         "reading_order": int(layout.reading_order),
         "bbox": {
             "x1": float(layout.x1),
@@ -55,6 +67,7 @@ def list_ocr_outputs(page_id: int) -> list[dict[str, Any]]:
 
 def update_ocr_output(layout_id: int, *, content: str) -> dict[str, Any]:
     now = _utc_now()
+    normalized_content = normalize_text_nfc(content)
     with get_session() as session:
         row = session.execute(
             select(OcrOutput, Layout)
@@ -65,7 +78,7 @@ def update_ocr_output(layout_id: int, *, content: str) -> dict[str, Any]:
             raise ValueError("OCR output not found.")
 
         output, layout = row
-        output.content = content
+        output.content = normalized_content
         output.updated_at = now
         session.flush()
         return _output_row_to_dict(output, layout)

@@ -705,6 +705,22 @@
         pointer-events: none;
       }
 
+      .recon-warning-badge.lookalike {
+        top: 22px;
+        border-color: #9c4f96;
+        background: #f3e4f0;
+        color: #5d2c5a;
+      }
+
+      .recon-line-warning {
+        position: absolute;
+        left: 0;
+        right: 0;
+        background: rgba(156, 79, 150, 0.16);
+        pointer-events: none;
+        z-index: 1;
+      }
+
       .recon-line-highlight {
         position: absolute;
         left: 0;
@@ -719,6 +735,15 @@
         left: 0;
         right: 0;
         background: rgba(11, 122, 117, 0.26);
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      .box-line-warning {
+        position: absolute;
+        left: 0;
+        right: 0;
+        background: rgba(156, 79, 150, 0.24);
         pointer-events: none;
         z-index: 1;
       }
@@ -2893,6 +2918,40 @@
         return countTextLines(output ? output.content : "");
       }
 
+      function outputLookalikeLineIndexes(layoutId) {
+        const output = outputByLayoutId(layoutId);
+        if (!output || !Array.isArray(output.lookalike_warning_line_indexes)) {
+          return [];
+        }
+        const deduped = new Set();
+        for (const raw of output.lookalike_warning_line_indexes) {
+          const value = Number(raw);
+          if (Number.isInteger(value) && value >= 0) {
+            deduped.add(value);
+          }
+        }
+        return Array.from(deduped).sort((a, b) => a - b);
+      }
+
+      function appendLineMarkers(container, lineIndexes, totalLines, markerClassName) {
+        if (!container || !Array.isArray(lineIndexes) || !lineIndexes.length) {
+          return;
+        }
+        const safeTotalLines = Math.max(1, Number(totalLines) || 1);
+        for (const rawIndex of lineIndexes) {
+          const lineIndex = Number(rawIndex);
+          if (!Number.isInteger(lineIndex) || lineIndex < 0) {
+            continue;
+          }
+          const band = lineBandFromLineIndex(lineIndex, safeTotalLines);
+          const marker = document.createElement("div");
+          marker.className = markerClassName;
+          marker.style.top = `${Math.max(0, Number(band.topRatio)) * 100}%`;
+          marker.style.height = `${Math.max(0, Number(band.heightRatio)) * 100}%`;
+          container.appendChild(marker);
+        }
+      }
+
       function clearLineHoverHighlights() {
         for (const marker of reconstructionSurface.querySelectorAll(".recon-line-highlight")) {
           marker.remove();
@@ -3391,6 +3450,15 @@
             badge.textContent = "TABLE MD";
             container.appendChild(badge);
           }
+          const lookalikeCount = Number(output.lookalike_warning_count || 0);
+          if (lookalikeCount > 0) {
+            container.classList.add("lookalike-warning");
+            const badge = document.createElement("span");
+            badge.className = "recon-warning-badge lookalike";
+            badge.textContent = `LOOK ${lookalikeCount}`;
+            badge.title = `${lookalikeCount} suspicious lookalike token(s) detected`;
+            container.appendChild(badge);
+          }
           if (mode === "markdown") {
             renderMarkdownInto(block, content, { onRendered: scheduleReconstructionRefit });
           }
@@ -3701,6 +3769,15 @@
           item.appendChild(header);
 
           const contentNode = appendStructuredContent(item, output);
+          const warningLineIndexes = outputLookalikeLineIndexes(output.layout_id);
+          if (warningLineIndexes.length > 0) {
+            appendLineMarkers(
+              item,
+              warningLineIndexes,
+              outputLineCount(output.layout_id),
+              "recon-line-warning",
+            );
+          }
           contentNode.addEventListener("pointermove", (event) => {
             updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
           });
@@ -3771,6 +3848,15 @@
           label.style.borderColor = hexToRgba(color, 0.62);
           label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}`;
           box.appendChild(label);
+          const warningLineIndexes = outputLookalikeLineIndexes(output.layout_id);
+          if (warningLineIndexes.length > 0) {
+            appendLineMarkers(
+              box,
+              warningLineIndexes,
+              outputLineCount(output.layout_id),
+              "box-line-warning",
+            );
+          }
           sourceOverlay.appendChild(box);
         }
         renderReconstruction();
@@ -3783,14 +3869,25 @@
         if (!output) return;
         const nextDraft = { content: String(nextContent ?? "") };
         output.content = nextDraft.content;
-        const baseline = state.serverOutputsByLayoutId[String(layoutId)]
-          ? toDraftShape(state.serverOutputsByLayoutId[String(layoutId)])
+        const baselineOutput = state.serverOutputsByLayoutId[String(layoutId)] || null;
+        const baseline = baselineOutput
+          ? toDraftShape(baselineOutput)
           : toDraftShape(output);
         if (sameDraft(nextDraft, baseline)) {
           delete state.localEditsByLayoutId[String(layoutId)];
+          output.lookalike_warning_count = Number(baselineOutput?.lookalike_warning_count || 0);
+          output.lookalike_warning_line_indexes = Array.isArray(baselineOutput?.lookalike_warning_line_indexes)
+            ? [...baselineOutput.lookalike_warning_line_indexes]
+            : [];
+          output.lookalike_warnings = Array.isArray(baselineOutput?.lookalike_warnings)
+            ? [...baselineOutput.lookalike_warnings]
+            : [];
           setStatus("Draft cleared (matches extracted value).");
         } else {
           state.localEditsByLayoutId[String(layoutId)] = nextDraft;
+          output.lookalike_warning_count = 0;
+          output.lookalike_warning_line_indexes = [];
+          output.lookalike_warnings = [];
           setStatus("Draft saved locally.");
         }
         if (

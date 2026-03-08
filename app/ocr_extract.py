@@ -14,6 +14,7 @@ from sqlalchemy import delete, select
 
 from .config import settings
 from .db import get_session
+from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import CaptionBinding, Layout, OcrOutput, Page
 
 GEMINI_MODEL = "gemini-3-flash-preview"
@@ -451,6 +452,13 @@ def extract_ocr_for_page(
             _write_prompt_debug_dump(page_id, prompt_debug_rows)
             raise RuntimeError(f"OCR extraction failed for layout {layout['id']}: {last_error}")
 
+        response_text = normalize_text_nfc(response_text)
+        lookalike_warnings = (
+            detect_suspicious_lookalikes(response_text, markdown_code_aware=True)
+            if output_format == "markdown"
+            else []
+        )
+
         pending_outputs.append(
             {
                 "layout_id": int(layout["id"]),
@@ -458,6 +466,7 @@ def extract_ocr_for_page(
                 "output_format": output_format,
                 "content": response_text,
                 "key_alias": _key_alias(used_key),
+                "lookalike_warning_count": len(lookalike_warnings),
             }
         )
         extracted_count += 1

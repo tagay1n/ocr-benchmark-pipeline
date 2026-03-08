@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from app import config, db, discovery, final_export, layouts, main, ocr_extract, runtime_options
 from app.config import DEFAULT_EXTENSIONS, Settings
+from app.lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 
 
 class OcrExtractInternalsTests(unittest.TestCase):
@@ -174,6 +175,22 @@ class OcrExtractInternalsTests(unittest.TestCase):
         }
         self.assertEqual(ocr_extract._extract_text_from_response(payload), "A\nB\nC")
 
+    def test_normalize_text_nfc_collapses_equivalent_unicode_sequences(self) -> None:
+        decomposed = "е\u0308"  # cyrillic e + combining diaeresis
+        composed = normalize_text_nfc(decomposed)
+        self.assertEqual(composed, "ё")
+
+    def test_detect_suspicious_lookalikes_marks_line_and_token(self) -> None:
+        text = "Бу сeр\n`код сeр`\n```\nсeр\n```"
+        warnings = detect_suspicious_lookalikes(text, markdown_code_aware=True)
+        self.assertEqual(len(warnings), 1)
+        warning = warnings[0]
+        self.assertEqual(warning["line_number"], 1)
+        self.assertEqual(warning["token"], "сeр")
+        self.assertEqual(warning["normalized_token"], "сер")
+        self.assertEqual(warning["replacements"][0]["from"], "e")
+        self.assertEqual(warning["replacements"][0]["to"], "е")
+
     def test_extract_ocr_for_page_rejects_unknown_layout_ids(self) -> None:
         self._write_image("ocr/a.png")
         main.scan_images()
@@ -258,6 +275,29 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(by_layout[int(first["id"])], "new-first")
         self.assertEqual(by_layout[int(third["id"])], "new-third")
         self.assertEqual(by_layout[int(second["id"])], "old-second")
+
+    def test_extract_ocr_for_page_applies_nfc_normalization_to_saved_content(self) -> None:
+        self._write_image("ocr/nfc.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", return_value="ё and е\u0308"
+        ):
+            ocr_extract.extract_ocr_for_page(page_id, layout_ids=[int(layout["id"])], max_retries_per_layout=1)
+
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 1)
+        content = outputs[0]["content"]
+        self.assertEqual(content, "ё and ё")
 
     def test_extract_ocr_for_page_skip_layout_writes_skip_output_without_requests(self) -> None:
         self.test_settings = Settings(
