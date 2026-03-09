@@ -10,6 +10,10 @@ import {
 } from "./pipeline_event_constants.mjs";
 import { fetchJson } from "./api_client.mjs";
 import {
+  findNextPageForStatus,
+  normalizeNextPagePayload,
+} from "./dashboard_review_actions_utils.mjs";
+import {
   readStorage,
   readStorageBool,
   writeStorage,
@@ -339,15 +343,8 @@ function syncReviewActionFromPages(actionKey) {
   if (!action) {
     return;
   }
-  const pending = currentPages
-    .filter((page) => !page.is_missing && page.status === action.pendingStatus)
-    .sort((a, b) => Number(a.id) - Number(b.id));
-  if (pending.length > 0) {
-    const next = pending[0];
-    applyReviewActionAvailability(actionKey, Number(next.id), next.rel_path);
-    return;
-  }
-  applyReviewActionAvailability(actionKey, null, null);
+  const next = findNextPageForStatus(currentPages, action.pendingStatus);
+  applyReviewActionAvailability(actionKey, next.nextPageId, next.nextPageRelPath);
 }
 
 function syncExportFromPages() {
@@ -427,11 +424,8 @@ function renderActivity(activity) {
 }
 
 function applyNextReviewStatePayload(actionKey, payload) {
-  if (payload && payload.has_next && Number.isInteger(payload.next_page_id) && payload.next_page_id > 0) {
-    applyReviewActionAvailability(actionKey, payload.next_page_id, payload.next_page_rel_path || null);
-    return;
-  }
-  applyReviewActionAvailability(actionKey, null, null);
+  const next = normalizeNextPagePayload(payload);
+  applyReviewActionAvailability(actionKey, next.nextPageId, next.nextPageRelPath);
 }
 
 function openNextReviewActionPage(actionKey) {

@@ -84,3 +84,29 @@ test("sortDashboardPages sorts status using missing marker", () => {
     [1, 3, 2],
   );
 });
+
+test("sortDashboardPages falls back to id tie-breaker when primary values match", () => {
+  const pages = [
+    { id: 9, created_at: "2026-03-09T12:00:00Z" },
+    { id: 2, created_at: "2026-03-09T12:00:00Z" },
+    { id: 5, created_at: "2026-03-09T12:00:00Z" },
+  ];
+  const sorted = sortDashboardPages(pages, { columnKey: "created_at", direction: "desc" });
+  assert.deepEqual(
+    sorted.map((page) => page.id),
+    [2, 5, 9],
+  );
+});
+
+test("sortDashboardPages sends invalid created_at values to the end in desc mode", () => {
+  const pages = [
+    { id: 1, created_at: "bad-date" },
+    { id: 2, created_at: "2026-03-09T12:00:00Z" },
+    { id: 3, created_at: "2026-03-08T12:00:00Z" },
+  ];
+  const sorted = sortDashboardPages(pages, { columnKey: "created_at", direction: "desc" });
+  assert.deepEqual(
+    sorted.map((page) => page.id),
+    [2, 3, 1],
+  );
+});
