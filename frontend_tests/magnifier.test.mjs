@@ -65,5 +65,5 @@ test("computeMagnifierLensPosition keeps lens inside viewport", () => {
     viewportWidth: 800,
     viewportHeight: 600,
   });
-  assert.deepEqual(nearTopLeft, { left: 21, top: 21 });
+  assert.deepEqual(nearTopLeft, { left: 8, top: 8 });
 });

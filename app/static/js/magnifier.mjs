@@ -12,8 +12,8 @@ function ensureMagnifierStyles() {
   style.textContent = `
 .image-magnifier-lens {
   position: fixed;
-  width: 180px;
-  height: 180px;
+  width: 270px;
+  height: 270px;
   border-radius: 50%;
   border: 1px solid rgba(53, 64, 67, 0.45);
   box-shadow:
@@ -38,30 +38,20 @@ function ensureMagnifierStyles() {
 
 .image-magnifier-crosshair {
   position: absolute;
-  inset: 0;
-}
-
-.image-magnifier-crosshair::before,
-.image-magnifier-crosshair::after {
-  content: "";
-  position: absolute;
-  background: rgba(33, 39, 43, 0.35);
-}
-
-.image-magnifier-crosshair::before {
   left: 50%;
-  top: 0;
-  width: 1px;
-  height: 100%;
-  transform: translateX(-50%);
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: #c83a3a;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(150, 24, 24, 0.34);
 }
 
-.image-magnifier-crosshair::after {
-  top: 50%;
-  left: 0;
-  height: 1px;
-  width: 100%;
-  transform: translateY(-50%);
+.image-magnifier-hide-cursor,
+.image-magnifier-hide-cursor * {
+  cursor: none !important;
 }
 `.trim();
   document.head.appendChild(style);
@@ -130,8 +120,8 @@ export function computeMagnifierLensPosition({
   lensSize,
   viewportWidth,
   viewportHeight,
-  offsetX = 20,
-  offsetY = 20,
+  offsetX = 0,
+  offsetY = 0,
   padding = 8,
 }) {
   const x = Number(clientX);
@@ -150,8 +140,8 @@ export function computeMagnifierLensPosition({
   const minTop = Number(padding);
   const maxLeft = Math.max(minLeft, width - size - Number(padding));
   const maxTop = Math.max(minTop, height - size - Number(padding));
-  const left = Math.max(minLeft, Math.min(maxLeft, x + Number(offsetX)));
-  const top = Math.max(minTop, Math.min(maxTop, y + Number(offsetY)));
+  const left = Math.max(minLeft, Math.min(maxLeft, x - size / 2 + Number(offsetX)));
+  const top = Math.max(minTop, Math.min(maxTop, y - size / 2 + Number(offsetY)));
   return { left, top };
 }
 
@@ -210,7 +200,7 @@ export function createImageMagnifier({
   viewport,
   image,
   getOverlayItems = () => [],
-  lensSize = 180,
+  lensSize = 270,
   defaultZoom = 4,
   minZoom = 2,
   maxZoom = 8,
@@ -249,6 +239,10 @@ export function createImageMagnifier({
 
   const hideLens = () => {
     lens.hidden = true;
+  };
+
+  const syncCursorVisibility = () => {
+    viewport.classList.toggle("image-magnifier-hide-cursor", isActive());
   };
 
   const renderAtPointer = (pointer) => {
@@ -363,6 +357,7 @@ export function createImageMagnifier({
     },
     setEnabled(value) {
       enabled = Boolean(value);
+      syncCursorVisibility();
       if (!isActive()) {
         hideLens();
         return;
@@ -373,6 +368,7 @@ export function createImageMagnifier({
     },
     setTemporary(value) {
       temporary = Boolean(value);
+      syncCursorVisibility();
       if (!isActive()) {
         hideLens();
         return;
@@ -396,6 +392,7 @@ export function createImageMagnifier({
       viewport.removeEventListener("pointerleave", onPointerLeave);
       viewport.removeEventListener("scroll", onViewportScroll);
       window.removeEventListener("resize", onViewportScroll);
+      viewport.classList.remove("image-magnifier-hide-cursor");
       lens.remove();
     },
   };
