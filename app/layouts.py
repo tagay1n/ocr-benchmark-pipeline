@@ -11,6 +11,13 @@ from sqlalchemy import delete, func, select
 
 from .config import settings
 from .db import get_session
+from .layout_classes import (
+    CAPTION_CLASS_NAME,
+    CAPTION_TARGET_CLASS_NAMES,
+    normalize_class_name,
+    normalize_detected_class_name,
+    normalize_persisted_class_name,
+)
 from .models import CaptionBinding, Layout, Page
 
 DOC_LAYOUTNET_REPO_ID = "hantian/yolo-doclaynet"
@@ -20,15 +27,6 @@ DOC_LAYOUTNET_DEFAULT_CONF = 0.25
 DOC_LAYOUTNET_DEFAULT_IOU = 0.45
 DOC_LAYOUTNET_DEFAULT_MAX_DET = 300
 DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS = False
-CAPTION_CLASS_NAME = "caption"
-CAPTION_TARGET_CLASS_NAMES = {"table", "picture", "formula"}
-DETECTED_CLASS_REMAP = {
-    "title": "section_header",
-    "list_item": "text",
-}
-PERSISTED_CLASS_REMAP = {
-    "title": "section_header",
-}
 
 _DOC_LAYOUTNET_MODEL = None
 _DOC_LAYOUTNET_MODEL_LOCK = Lock()
@@ -40,21 +38,6 @@ def _utc_now() -> str:
 
 def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
-
-
-def _normalize_class_name(value: str) -> str:
-    normalized = value.strip().lower().replace("-", "_").replace("/", "_")
-    return "_".join(normalized.split())
-
-
-def _normalize_detected_class_name(value: str) -> str:
-    class_name = _normalize_class_name(value)
-    return DETECTED_CLASS_REMAP.get(class_name, class_name)
-
-
-def _normalize_persisted_class_name(value: str) -> str:
-    class_name = _normalize_class_name(value)
-    return PERSISTED_CLASS_REMAP.get(class_name, class_name)
 
 
 def _load_doclaynet_model():
@@ -158,7 +141,7 @@ def _detect_doclaynet_layouts(
 
         rows.append(
             {
-                "class_name": _normalize_detected_class_name(raw_name),
+                "class_name": normalize_detected_class_name(raw_name),
                 "confidence": float(confidence.item()),
                 "x1": x1,
                 "y1": y1,
@@ -281,7 +264,7 @@ def detect_layouts_for_page(
     detected_rows = [
         {
             **row,
-            "class_name": _normalize_detected_class_name(str(row.get("class_name", ""))),
+            "class_name": normalize_detected_class_name(str(row.get("class_name", ""))),
         }
         for row in detected_rows
     ]
@@ -363,7 +346,7 @@ def create_layout(
     reading_order: int | None,
 ) -> dict[str, Any]:
     validate_bbox(x1, y1, x2, y2)
-    class_name = _normalize_persisted_class_name(class_name)
+    class_name = normalize_persisted_class_name(class_name)
     now = _utc_now()
 
     with get_session() as session:
@@ -411,7 +394,7 @@ def update_layout(
     y2: float | None,
 ) -> dict[str, Any]:
     now = _utc_now()
-    next_class_name_input = None if class_name is None else _normalize_persisted_class_name(class_name)
+    next_class_name_input = None if class_name is None else normalize_persisted_class_name(class_name)
     with get_session() as session:
         layout = session.get(Layout, layout_id)
         if layout is None:
@@ -464,7 +447,7 @@ def replace_caption_bindings(page_id: int, bindings_by_caption_id: dict[int, lis
             raise ValueError("Page is marked as missing and cannot be edited.")
 
         layouts = session.execute(select(Layout).where(Layout.page_id == page_id)).scalars().all()
-        layout_class_by_id = {int(layout.id): _normalize_class_name(str(layout.class_name)) for layout in layouts}
+        layout_class_by_id = {int(layout.id): normalize_class_name(str(layout.class_name)) for layout in layouts}
         caption_ids = {
             layout_id for layout_id, class_name in layout_class_by_id.items() if class_name == CAPTION_CLASS_NAME
         }
@@ -539,7 +522,7 @@ def mark_layout_reviewed(page_id: int) -> dict[str, Any]:
         if layout_count == 0:
             raise ValueError("No layouts found for this page.")
 
-        class_by_id = {int(layout.id): str(layout.class_name) for layout in layouts}
+        class_by_id = {int(layout.id): normalize_class_name(str(layout.class_name)) for layout in layouts}
         caption_ids = {layout_id for layout_id, class_name in class_by_id.items() if class_name == CAPTION_CLASS_NAME}
         target_ids = {
             layout_id

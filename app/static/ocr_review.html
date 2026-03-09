@@ -1359,6 +1359,11 @@
       import {
         createImageMagnifier,
       } from "./js/magnifier.mjs";
+      import {
+        colorForClass,
+        formatClassLabel,
+        normalizeClassName,
+      } from "./js/layout_class_catalog.mjs";
 
       const STORAGE_KEYS = {
         draftPrefix: "ocrReview.drafts",
@@ -1378,21 +1383,6 @@
       const EDITOR_DRAWER_WIDTH_MIN = 420;
       const EDITOR_DRAWER_WIDTH_MAX_RATIO = 0.9;
       const EDITOR_DRAWER_RESPONSIVE_BREAKPOINT = 1120;
-
-      const CLASS_COLORS = {
-        section_header: "#355fa8",
-        text: "#4f5d69",
-        list_item: "#2f6f5f",
-        table: "#6f7d2f",
-        picture: "#8a6831",
-        caption: "#496f98",
-        footnote: "#7a6030",
-        formula: "#7b5a95",
-        page_header: "#3f6e69",
-        page_footer: "#8b5949",
-      };
-
-      const FALLBACK_COLORS = ["#4e6f8f", "#7c5f90", "#3f7b69", "#8d6a3b", "#82605b", "#537987", "#6e6b3f"];
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -2736,22 +2726,6 @@
         syncHoveredLineFromExpandedEditor({ source: "editor" });
       }
 
-      function normalizeClassName(className) {
-        return String(className || "")
-          .trim()
-          .toLowerCase()
-          .replace(/[-/\s]+/g, "_");
-      }
-
-      function formatClassLabel(value) {
-        const normalized = String(value || "")
-          .replace(/_/g, " ")
-          .trim()
-          .toLowerCase();
-        if (!normalized) return "";
-        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-      }
-
       function formatStatusLabel(value) {
         return String(value || "")
           .replace(/_/g, " ")
@@ -2787,21 +2761,6 @@
         }
         const preview = compactTextPreview(text);
         return preview || "No OCR content";
-      }
-
-      function hashString(value) {
-        let hash = 0;
-        for (let i = 0; i < value.length; i += 1) {
-          hash = (hash << 5) - hash + value.charCodeAt(i);
-          hash |= 0;
-        }
-        return Math.abs(hash);
-      }
-
-      function colorForClass(className) {
-        const normalized = normalizeClassName(className);
-        if (CLASS_COLORS[normalized]) return CLASS_COLORS[normalized];
-        return FALLBACK_COLORS[hashString(normalized) % FALLBACK_COLORS.length];
       }
 
       function hexToRgba(hex, alpha) {

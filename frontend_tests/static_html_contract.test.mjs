@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 
 function readHtml(path) {
   return readFileSync(path, "utf8");
@@ -44,29 +45,13 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(html.includes("layout-show-bbox-btn"), true);
   assert.equal(html.includes('id="magnifier-toggle-btn"'), true);
   assert.equal(html.includes('"/static/js/magnifier.mjs"'), true);
+  assert.equal(html.includes('"/static/js/layout_class_catalog.mjs"'), true);
 });
 
-test("layout review HTML class catalog excludes title class", () => {
-  const html = readHtml("app/static/layouts.html");
-
-  const knownClassesMatch = html.match(/const KNOWN_LAYOUT_CLASSES = \[([\s\S]*?)\];/);
-  assert.ok(knownClassesMatch, "KNOWN_LAYOUT_CLASSES block is missing");
-  assert.equal(knownClassesMatch[1].includes('"title"'), false);
-  assert.equal(knownClassesMatch[1].includes('"list_item"'), true);
-
-  const classColorsMatch = html.match(/const CLASS_COLORS = \{([\s\S]*?)\};/);
-  assert.ok(classColorsMatch, "CLASS_COLORS block is missing");
-  assert.equal(/\btitle\s*:/.test(classColorsMatch[1]), false);
-});
-
-test("layout review class dropdown contract maps to known classes without title", () => {
-  const html = readHtml("app/static/layouts.html");
-  const knownClassesMatch = html.match(/const KNOWN_LAYOUT_CLASSES = \[([\s\S]*?)\];/);
-  assert.ok(knownClassesMatch, "KNOWN_LAYOUT_CLASSES block is missing");
-  const classNames = Array.from(
-    knownClassesMatch[1].matchAll(/"([^"]+)"/g),
-    (match) => String(match[1]),
-  );
+test("layout class catalog module exports stable class policy", async () => {
+  const moduleUrl = pathToFileURL(`${process.cwd()}/app/static/js/layout_class_catalog.mjs`).href;
+  const catalog = await import(moduleUrl);
+  const classNames = Array.from(catalog.KNOWN_LAYOUT_CLASSES || []);
   assert.equal(classNames.includes("title"), false);
   assert.equal(classNames.includes("list_item"), true);
   assert.deepEqual(
@@ -84,6 +69,12 @@ test("layout review class dropdown contract maps to known classes without title"
       "page_footer",
     ],
   );
+  assert.equal(catalog.CAPTION_LAYOUT_CLASS, "caption");
+  assert.deepEqual(Array.from(catalog.CAPTION_TARGET_CLASSES || []), ["table", "picture", "formula"]);
+  assert.equal(typeof catalog.colorForClass, "function");
+  assert.equal(catalog.colorForClass("section_header"), "#355fa8");
+  assert.equal(catalog.normalizeClassName(" List Item "), "list_item");
+  assert.equal(catalog.formatClassLabel("section_header"), "Section header");
 });
 
 test("ocr review HTML keeps extraction/editor integration hooks", () => {
@@ -107,11 +98,10 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
   assert.equal(html.includes("`/api/pages/${state.pageId}/ocr/reextract`"), true);
   assert.equal(html.includes("renderSourceCaptionBindingLines"), true);
   assert.equal(html.includes('"./js/magnifier.mjs"'), true);
+  assert.equal(html.includes('"./js/layout_class_catalog.mjs"'), true);
 });
 
-test("ocr review HTML class colors exclude title class", () => {
+test("ocr review HTML no longer hardcodes class color map", () => {
   const html = readHtml("app/static/ocr_review.html");
-  const classColorsMatch = html.match(/const CLASS_COLORS = \{([\s\S]*?)\};/);
-  assert.ok(classColorsMatch, "CLASS_COLORS block is missing");
-  assert.equal(/\btitle\s*:/.test(classColorsMatch[1]), false);
+  assert.equal(html.includes("const CLASS_COLORS = {"), false);
 });

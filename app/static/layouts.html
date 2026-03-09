@@ -1189,6 +1189,14 @@
       import {
         createImageMagnifier,
       } from "/static/js/magnifier.mjs";
+      import {
+        KNOWN_LAYOUT_CLASSES,
+        colorForClass,
+        formatClassLabel,
+        normalizeClassName,
+        isCaptionClassName,
+        isCaptionTargetClassName,
+      } from "/static/js/layout_class_catalog.mjs";
 
       const params = new URLSearchParams(window.location.search);
       const pageId = Number(params.get("page_id"));
@@ -1760,57 +1768,6 @@
         state.captionBindingsByCaptionId = {};
         removeStorage(draftStorageKey());
         updateReviewUiState();
-      }
-
-      const CLASS_COLORS = {
-        section_header: "#355fa8",
-        text: "#4f5d69",
-        list_item: "#2f6f5f",
-        table: "#6f7d2f",
-        picture: "#8a6831",
-        caption: "#496f98",
-        footnote: "#7a6030",
-        formula: "#7b5a95",
-        page_header: "#3f6e69",
-        page_footer: "#8b5949",
-      };
-
-      const KNOWN_LAYOUT_CLASSES = [
-        "section_header",
-        "text",
-        "list_item",
-        "table",
-        "picture",
-        "caption",
-        "footnote",
-        "formula",
-        "page_header",
-        "page_footer",
-      ];
-
-      const CAPTION_LAYOUT_CLASS = "caption";
-      const CAPTION_TARGET_CLASSES = new Set(["table", "picture", "formula"]);
-
-      const FALLBACK_COLORS = ["#4e6f8f", "#7c5f90", "#3f7b69", "#8d6a3b", "#82605b", "#537987", "#6e6b3f"];
-
-      function hashString(value) {
-        let hash = 0;
-        for (let i = 0; i < value.length; i += 1) {
-          hash = (hash << 5) - hash + value.charCodeAt(i);
-          hash |= 0;
-        }
-        return Math.abs(hash);
-      }
-
-      function colorForClass(className) {
-        const normalized = String(className || "")
-          .trim()
-          .toLowerCase()
-          .replace(/[-/\s]+/g, "_");
-        if (CLASS_COLORS[normalized]) {
-          return CLASS_COLORS[normalized];
-        }
-        return FALLBACK_COLORS[hashString(normalized) % FALLBACK_COLORS.length];
       }
 
       function hexToRgba(hex, alpha) {
@@ -2671,29 +2628,11 @@
         applyActivePointHighlightStyles();
       }
 
-      function formatClassLabel(className) {
-        const normalized = String(className || "")
-          .replace(/_/g, " ")
-          .trim()
-          .toLowerCase();
-        if (!normalized) {
-          return "";
-        }
-        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
-      }
-
       function formatStatusLabel(status) {
         return String(status || "")
           .replace(/_/g, " ")
           .trim()
           .toUpperCase();
-      }
-
-      function normalizeClassName(className) {
-        return String(className || "")
-          .trim()
-          .toLowerCase()
-          .replace(/[-/\s]+/g, "_");
       }
 
       function normalizeLayoutIdList(values) {
@@ -2712,11 +2651,11 @@
       }
 
       function isCaptionClass(className) {
-        return normalizeClassName(className) === CAPTION_LAYOUT_CLASS;
+        return isCaptionClassName(className);
       }
 
       function isCaptionTargetClass(className) {
-        return CAPTION_TARGET_CLASSES.has(normalizeClassName(className));
+        return isCaptionTargetClassName(className);
       }
 
       function captionTargetIds(captionLayoutId) {

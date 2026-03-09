@@ -196,6 +196,113 @@ class FinalExportRequest(BaseModel):
     confirm: bool = False
 
 
+def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
+    emit_event(
+        stage="layout_detect",
+        event_type="manual_detect_started",
+        page_id=page_id,
+        message="Manual layout detection started.",
+    )
+    try:
+        result = detect_layouts_for_page(
+            page_id,
+            replace_existing=payload.replace_existing,
+            confidence_threshold=payload.confidence_threshold,
+            iou_threshold=payload.iou_threshold,
+            image_size=payload.image_size,
+            max_detections=payload.max_detections,
+            agnostic_nms=payload.agnostic_nms,
+        )
+    except ValueError as error:
+        emit_event(
+            stage="layout_detect",
+            event_type="manual_detect_failed",
+            page_id=page_id,
+            message=f"Manual layout detection failed: {error}",
+        )
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    emit_event(
+        stage="layout_detect",
+        event_type="manual_detect_completed",
+        page_id=page_id,
+        message=f"Manual layout detection completed with {result['created']} regions.",
+        data={"created": result["created"], "class_counts": result["class_counts"]},
+    )
+    return result
+
+
+def _run_manual_ocr_reextract(page_id: int, params: ReextractOcrRequest) -> dict[str, object]:
+    page = get_page(page_id)
+    if page is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
+        if page_row is None:
+            raise HTTPException(status_code=404, detail="Page not found.")
+        if bool(page_row.is_missing):
+            raise HTTPException(status_code=400, detail="Page is marked as missing.")
+
+        current_status = str(page_row.status)
+        if current_status not in {"layout_reviewed", "ocr_done", "ocr_reviewed", "ocr_failed", "ocr_extracting"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Page status must allow OCR extraction (got {current_status}).",
+            )
+
+        page_row.status = "ocr_extracting"
+        page_row.updated_at = _utc_now()
+
+    emit_event(
+        stage="ocr_extract",
+        event_type="job_started",
+        page_id=page_id,
+        message="Manual OCR reextraction started.",
+        data={
+            "trigger": "manual_reextract",
+            "layout_ids": params.layout_ids,
+            "temperature": params.temperature,
+            "max_retries_per_layout": params.max_retries_per_layout,
+            "prompt_template": params.prompt_template,
+        },
+    )
+    try:
+        result = extract_ocr_for_page(
+            page_id,
+            layout_ids=params.layout_ids,
+            prompt_template=params.prompt_template,
+            temperature=params.temperature,
+            max_retries_per_layout=params.max_retries_per_layout,
+        )
+    except Exception as error:
+        with get_session() as session:
+            page_row = session.get(Page, page_id)
+            if page_row is not None and not bool(page_row.is_missing):
+                page_row.status = "ocr_failed"
+                page_row.updated_at = _utc_now()
+        emit_event(
+            stage="ocr_extract",
+            event_type="job_failed",
+            page_id=page_id,
+            message=f"Manual OCR reextraction failed: {error}",
+            data={"trigger": "manual_reextract"},
+        )
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+    emit_event(
+        stage="ocr_extract",
+        event_type="job_completed",
+        page_id=page_id,
+        message=(
+            f"Manual OCR reextraction completed. "
+            f"Extracted {result['extracted_count']}, skipped {result['skipped_count']}, "
+            f"Gemini requests {result['requests_count']}."
+        ),
+        data={"trigger": "manual_reextract", "result": result},
+    )
+    return result
+
+
 @app.get("/")
 def root() -> FileResponse:
     return FileResponse("app/static/index.html")
@@ -648,38 +755,7 @@ def next_ocr_review_page(page_id: int) -> dict[str, object]:
 
 @app.post("/api/pages/{page_id}/layouts/detect")
 def detect_page_layouts(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
-    emit_event(
-        stage="layout_detect",
-        event_type="manual_detect_started",
-        page_id=page_id,
-        message="Manual layout detection started.",
-    )
-    try:
-        result = detect_layouts_for_page(
-            page_id,
-            replace_existing=payload.replace_existing,
-            confidence_threshold=payload.confidence_threshold,
-            iou_threshold=payload.iou_threshold,
-            image_size=payload.image_size,
-            max_detections=payload.max_detections,
-            agnostic_nms=payload.agnostic_nms,
-        )
-    except ValueError as error:
-        emit_event(
-            stage="layout_detect",
-            event_type="manual_detect_failed",
-            page_id=page_id,
-            message=f"Manual layout detection failed: {error}",
-        )
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    emit_event(
-        stage="layout_detect",
-        event_type="manual_detect_completed",
-        page_id=page_id,
-        message=f"Manual layout detection completed with {result['created']} regions.",
-        data={"created": result["created"], "class_counts": result["class_counts"]},
-    )
-    return result
+    return _run_manual_layout_detection(page_id, payload)
 
 
 @app.post("/api/pages/{page_id}/layouts")
@@ -862,77 +938,8 @@ def complete_ocr_review(page_id: int) -> dict[str, object]:
 
 @app.post("/api/pages/{page_id}/ocr/reextract")
 def reextract_ocr(page_id: int, payload: ReextractOcrRequest | None = None) -> dict[str, object]:
-    page = get_page(page_id)
-    if page is None:
-        raise HTTPException(status_code=404, detail="Page not found.")
-
     params = payload or ReextractOcrRequest()
-
-    with get_session() as session:
-        page_row = session.get(Page, page_id)
-        if page_row is None:
-            raise HTTPException(status_code=404, detail="Page not found.")
-        if bool(page_row.is_missing):
-            raise HTTPException(status_code=400, detail="Page is marked as missing.")
-
-        current_status = str(page_row.status)
-        if current_status not in {"layout_reviewed", "ocr_done", "ocr_reviewed", "ocr_failed", "ocr_extracting"}:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Page status must allow OCR extraction (got {current_status}).",
-            )
-
-        page_row.status = "ocr_extracting"
-        page_row.updated_at = _utc_now()
-
-    emit_event(
-        stage="ocr_extract",
-        event_type="job_started",
-        page_id=page_id,
-        message="Manual OCR reextraction started.",
-        data={
-            "trigger": "manual_reextract",
-            "layout_ids": params.layout_ids,
-            "temperature": params.temperature,
-            "max_retries_per_layout": params.max_retries_per_layout,
-            "prompt_template": params.prompt_template,
-        },
-    )
-    try:
-        result = extract_ocr_for_page(
-            page_id,
-            layout_ids=params.layout_ids,
-            prompt_template=params.prompt_template,
-            temperature=params.temperature,
-            max_retries_per_layout=params.max_retries_per_layout,
-        )
-    except Exception as error:
-        with get_session() as session:
-            page_row = session.get(Page, page_id)
-            if page_row is not None and not bool(page_row.is_missing):
-                page_row.status = "ocr_failed"
-                page_row.updated_at = _utc_now()
-        emit_event(
-            stage="ocr_extract",
-            event_type="job_failed",
-            page_id=page_id,
-            message=f"Manual OCR reextraction failed: {error}",
-            data={"trigger": "manual_reextract"},
-        )
-        raise HTTPException(status_code=400, detail=str(error)) from error
-
-    emit_event(
-        stage="ocr_extract",
-        event_type="job_completed",
-        page_id=page_id,
-        message=(
-            f"Manual OCR reextraction completed. "
-            f"Extracted {result['extracted_count']}, skipped {result['skipped_count']}, "
-            f"Gemini requests {result['requests_count']}."
-        ),
-        data={"trigger": "manual_reextract", "result": result},
-    )
-    return result
+    return _run_manual_ocr_reextract(page_id, params)
 
 
 @app.post("/api/final/export")

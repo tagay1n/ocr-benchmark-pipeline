@@ -14,6 +14,13 @@ from sqlalchemy import delete, select
 
 from .config import settings
 from .db import get_session
+from .layout_classes import (
+    HTML_LAYOUT_CLASSES as HTML_CLASSES,
+    LATEX_LAYOUT_CLASSES as LATEX_CLASSES,
+    MARKDOWN_LAYOUT_CLASSES as MARKDOWN_CLASSES,
+    SKIP_LAYOUT_CLASSES as SKIP_CLASSES,
+    normalize_class_name,
+)
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import CaptionBinding, Layout, OcrOutput, Page
 
@@ -29,31 +36,12 @@ DEFAULT_PROMPT_TEMPLATE = (
     "{format_rule}"
 )
 
-MARKDOWN_CLASSES = {
-    "caption",
-    "footnote",
-    "list_item",
-    "page_footer",
-    "page_header",
-    "section_header",
-    "text",
-}
-HTML_CLASSES = {"table"}
-LATEX_CLASSES = {"formula"}
-SKIP_CLASSES = {"picture"}
-
-
 class GeminiQuotaExhaustedError(RuntimeError):
     pass
 
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _normalize_class_name(value: str) -> str:
-    normalized = value.strip().lower().replace("-", "_").replace("/", "_")
-    return "_".join(normalized.split())
 
 
 def _key_alias(api_key: str) -> str:
@@ -196,7 +184,7 @@ def _is_quota_error(message: str) -> bool:
 def _prompt_for_layout(
     layout: dict[str, Any], caption_targets: list[str], *, prompt_template: str
 ) -> tuple[str, str]:
-    class_name = _normalize_class_name(str(layout["class_name"]))
+    class_name = normalize_class_name(str(layout["class_name"]))
     if class_name in MARKDOWN_CLASSES:
         output_format = "markdown"
     elif class_name in HTML_CLASSES:
@@ -296,14 +284,14 @@ def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
     for caption_layout_id_raw, target_layout_id_raw, target_class_name_raw in binding_rows:
         caption_layout_id = int(caption_layout_id_raw)
         target_layout_id = int(target_layout_id_raw)
-        target_class_name = _normalize_class_name(str(target_class_name_raw))
+        target_class_name = normalize_class_name(str(target_class_name_raw))
         label = f"{target_class_name} [id:{target_layout_id}]"
         caption_targets_by_layout_id.setdefault(caption_layout_id, []).append(label)
 
     return [
         {
             "id": int(layout.id),
-            "class_name": _normalize_class_name(str(layout.class_name)),
+            "class_name": normalize_class_name(str(layout.class_name)),
             "bbox": {
                 "x1": float(layout.x1),
                 "y1": float(layout.y1),

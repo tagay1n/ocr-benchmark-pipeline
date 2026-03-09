@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -37,7 +37,11 @@ class DuplicateFile(Base):
 
 class Layout(Base):
     __tablename__ = "layouts"
-    __table_args__ = (Index("idx_layouts_page_order", "page_id", "reading_order"),)
+    __table_args__ = (
+        Index("idx_layouts_page_order", "page_id", "reading_order"),
+        UniqueConstraint("page_id", "reading_order", name="uq_layouts_page_order"),
+        CheckConstraint("reading_order >= 1", name="ck_layouts_reading_order_positive"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), nullable=False)
