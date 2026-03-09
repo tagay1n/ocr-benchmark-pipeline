@@ -14,7 +14,6 @@
         --accent: #0b7a75;
         --danger: #a52222;
         --border: #e0dccf;
-        --actions-col-size: 7ch;
         --class-col-size: 16ch;
       }
 
@@ -286,19 +285,20 @@
 
       .row-actions {
         display: inline-flex;
-        flex-direction: column;
-        align-items: stretch;
-        gap: 4px;
-        width: 100%;
+        flex-direction: row;
+        align-items: center;
+        gap: 3px;
+        width: auto;
       }
 
       .icon-btn {
-        width: 100%;
-        min-width: 0;
-        height: var(--actions-col-size);
+        width: 22px;
+        min-width: 22px;
+        height: 22px;
         padding: 0;
         line-height: 1;
-        font-size: 16px;
+        font-size: 12px;
+        border-radius: 7px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -356,12 +356,6 @@
         gap: 8px;
       }
 
-      .bbox-toggle-btn {
-        min-width: 54px;
-        height: 36px;
-        padding: 0 10px;
-      }
-
       .layouts-add-btn {
         width: 36px;
         height: 36px;
@@ -416,8 +410,10 @@
       }
 
       .layout-actions-col {
-        width: var(--actions-col-size);
-        min-width: var(--actions-col-size);
+        width: auto;
+        min-width: 0;
+        text-align: right;
+        vertical-align: top;
       }
 
       .layout-order-value {
@@ -429,15 +425,15 @@
         font-feature-settings: "tnum";
       }
 
-      .layout-bbox-cell {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
+      .layout-bbox-editor {
+        display: none;
+        margin-top: 4px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px 8px;
       }
 
-      .layouts-panel table.hide-bbox-column .layout-bbox-col,
-      .layouts-panel table.hide-bbox-column .layout-bbox-cell {
-        display: none;
+      .layout-bbox-editor.is-open {
+        display: grid;
       }
 
       .bbox-field {
@@ -1009,7 +1005,6 @@
           <div class="layouts-header">
             <h2>Layouts</h2>
             <div class="layouts-header-tools">
-              <button id="bbox-toggle-btn" class="secondary bbox-toggle-btn" type="button" aria-pressed="false" title="Show bbox column">bbox</button>
               <button id="add-btn" class="secondary layouts-add-btn" type="button" aria-label="Add box" title="Add box">
                 <svg class="layouts-add-btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                   <path d="M12 5v14"></path>
@@ -1018,13 +1013,12 @@
               </button>
             </div>
           </div>
-          <table id="layouts-table" class="hide-bbox-column">
+          <table>
               <thead>
                 <tr>
                   <th class="layout-order-col" aria-label="Order"></th>
                   <th class="layout-class-col">Class</th>
-                  <th class="layout-bbox-col">bbox</th>
-                  <th class="layout-actions-col">Actions</th>
+                  <th class="layout-actions-col" aria-label="Actions"></th>
                 </tr>
               </thead>
             <tbody id="layouts-body"></tbody>
@@ -1102,7 +1096,6 @@
         layoutDraftPrefix: "layout.draft.page",
         zoomMode: "layout.zoom.mode",
         zoomPercent: "layout.zoom.percent",
-        showBboxColumn: "layout.show_bbox_column",
         reviewNavHistory: "layout.review_nav.history",
         reviewNavIndex: "layout.review_nav.index",
       };
@@ -1139,9 +1132,7 @@
       const drawLayer = document.getElementById("draw-layer");
       const drawPreviewBox = document.getElementById("draw-preview-box");
       const statusLine = document.getElementById("status-line");
-      const layoutsTable = document.getElementById("layouts-table");
       const layoutsBody = document.getElementById("layouts-body");
-      const bboxToggleBtn = document.getElementById("bbox-toggle-btn");
       const reviewStateBadge = document.getElementById("review-state-badge");
       const zoomTrigger = document.getElementById("zoom-trigger");
       const zoomMenu = document.getElementById("zoom-menu");
@@ -1174,7 +1165,7 @@
         selectedLayoutId: null,
         activeBindingCaptionId: null,
         activePointHighlight: null,
-        showBboxColumn: false,
+        expandedBboxLayoutId: null,
         zoomMode: "automatic",
         zoomPercent: 100,
         zoomAppliedPercent: 100,
@@ -1201,21 +1192,6 @@
         state.zoomAppliedPercent = 100;
         setZoomInputFromApplied();
         updateZoomMenuSelection();
-      }
-
-      function updateBboxColumnVisibility() {
-        if (!layoutsTable || !bboxToggleBtn) {
-          return;
-        }
-        const show = Boolean(state.showBboxColumn);
-        layoutsTable.classList.toggle("hide-bbox-column", !show);
-        bboxToggleBtn.setAttribute("aria-pressed", show ? "true" : "false");
-        bboxToggleBtn.title = show ? "Hide bbox column" : "Show bbox column";
-      }
-
-      function applyStoredLayoutPanelSettings() {
-        state.showBboxColumn = readStorage(STORAGE_KEYS.showBboxColumn) === "1";
-        updateBboxColumnVisibility();
       }
 
       function closeZoomMenu() {
@@ -1287,6 +1263,7 @@
         setZoomInputFromApplied();
         updateZoomMenuSelection();
         requestAnimationFrame(() => {
+          renderOverlay();
           centerImageInViewport();
         });
       }
@@ -1813,6 +1790,17 @@
         const exists = state.layouts.some((row) => Number(row.id) === Number(layoutId));
         if (!exists) {
           state.activePointHighlight = null;
+        }
+      }
+
+      function clearExpandedBboxIfMissing() {
+        if (!Number.isInteger(Number(state.expandedBboxLayoutId))) {
+          state.expandedBboxLayoutId = null;
+          return;
+        }
+        const exists = state.layouts.some((row) => Number(row.id) === Number(state.expandedBboxLayoutId));
+        if (!exists) {
+          state.expandedBboxLayoutId = null;
         }
       }
 
@@ -2682,9 +2670,14 @@
 
               const chipLabel = document.createElement("span");
               chipLabel.className = "caption-bind-chip-label";
-              chipLabel.textContent = targetLayout
-                ? `${formatClassLabel(targetLayout.class_name)} #${targetId}`
-                : `Missing #${targetId}`;
+              if (targetLayout) {
+                const targetOrder = Number(targetLayout.reading_order);
+                const positionLabel =
+                  Number.isInteger(targetOrder) && targetOrder > 0 ? String(targetOrder) : "?";
+                chipLabel.textContent = `${formatClassLabel(targetLayout.class_name)} ${positionLabel}`;
+              } else {
+                chipLabel.textContent = "Missing";
+              }
               chip.appendChild(chipLabel);
 
               const removeBtn = document.createElement("button");
@@ -2713,8 +2706,6 @@
         }
         tr.appendChild(classTd);
 
-        const bboxTd = document.createElement("td");
-        bboxTd.className = "layout-bbox-cell";
         const bboxSpec = [
           ["x1", "x1"],
           ["y1", "y1"],
@@ -2738,10 +2729,15 @@
           field.appendChild(input);
           return [key, input, field];
         });
-        for (const [, , field] of bboxFields) {
-          bboxTd.appendChild(field);
+        const bboxEditor = document.createElement("div");
+        bboxEditor.className = "layout-bbox-editor";
+        if (Number(state.expandedBboxLayoutId) === layoutId) {
+          bboxEditor.classList.add("is-open");
         }
-        tr.appendChild(bboxTd);
+        for (const [, , field] of bboxFields) {
+          bboxEditor.appendChild(field);
+        }
+        classTd.appendChild(bboxEditor);
 
         for (const [key, input] of bboxFields) {
           const pointHandle = pointHandleForCoordinateKey(key);
@@ -2857,6 +2853,41 @@
         const actionsWrap = document.createElement("div");
         actionsWrap.className = "row-actions";
 
+        const showBboxBtn = document.createElement("button");
+        showBboxBtn.className = "secondary icon-btn layout-show-bbox-btn";
+        showBboxBtn.type = "button";
+        showBboxBtn.title = "Toggle bbox values";
+        showBboxBtn.setAttribute("aria-label", "Toggle bbox values");
+        showBboxBtn.textContent = "□";
+        showBboxBtn.addEventListener("click", () => {
+          const shouldExpand = Number(state.expandedBboxLayoutId) !== layoutId;
+          state.expandedBboxLayoutId = shouldExpand ? layoutId : null;
+
+          if (!shouldExpand) {
+            const activeEl = document.activeElement;
+            if (activeEl instanceof HTMLElement && activeEl.classList.contains("layout-bbox-input")) {
+              activeEl.blur();
+            }
+            state.activePointHighlight = null;
+            applyActivePointHighlightStyles();
+            renderLayouts();
+            return;
+          }
+
+          renderLayouts();
+          selectLayout(layoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
+          requestAnimationFrame(() => {
+            const row = layoutsBody.querySelector(`tr[data-layout-id="${layoutId}"]`);
+            const firstBboxInput = row?.querySelector(".layout-bbox-editor.is-open .layout-bbox-input");
+            if (!(firstBboxInput instanceof HTMLInputElement)) {
+              return;
+            }
+            firstBboxInput.focus();
+            firstBboxInput.select();
+          });
+        });
+        actionsWrap.appendChild(showBboxBtn);
+
         const restoreBtn = document.createElement("button");
         restoreBtn.className = "secondary icon-btn";
         restoreBtn.type = "button";
@@ -2935,6 +2966,7 @@
         sanitizeCaptionBindingsInPlace();
         clearSelectedLayoutIfMissing();
         clearActivePointHighlightIfMissing();
+        clearExpandedBboxIfMissing();
         layoutsBody.innerHTML = "";
         for (const layout of state.layouts) {
           layoutsBody.appendChild(layoutRow(layout));
@@ -3347,11 +3379,6 @@
         }
         toggleDrawMode();
       });
-      bboxToggleBtn.addEventListener("click", () => {
-        state.showBboxColumn = !state.showBboxColumn;
-        writeStorage(STORAGE_KEYS.showBboxColumn, state.showBboxColumn ? "1" : "0");
-        updateBboxColumnVisibility();
-      });
       reviewBtn.addEventListener("click", markReviewed);
       historyBackBtn.addEventListener("click", () => {
         const targetPageId = previousHistoryPageId(state.reviewHistory, state.reviewHistoryIndex);
@@ -3552,7 +3579,6 @@
         try {
           setDrawModeActive(false);
           applyStoredZoomSettings();
-          applyStoredLayoutPanelSettings();
           loadReviewHistory();
           registerCurrentPageInHistory();
           loadLayoutDraftState();

@@ -31,13 +31,12 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(html.includes('id="zoom-percent-input"'), true);
   assert.equal(html.includes('id="zoom-trigger"'), true);
   assert.equal(html.includes('id="zoom-menu"'), true);
-  assert.equal(html.includes('id="bbox-toggle-btn"'), true);
-  assert.equal(html.includes('id="layouts-table"'), true);
-  assert.equal(html.includes("hide-bbox-column"), true);
+  assert.equal(html.includes("layout-bbox-editor"), true);
   assert.equal(html.includes("`/api/pages/${pageId}/layouts/detect`"), true);
   assert.equal(html.includes('bindingLinesLayer.id = "bind-lines-layer"'), true);
   assert.equal(html.includes("box-bind-btn"), true);
   assert.equal(html.includes("caption-bind-chip-remove"), true);
+  assert.equal(html.includes("layout-show-bbox-btn"), true);
 });
 
 test("ocr review HTML keeps extraction/editor integration hooks", () => {
