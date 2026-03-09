@@ -18,7 +18,8 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Pipeline actions: `Scan -> Review layouts -> Review OCR -> Export`.
   - Live backend activity panel (SSE stream).
   - Duplicate-file warnings.
-  - Sortable indexed-images table (default: `Added time` newest first).
+  - Sortable + paginated indexed-images table (default: `Added time` newest first).
+  - Pagination controls with page size `25/50/100`.
   - Per-row actions: open Layout/OCR review and remove an image (with confirmation).
 - Layout review (`/static/layouts.html?page_id=<id>`):
   - Editable class, reading order, bbox.
@@ -27,12 +28,12 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Overlapping bbox borders are highlighted with striped warning segments.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with layout overlays.
   - Caption binding mode from caption bbox (`Bind`), with visible arrows to table/picture/formula targets and explicit unbind controls.
-  - `Detect again` modal with model params and in-flight busy state.
+  - `Detect` modal with model params and in-flight busy state.
 - OCR review (`/static/ocr_review.html?page_id=<id>`):
   - Source + reconstructed + extracted-content panels.
   - Draft editing and restore per OCR item.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with OCR bbox overlays.
-  - `Detect again` modal with editable prompt template + generation params.
+  - `Detect` modal with editable prompt template + generation params.
   - Manual detect is always allowed regardless of auto-mode toggles.
 
 ## Configuration
@@ -103,7 +104,8 @@ node --test frontend_tests/*.test.mjs
 
 - `POST /api/discovery/scan`
 - `POST /api/state/wipe`
-- `GET /api/pages`
+- `GET /api/pages` (supports `limit`, `cursor`, `sort`, `dir`)
+- `GET /api/pages/summary`
 - `DELETE /api/pages/{page_id}`
 - `GET /api/pages/{page_id}/layouts`
 - `POST /api/pages/{page_id}/layouts/detect`

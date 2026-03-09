@@ -26,7 +26,7 @@ Use only these living docs:
 ## Pipeline Invariants
 
 - Auto toggles affect only automatic pipeline triggers.
-- Manual actions (`Detect again`, reextract, review submit) must remain available unless a local in-flight operation is active.
+- Manual actions (`Detect`, reextract, review submit) must remain available unless a local in-flight operation is active.
 - Reviewer edits are draft-first and applied explicitly on review confirmation.
 
 ## UI/UX Invariants

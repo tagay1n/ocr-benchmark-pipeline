@@ -1506,7 +1506,7 @@
           reextractBtn.disabled = true;
           return;
         }
-        reextractBtn.textContent = "Detect again";
+        reextractBtn.textContent = "Detect";
         reextractBtn.disabled = state.reviewSubmitInProgress || !Number.isInteger(state.pageId) || state.pageId <= 0;
       }
 
@@ -1679,7 +1679,7 @@
           .map((checkbox) => Number(checkbox.value))
           .filter((value) => Number.isInteger(value) && value > 0);
         if (layoutIds.length === 0) {
-          throw new Error("Select at least one layout to detect again.");
+          throw new Error("Select at least one layout to detect.");
         }
 
         return {

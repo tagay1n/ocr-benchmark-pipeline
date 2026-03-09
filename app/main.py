@@ -21,6 +21,7 @@ from .api import discovery_router, pipeline_router, review_router
 from .api.discovery import (
     list_duplicates,
     list_pages,
+    pages_summary,
     page_details,
     page_image,
     put_runtime_options,

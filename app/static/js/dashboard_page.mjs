@@ -2,7 +2,6 @@ import {
   DEFAULT_DASHBOARD_SORT,
   nextDashboardSortState,
   normalizeDashboardSortState,
-  sortDashboardPages,
 } from "./dashboard_sorting_utils.mjs";
 import {
   inferPageStatusFromPipelineEvent,
@@ -10,7 +9,6 @@ import {
 } from "./pipeline_event_constants.mjs";
 import { fetchJson } from "./api_client.mjs";
 import {
-  findNextPageForStatus,
   normalizeNextPagePayload,
 } from "./dashboard_review_actions_utils.mjs";
 import {
@@ -23,6 +21,7 @@ const STORAGE_KEYS = {
   pipelinePanelExpanded: "dashboard.pipeline_panel_expanded",
   pagesSortColumn: "dashboard.pages_sort.column",
   pagesSortDirection: "dashboard.pages_sort.direction",
+  pagesPageSize: "dashboard.pages.page_size",
 };
 
 const scanBtn = document.getElementById("scan-btn");
@@ -42,6 +41,10 @@ const removeCancelBtn = document.getElementById("remove-cancel-btn");
 const removeConfirmBtn = document.getElementById("remove-confirm-btn");
 
 const pagesBody = document.getElementById("pages-body");
+const pagesMeta = document.getElementById("pages-meta");
+const pagesPrevBtn = document.getElementById("pages-prev-btn");
+const pagesNextBtn = document.getElementById("pages-next-btn");
+const pagesSizeSelect = document.getElementById("pages-size-select");
 const duplicatePanel = document.getElementById("duplicate-panel");
 const duplicateList = document.getElementById("duplicate-list");
 const pipelineToggle = document.getElementById("pipeline-toggle");
@@ -56,9 +59,18 @@ const pagesSortButtons = Array.from(
 
 let currentPages = [];
 let pagesSortState = { ...DEFAULT_DASHBOARD_SORT };
+let pagesPageSize = 50;
+let pagesTotalCount = 0;
+let pagesHasMore = false;
+let pagesNextCursor = null;
+let pagesCursorHistory = [null];
+let pagesCursorIndex = 0;
+let pagesLoading = false;
 let pipelinePanelExpanded = false;
 let activityStream = null;
 let streamReconnectTimer = null;
+let streamRefreshTimer = null;
+let streamRefreshInFlight = false;
 let lastProcessedEventId = 0;
 let pendingRemovePageId = null;
 let runtimeOptions = {
@@ -145,6 +157,38 @@ function persistPagesSortState() {
   writeStorage(STORAGE_KEYS.pagesSortDirection, pagesSortState.direction);
 }
 
+function loadPagesPageSize() {
+  const stored = Number(readStorage(STORAGE_KEYS.pagesPageSize));
+  if ([25, 50, 100].includes(stored)) {
+    pagesPageSize = stored;
+  } else {
+    pagesPageSize = 50;
+  }
+}
+
+function persistPagesPageSize() {
+  writeStorage(STORAGE_KEYS.pagesPageSize, String(pagesPageSize));
+}
+
+function pagesRequestUrl(cursor = null) {
+  const params = new URLSearchParams();
+  params.set("limit", String(pagesPageSize));
+  params.set("sort", pagesSortState.columnKey);
+  params.set("dir", pagesSortState.direction);
+  if (cursor) {
+    params.set("cursor", String(cursor));
+  }
+  return `/api/pages?${params.toString()}`;
+}
+
+function resetPagesPagination() {
+  pagesCursorHistory = [null];
+  pagesCursorIndex = 0;
+  pagesHasMore = false;
+  pagesNextCursor = null;
+  pagesTotalCount = 0;
+}
+
 function updatePagesSortControls() {
   for (const button of pagesSortButtons) {
     if (!(button instanceof HTMLButtonElement)) {
@@ -176,6 +220,15 @@ function updatePagesSortControls() {
         : "↕";
     }
   }
+}
+
+function updatePagesPaginationControls() {
+  const start = pagesTotalCount === 0 ? 0 : pagesCursorIndex * pagesPageSize + 1;
+  const end = pagesTotalCount === 0 ? 0 : start + currentPages.length - 1;
+  pagesMeta.textContent = `Showing ${start}-${end} of ${pagesTotalCount}`;
+  pagesPrevBtn.disabled = pagesLoading || pagesCursorIndex <= 0;
+  pagesNextBtn.disabled = pagesLoading || !pagesHasMore || !pagesNextCursor;
+  pagesSizeSelect.disabled = pagesLoading;
 }
 
 function applyRuntimeOptions(options) {
@@ -250,17 +303,16 @@ function loadThumbnail(slot) {
 }
 
 function renderPages(pages) {
-  const sortedPages = sortDashboardPages(pages, pagesSortState);
-  currentPages = sortedPages.map((page) => ({ ...page }));
   pagesBody.innerHTML = "";
-  if (sortedPages.length === 0) {
+  const visiblePages = Array.isArray(pages) ? pages : [];
+  if (visiblePages.length === 0) {
     const tr = document.createElement("tr");
     tr.innerHTML = '<td class="empty-row" colspan="6">No indexed documents found yet.</td>';
     pagesBody.appendChild(tr);
     return;
   }
 
-  for (const page of sortedPages) {
+  for (const page of visiblePages) {
     const tr = document.createElement("tr");
     tr.dataset.pageId = String(page.id);
     tr.innerHTML = `
@@ -320,6 +372,41 @@ function renderPages(pages) {
   }
 }
 
+function applyPagesPayload(pagesPayload) {
+  currentPages = Array.isArray(pagesPayload?.pages)
+    ? pagesPayload.pages.map((page) => ({ ...page }))
+    : [];
+  pagesTotalCount = Number.isInteger(pagesPayload?.total_count)
+    ? Number(pagesPayload.total_count)
+    : currentPages.length;
+  pagesHasMore = Boolean(pagesPayload?.has_more);
+  pagesNextCursor = pagesPayload?.next_cursor ? String(pagesPayload.next_cursor) : null;
+  renderPages(currentPages);
+  updatePagesPaginationControls();
+}
+
+async function loadCurrentPagesSlice({ allowAutoBack = true } = {}) {
+  const cursor = pagesCursorHistory[pagesCursorIndex] || null;
+  pagesLoading = true;
+  updatePagesPaginationControls();
+  try {
+    const payload = await fetchJson(pagesRequestUrl(cursor));
+    applyPagesPayload(payload);
+    if (
+      allowAutoBack &&
+      pagesTotalCount > 0 &&
+      currentPages.length === 0 &&
+      pagesCursorIndex > 0
+    ) {
+      pagesCursorIndex -= 1;
+      return await loadCurrentPagesSlice({ allowAutoBack: false });
+    }
+  } finally {
+    pagesLoading = false;
+    updatePagesPaginationControls();
+  }
+}
+
 function applyReviewActionAvailability(actionKey, nextPageId, nextPageRelPath) {
   const action = REVIEW_ACTIONS[actionKey];
   const state = reviewActionState[actionKey];
@@ -338,19 +425,20 @@ function applyReviewActionAvailability(actionKey, nextPageId, nextPageRelPath) {
   action.button.title = action.noItemsTitle;
 }
 
-function syncReviewActionFromPages(actionKey) {
-  const action = REVIEW_ACTIONS[actionKey];
-  if (!action) {
-    return;
+function ocrReviewedCountFromSummary(summaryPayload) {
+  const byStatus = summaryPayload?.by_status && typeof summaryPayload.by_status === "object"
+    ? summaryPayload.by_status
+    : {};
+  const rawCount = byStatus.ocr_reviewed ?? byStatus.OCR_REVIEWED ?? 0;
+  const parsed = Number(rawCount);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
   }
-  const next = findNextPageForStatus(currentPages, action.pendingStatus);
-  applyReviewActionAvailability(actionKey, next.nextPageId, next.nextPageRelPath);
+  return Math.floor(parsed);
 }
 
-function syncExportFromPages() {
-  const reviewedCount = currentPages.filter(
-    (page) => !page.is_missing && page.status === "ocr_reviewed",
-  ).length;
+function applyPagesSummary(summaryPayload) {
+  const reviewedCount = ocrReviewedCountFromSummary(summaryPayload);
   if (reviewedCount > 0) {
     exportFinalBtn.disabled = false;
     exportFinalBtn.title = `Export ${reviewedCount} OCR-reviewed page${reviewedCount === 1 ? "" : "s"}.`;
@@ -358,6 +446,20 @@ function syncExportFromPages() {
   }
   exportFinalBtn.disabled = true;
   exportFinalBtn.title = "No OCR-reviewed pages available for export.";
+}
+
+async function refreshReviewActionState() {
+  const [nextReviewPayload, nextOcrPayload] = await Promise.all([
+    fetchJson("/api/layout-review/next"),
+    fetchJson("/api/ocr-review/next"),
+  ]);
+  applyNextReviewStatePayload("layout", nextReviewPayload);
+  applyNextReviewStatePayload("ocr", nextOcrPayload);
+}
+
+async function refreshPagesSummary() {
+  const summaryPayload = await fetchJson("/api/pages/summary");
+  applyPagesSummary(summaryPayload);
 }
 
 function renderDuplicates(duplicates) {
@@ -472,7 +574,7 @@ function applyPageStatusUpdate(pageId, status) {
 
 function applyStatusUpdatesFromEvents(events) {
   if (!Array.isArray(events) || events.length === 0) {
-    return;
+    return { changed: false, sawNewEvent: false };
   }
   let maxId = 0;
   for (const event of events) {
@@ -487,11 +589,13 @@ function applyStatusUpdatesFromEvents(events) {
   }
 
   let changed = false;
+  let sawNewEvent = false;
   for (const event of events) {
     const eventId = Number(event?.id);
     if (!Number.isInteger(eventId) || eventId <= lastProcessedEventId) {
       continue;
     }
+    sawNewEvent = true;
     lastProcessedEventId = eventId;
 
     const pageId = Number(event?.page_id);
@@ -510,36 +614,66 @@ function applyStatusUpdatesFromEvents(events) {
     if (pagesSortState.columnKey === "status") {
       renderPages(currentPages);
     }
-    syncReviewActionFromPages("layout");
-    syncReviewActionFromPages("ocr");
-    syncExportFromPages();
+    updatePagesPaginationControls();
   }
+  return { changed, sawNewEvent };
 }
 
 async function reloadDashboard() {
-  const [pagesPayload, duplicatesPayload, activityPayload, nextReviewPayload, nextOcrPayload, runtimeOptionsPayload] = await Promise.all([
-    fetchJson("/api/pages"),
+  const [duplicatesPayload, activityPayload, runtimeOptionsPayload] = await Promise.all([
     fetchJson("/api/duplicates"),
     fetchJson("/api/pipeline/activity"),
-    fetchJson("/api/layout-review/next"),
-    fetchJson("/api/ocr-review/next"),
     fetchJson("/api/runtime-options"),
   ]);
-
-  renderPages(pagesPayload.pages);
-  syncExportFromPages();
+  await Promise.all([
+    loadCurrentPagesSlice(),
+    refreshReviewActionState(),
+    refreshPagesSummary(),
+  ]);
   renderDuplicates(duplicatesPayload.duplicates);
   renderActivity(activityPayload);
-  applyNextReviewStatePayload("layout", nextReviewPayload);
-  applyNextReviewStatePayload("ocr", nextOcrPayload);
   applyRuntimeOptions(runtimeOptionsPayload);
   syncLastProcessedEventId(activityPayload.recent_events);
+}
+
+async function refreshDashboardFromStream() {
+  if (streamRefreshInFlight) {
+    return;
+  }
+  streamRefreshInFlight = true;
+  try {
+    await Promise.all([
+      loadCurrentPagesSlice(),
+      refreshReviewActionState(),
+      refreshPagesSummary(),
+    ]);
+  } catch (error) {
+    console.error(`Failed to refresh dashboard from stream: ${error.message}`);
+  } finally {
+    streamRefreshInFlight = false;
+  }
+}
+
+function scheduleDashboardRefreshFromStream() {
+  if (streamRefreshTimer !== null) {
+    window.clearTimeout(streamRefreshTimer);
+  }
+  streamRefreshTimer = window.setTimeout(() => {
+    streamRefreshTimer = null;
+    refreshDashboardFromStream().catch((error) => {
+      console.error(`Stream refresh failed: ${error.message}`);
+    });
+  }, 300);
 }
 
 function closeActivityStream() {
   if (activityStream) {
     activityStream.close();
     activityStream = null;
+  }
+  if (streamRefreshTimer !== null) {
+    window.clearTimeout(streamRefreshTimer);
+    streamRefreshTimer = null;
   }
 }
 
@@ -565,7 +699,10 @@ function startActivityStream() {
     try {
       const payload = JSON.parse(event.data);
       renderActivity(payload);
-      applyStatusUpdatesFromEvents(payload.recent_events);
+      const statusUpdate = applyStatusUpdatesFromEvents(payload.recent_events);
+      if (statusUpdate.sawNewEvent) {
+        scheduleDashboardRefreshFromStream();
+      }
     } catch {
       // Ignore malformed events.
     }
@@ -685,9 +822,7 @@ async function runFinalExport() {
   } finally {
     scanBtn.disabled = false;
     wipeBtn.disabled = false;
-    syncReviewActionFromPages("layout");
-    syncReviewActionFromPages("ocr");
-    syncExportFromPages();
+    updatePagesPaginationControls();
   }
 }
 
@@ -735,9 +870,49 @@ for (const sortBtn of pagesSortButtons) {
     pagesSortState = nextState;
     persistPagesSortState();
     updatePagesSortControls();
-    renderPages(currentPages);
+    resetPagesPagination();
+    loadCurrentPagesSlice().catch((error) => {
+      console.error(`Failed to load sorted pages: ${error.message}`);
+    });
   });
 }
+pagesPrevBtn.addEventListener("click", () => {
+  if (pagesLoading || pagesCursorIndex <= 0) {
+    return;
+  }
+  pagesCursorIndex -= 1;
+  loadCurrentPagesSlice().catch((error) => {
+    console.error(`Failed to load previous page slice: ${error.message}`);
+  });
+});
+pagesNextBtn.addEventListener("click", () => {
+  if (pagesLoading || !pagesHasMore || !pagesNextCursor) {
+    return;
+  }
+  const nextIndex = pagesCursorIndex + 1;
+  pagesCursorHistory = pagesCursorHistory.slice(0, nextIndex);
+  pagesCursorHistory[nextIndex] = String(pagesNextCursor);
+  pagesCursorIndex = nextIndex;
+  loadCurrentPagesSlice().catch((error) => {
+    console.error(`Failed to load next page slice: ${error.message}`);
+  });
+});
+pagesSizeSelect.addEventListener("change", () => {
+  const requestedSize = Number(pagesSizeSelect.value);
+  if (![25, 50, 100].includes(requestedSize)) {
+    pagesSizeSelect.value = String(pagesPageSize);
+    return;
+  }
+  if (requestedSize === pagesPageSize) {
+    return;
+  }
+  pagesPageSize = requestedSize;
+  persistPagesPageSize();
+  resetPagesPagination();
+  loadCurrentPagesSlice().catch((error) => {
+    console.error(`Failed to load paginated pages: ${error.message}`);
+  });
+});
 pagesBody.addEventListener("click", (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) {
@@ -806,7 +981,11 @@ document.addEventListener("keydown", (event) => {
 });
 
 loadPagesSortState();
+loadPagesPageSize();
+pagesSizeSelect.value = String(pagesPageSize);
+resetPagesPagination();
 updatePagesSortControls();
+updatePagesPaginationControls();
 setPipelinePanelExpanded(readStorageBool(STORAGE_KEYS.pipelinePanelExpanded, false));
 reloadDashboard().catch((error) => {
   console.error(`Failed to load dashboard: ${error.message}`);

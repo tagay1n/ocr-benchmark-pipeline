@@ -158,6 +158,18 @@
         margin: 0 0 8px;
       }
 
+      .panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+
+      .panel-head .panel-title {
+        margin: 0;
+      }
+
       table {
         width: 100%;
         border-collapse: collapse;
@@ -285,6 +297,43 @@
         border-radius: 8px;
       }
 
+      .pages-pagination {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px 12px;
+        margin-left: auto;
+      }
+
+      .pages-pagination-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .pages-pagination-size {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .pages-pagination-size select {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+        padding: 4px 8px;
+        font-size: 13px;
+      }
+
+      .pages-pagination-meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
       .activity-headline {
         margin: 0;
         font-weight: 700;
@@ -399,6 +448,11 @@
           align-items: flex-start;
         }
 
+        .panel-head {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
         table,
         thead,
         tbody,
@@ -489,7 +543,23 @@
       </section>
 
       <section class="panel">
-        <h2 class="panel-title">All indexed images</h2>
+        <div class="panel-head">
+          <div class="pages-pagination" aria-label="Pages pagination">
+            <div class="pages-pagination-controls">
+              <label class="pages-pagination-size" for="pages-size-select">
+                Rows
+                <select id="pages-size-select">
+                  <option value="25">25</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                </select>
+              </label>
+              <button id="pages-prev-btn" class="secondary" type="button" disabled>Previous</button>
+              <button id="pages-next-btn" class="secondary" type="button" disabled>Next</button>
+            </div>
+            <div id="pages-meta" class="pages-pagination-meta">Showing 0-0 of 0</div>
+          </div>
+        </div>
         <table>
           <thead>
             <tr>

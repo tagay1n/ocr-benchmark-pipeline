@@ -21,6 +21,10 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
     'id="export-final-btn"',
     'id="wipe-btn"',
     'id="pages-body"',
+    'id="pages-size-select"',
+    'id="pages-prev-btn"',
+    'id="pages-next-btn"',
+    'id="pages-meta"',
     'id="auto-detect-layouts-toggle"',
     'id="auto-extract-text-toggle"',
     'data-pages-sort-key="id"',
@@ -35,6 +39,7 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(pageModule.includes('"/api/pipeline/activity/stream?limit=30"'), true);
   assert.equal(pageModule.includes('"/api/final/export"'), true);
   assert.equal(pageModule.includes('"/api/runtime-options"'), true);
+  assert.equal(pageModule.includes('"/api/pages/summary"'), true);
   assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);
   assert.equal(pageModule.includes('"./pipeline_event_constants.mjs"'), true);
   assert.equal(pageModule.includes('"./api_client.mjs"'), true);
