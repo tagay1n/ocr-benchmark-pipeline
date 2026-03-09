@@ -125,6 +125,82 @@ class OcrReviewLookalikesTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(outputs[0]["content"], "ё")
 
+    def test_page_ocr_outputs_includes_caption_bound_target_ids(self) -> None:
+        self._write_image("review/caption-bounds.png")
+        main.scan_images()
+        page_id = int(main.list_pages()["pages"][0]["id"])
+
+        caption_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="caption",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.8, x2=0.9, y2=0.95),
+            ),
+        )["layout"]
+        picture_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="picture",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.7),
+            ),
+        )["layout"]
+
+        main.put_page_caption_bindings(
+            page_id,
+            main.ReplaceCaptionBindingsRequest(
+                bindings=[
+                    main.CaptionBindingPayload(
+                        caption_layout_id=int(caption_layout["id"]),
+                        target_layout_ids=[int(picture_layout["id"])],
+                    )
+                ]
+            ),
+        )
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=int(caption_layout["id"]),
+                    page_id=page_id,
+                    class_name="caption",
+                    output_format="markdown",
+                    content="Figure 1",
+                    model_name="test",
+                    key_alias="k",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            session.add(
+                main.OcrOutput(
+                    layout_id=int(picture_layout["id"]),
+                    page_id=page_id,
+                    class_name="picture",
+                    output_format="skip",
+                    content="",
+                    model_name="test",
+                    key_alias="k",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "ocr_done"
+            page.updated_at = now
+
+        outputs_by_layout_id = {
+            int(row["layout_id"]): row for row in main.page_ocr_outputs(page_id)["outputs"]
+        }
+        self.assertEqual(
+            outputs_by_layout_id[int(caption_layout["id"])]["bound_target_ids"],
+            [int(picture_layout["id"])],
+        )
+        self.assertEqual(outputs_by_layout_id[int(picture_layout["id"])]["bound_target_ids"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

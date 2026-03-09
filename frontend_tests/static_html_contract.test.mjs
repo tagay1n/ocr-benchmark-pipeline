@@ -59,10 +59,12 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
     'id="editor-action-list-item"',
     'id="editor-action-ordered-list-item"',
     'id="magnifier-toggle-btn"',
+    'id="source-bind-lines-layer"',
   ];
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
   }
   assert.equal(html.includes("`/api/pages/${state.pageId}/ocr/reextract`"), true);
+  assert.equal(html.includes("renderSourceCaptionBindingLines"), true);
   assert.equal(html.includes('"./js/magnifier.mjs"'), true);
 });

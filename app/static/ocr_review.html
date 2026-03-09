@@ -823,6 +823,15 @@
         z-index: 0;
       }
 
+      #source-bind-lines-layer {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 0;
+      }
+
       #source-label-layer-selected {
         position: absolute;
         inset: 0;
@@ -1187,6 +1196,7 @@
           <div id="source-viewport" class="preview-viewport">
             <div id="source-wrap" class="preview-wrap">
               <img id="page-image" alt="Source page image" />
+              <svg id="source-bind-lines-layer"></svg>
               <div id="source-label-layer"></div>
               <div id="source-label-layer-selected"></div>
               <div id="source-overlay"></div>
@@ -1412,6 +1422,7 @@
       const renderRawBtn = document.getElementById("render-raw-btn");
       const pageImage = document.getElementById("page-image");
       const reconstructionSurface = document.getElementById("reconstruction-surface");
+      const sourceBindLinesLayer = document.getElementById("source-bind-lines-layer");
       const sourceLabelLayer = document.getElementById("source-label-layer");
       const sourceSelectedLabelLayer = document.getElementById("source-label-layer-selected");
       const sourceOverlay = document.getElementById("source-overlay");
@@ -3496,8 +3507,134 @@
         applyReextractHoverStyles();
       }
 
+      function isCaptionOutput(output) {
+        return normalizeClassName(output?.class_name) === "caption";
+      }
+
+      function isCaptionTargetOutput(output) {
+        const className = normalizeClassName(output?.class_name);
+        return className === "table" || className === "picture" || className === "formula";
+      }
+
+      function normalizedRectFromBBox(bbox) {
+        const x1 = Number(bbox?.x1);
+        const y1 = Number(bbox?.y1);
+        const x2 = Number(bbox?.x2);
+        const y2 = Number(bbox?.y2);
+        if (![x1, y1, x2, y2].every((value) => Number.isFinite(value))) {
+          return null;
+        }
+        return {
+          left: Math.max(0, Math.min(1, Math.min(x1, x2))),
+          right: Math.max(0, Math.min(1, Math.max(x1, x2))),
+          top: Math.max(0, Math.min(1, Math.min(y1, y2))),
+          bottom: Math.max(0, Math.min(1, Math.max(y1, y2))),
+        };
+      }
+
+      function shortestConnectorBetweenRects(sourceRect, targetRect) {
+        let sourceX;
+        let targetX;
+        if (sourceRect.right < targetRect.left) {
+          sourceX = sourceRect.right;
+          targetX = targetRect.left;
+        } else if (targetRect.right < sourceRect.left) {
+          sourceX = sourceRect.left;
+          targetX = targetRect.right;
+        } else {
+          const overlapLeft = Math.max(sourceRect.left, targetRect.left);
+          const overlapRight = Math.min(sourceRect.right, targetRect.right);
+          const overlapMidX = (overlapLeft + overlapRight) / 2;
+          sourceX = overlapMidX;
+          targetX = overlapMidX;
+        }
+
+        let sourceY;
+        let targetY;
+        if (sourceRect.bottom < targetRect.top) {
+          sourceY = sourceRect.bottom;
+          targetY = targetRect.top;
+        } else if (targetRect.bottom < sourceRect.top) {
+          sourceY = sourceRect.top;
+          targetY = targetRect.bottom;
+        } else {
+          const overlapTop = Math.max(sourceRect.top, targetRect.top);
+          const overlapBottom = Math.min(sourceRect.bottom, targetRect.bottom);
+          const overlapMidY = (overlapTop + overlapBottom) / 2;
+          sourceY = overlapMidY;
+          targetY = overlapMidY;
+        }
+
+        return {
+          source: { x: sourceX, y: sourceY },
+          target: { x: targetX, y: targetY },
+        };
+      }
+
+      function renderSourceCaptionBindingLines() {
+        sourceBindLinesLayer.innerHTML = "";
+        const byLayoutId = new Map(
+          state.outputs.map((output) => [Number(output.layout_id), output]),
+        );
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+        marker.setAttribute("id", "source-bind-arrowhead");
+        marker.setAttribute("markerWidth", "8");
+        marker.setAttribute("markerHeight", "8");
+        marker.setAttribute("refX", "7");
+        marker.setAttribute("refY", "4");
+        marker.setAttribute("orient", "auto");
+        marker.setAttribute("markerUnits", "userSpaceOnUse");
+        const arrowPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        arrowPath.setAttribute("d", "M0,0 L8,4 L0,8 Z");
+        arrowPath.setAttribute("fill", "#496f98");
+        arrowPath.setAttribute("fill-opacity", "0.75");
+        marker.appendChild(arrowPath);
+        defs.appendChild(marker);
+        sourceBindLinesLayer.appendChild(defs);
+
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        for (const output of state.outputs) {
+          if (!isCaptionOutput(output)) {
+            continue;
+          }
+          const captionRect = normalizedRectFromBBox(output.bbox);
+          if (!captionRect) {
+            continue;
+          }
+          const targetIds = Array.isArray(output.bound_target_ids) ? output.bound_target_ids : [];
+          const isActiveCaption = Number(output.layout_id) === selectedLayoutId;
+          for (const rawTargetId of targetIds) {
+            const targetId = Number(rawTargetId);
+            if (!Number.isInteger(targetId) || targetId <= 0) {
+              continue;
+            }
+            const targetOutput = byLayoutId.get(targetId);
+            if (!targetOutput || !isCaptionTargetOutput(targetOutput)) {
+              continue;
+            }
+            const targetRect = normalizedRectFromBBox(targetOutput.bbox);
+            if (!targetRect) {
+              continue;
+            }
+            const connector = shortestConnectorBetweenRects(captionRect, targetRect);
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", `${(connector.source.x * 100).toFixed(3)}%`);
+            line.setAttribute("y1", `${(connector.source.y * 100).toFixed(3)}%`);
+            line.setAttribute("x2", `${(connector.target.x * 100).toFixed(3)}%`);
+            line.setAttribute("y2", `${(connector.target.y * 100).toFixed(3)}%`);
+            line.setAttribute("stroke", "#496f98");
+            line.setAttribute("stroke-opacity", isActiveCaption ? "0.92" : "0.56");
+            line.setAttribute("stroke-width", isActiveCaption ? "2.2" : "1.6");
+            line.setAttribute("marker-end", "url(#source-bind-arrowhead)");
+            sourceBindLinesLayer.appendChild(line);
+          }
+        }
+      }
+
       function applySelectedStyles() {
         const selectedId = Number(state.selectedLayoutId);
+        renderSourceCaptionBindingLines();
         for (const box of sourceOverlay.querySelectorAll(".box[data-layout-id]")) {
           box.classList.toggle("layout-selected", Number(box.dataset.layoutId) === selectedId);
         }
@@ -4085,6 +4222,7 @@
 
       function renderOverlay() {
         sortOutputsInPlace();
+        sourceBindLinesLayer.innerHTML = "";
         sourceLabelLayer.innerHTML = "";
         sourceSelectedLabelLayer.innerHTML = "";
         sourceOverlay.innerHTML = "";
