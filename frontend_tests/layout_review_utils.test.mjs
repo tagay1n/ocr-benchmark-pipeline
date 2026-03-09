@@ -9,6 +9,7 @@ import {
   computeApproxLineBand,
   computeApproxLineBandByIndex,
   computeDraggedBBox,
+  filterReviewHistory,
   mergeLayoutsForReview,
   computeViewportCenterPadding,
   computeViewportScrollTargetForLayoutId,
@@ -17,6 +18,8 @@ import {
   findMaxFittingFontSize,
   formatZoomPercent,
   normalizeReviewHistory,
+  normalizeZoomMode,
+  nextHistoryPageId,
   nextLayoutReviewUrl,
   pointHandleForCoordinateKey,
   previousHistoryPageId,
@@ -34,6 +37,15 @@ test("clampZoomPercent clamps and falls back for invalid values", () => {
   assert.equal(clampZoomPercent(1), 1);
   assert.equal(clampZoomPercent(95), 95);
   assert.equal(clampZoomPercent(999), 400);
+});
+
+test("normalizeZoomMode accepts known modes and falls back for invalid values", () => {
+  assert.equal(normalizeZoomMode("fit-width"), "fit-width");
+  assert.equal(normalizeZoomMode("fit-height"), "fit-height");
+  assert.equal(normalizeZoomMode("custom"), "custom");
+  assert.equal(normalizeZoomMode("custom", { allowCustom: false }), "automatic");
+  assert.equal(normalizeZoomMode("invalid"), "automatic");
+  assert.equal(normalizeZoomMode("", { fallback: "fit-page" }), "fit-page");
 });
 
 test("formatZoomPercent renders integer and 1-decimal labels", () => {
@@ -550,6 +562,39 @@ test("previousHistoryPageId returns previous page only when available", () => {
   assert.equal(previousHistoryPageId([100, 101, 102], 2), 101);
   assert.equal(previousHistoryPageId([100], 0), null);
   assert.equal(previousHistoryPageId([], -1), null);
+});
+
+test("nextHistoryPageId returns next page only when available", () => {
+  assert.equal(nextHistoryPageId([100, 101, 102], 1), 102);
+  assert.equal(nextHistoryPageId([100], 0), null);
+  assert.equal(nextHistoryPageId([], -1), null);
+});
+
+test("filterReviewHistory drops disallowed ids and remaps active index", () => {
+  assert.deepEqual(
+    filterReviewHistory([10, 11, 12, 13], 2, [10, 12, 13]),
+    { history: [10, 12, 13], index: 1 },
+  );
+  assert.deepEqual(
+    filterReviewHistory([10, 11, 12], 1, [12]),
+    { history: [12], index: 0 },
+  );
+  assert.deepEqual(
+    filterReviewHistory([10, 11, 12], 2, []),
+    { history: [], index: -1 },
+  );
+});
+
+test("filtered history keeps consistent back/forward targets", () => {
+  const filteredWithForward = filterReviewHistory([5, 6, 7], 1, [5, 7]);
+  assert.deepEqual(filteredWithForward, { history: [5, 7], index: 0 });
+  assert.equal(previousHistoryPageId(filteredWithForward.history, filteredWithForward.index), null);
+  assert.equal(nextHistoryPageId(filteredWithForward.history, filteredWithForward.index), 7);
+
+  const filteredWithoutForward = filterReviewHistory([5, 6, 7], 2, [5, 6]);
+  assert.deepEqual(filteredWithoutForward, { history: [5, 6], index: 1 });
+  assert.equal(previousHistoryPageId(filteredWithoutForward.history, filteredWithoutForward.index), 5);
+  assert.equal(nextHistoryPageId(filteredWithoutForward.history, filteredWithoutForward.index), null);
 });
 
 test("reorderReadingOrderIds preserves id set across randomized moves", () => {

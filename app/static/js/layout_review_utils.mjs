@@ -23,6 +23,17 @@ export const ZOOM_PRESET_PERCENTS = Object.freeze([
   400,
 ]);
 
+export function normalizeZoomMode(value, { fallback = "automatic", allowCustom = true } = {}) {
+  const mode = String(value || "").trim().toLowerCase();
+  const allowedModes = allowCustom
+    ? ["fit-page", "fit-width", "fit-height", "automatic", "custom"]
+    : ["fit-page", "fit-width", "fit-height", "automatic"];
+  if (allowedModes.includes(mode)) {
+    return mode;
+  }
+  return fallback;
+}
+
 export function formatZoomPercent(percentValue) {
   const rounded = Math.round(Number(percentValue) * 10) / 10;
   if (Number.isInteger(rounded)) {
@@ -625,4 +636,46 @@ export function previousHistoryPageId(rawHistory, rawIndex) {
     return null;
   }
   return history[index - 1];
+}
+
+export function nextHistoryPageId(rawHistory, rawIndex) {
+  const { history, index } = normalizeReviewHistory(rawHistory, rawIndex);
+  if (history.length === 0 || index < 0 || index >= history.length - 1) {
+    return null;
+  }
+  return history[index + 1];
+}
+
+export function filterReviewHistory(rawHistory, rawIndex, allowedPageIds) {
+  const normalized = normalizeReviewHistory(rawHistory, rawIndex);
+  const allowedSet = new Set(
+    (Array.isArray(allowedPageIds) ? allowedPageIds : Array.from(allowedPageIds || []))
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0),
+  );
+  if (allowedSet.size === 0) {
+    return { history: [], index: -1 };
+  }
+
+  const filteredHistory = [];
+  let filteredIndex = -1;
+  for (let index = 0; index < normalized.history.length; index += 1) {
+    const pageId = normalized.history[index];
+    if (!allowedSet.has(pageId)) {
+      continue;
+    }
+    if (index <= normalized.index) {
+      filteredIndex = filteredHistory.length;
+    }
+    filteredHistory.push(pageId);
+  }
+
+  if (filteredHistory.length === 0) {
+    return { history: [], index: -1 };
+  }
+  if (filteredIndex < 0) {
+    filteredIndex = 0;
+  }
+  filteredIndex = Math.max(0, Math.min(filteredIndex, filteredHistory.length - 1));
+  return { history: filteredHistory, index: filteredIndex };
 }

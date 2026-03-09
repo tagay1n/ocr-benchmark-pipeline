@@ -801,6 +801,10 @@
         z-index: 3;
       }
 
+      .box-label.flip-below {
+        top: calc(100% + 2px);
+      }
+
       .recon-label {
         position: static;
         top: auto;
@@ -816,6 +820,10 @@
         align-items: center;
         gap: 2px;
         z-index: 4;
+      }
+
+      .recon-header.flip-below {
+        top: calc(100% + 2px);
       }
 
       .recon-restore-btn {
@@ -1258,7 +1266,10 @@
         computeZoomScale,
         computeViewportScrollTargetForLayoutId,
         countStretchableSpaces,
+        filterReviewHistory,
         findMaxFittingFontSize,
+        nextHistoryPageId,
+        normalizeZoomMode,
         normalizeReviewHistory,
         previousHistoryPageId,
         reconstructionHorizontalScale,
@@ -1397,6 +1408,7 @@
         zoomAppliedPercent: 100,
         history: [],
         historyIndex: -1,
+        nextReviewPageId: null,
         panelVisibility: {
           source: true,
           reconstructed: true,
@@ -1624,7 +1636,11 @@
       }
 
       function applyStoredZoomSettings() {
-        state.zoomMode = "automatic";
+        state.zoomMode = normalizeZoomMode(readStorage(STORAGE_KEYS.zoomMode), {
+          fallback: "automatic",
+          allowCustom: true,
+        });
+        state.zoomPercent = 100;
         const storedPercent = readStorage(STORAGE_KEYS.zoomPercent);
         if (storedPercent !== null) {
           state.zoomPercent = clampZoomPercent(storedPercent);
@@ -3762,6 +3778,8 @@
         state.hoveredLine = null;
         reconstructionSurface.innerHTML = "";
         for (const output of state.outputs) {
+          const outputTop = Math.min(Number(output.bbox.y1), Number(output.bbox.y2));
+          const pinTopUiBelow = outputTop < 0.03;
           const color = colorForClass(output.class_name);
           const item = document.createElement("div");
           item.className = "recon-item";
@@ -3783,6 +3801,9 @@
 
           const header = document.createElement("div");
           header.className = "recon-header";
+          if (pinTopUiBelow) {
+            header.classList.add("flip-below");
+          }
           const showRestore = hasLocalDraftForLayout(state.localEditsByLayoutId, output.layout_id);
           let restoreBtn = null;
           if (showRestore) {
@@ -3858,6 +3879,8 @@
         sortOutputsInPlace();
         sourceOverlay.innerHTML = "";
         for (const output of state.outputs) {
+          const outputTop = Math.min(Number(output.bbox.y1), Number(output.bbox.y2));
+          const pinTopUiBelow = outputTop < 0.03;
           const color = colorForClass(output.class_name);
           const box = document.createElement("div");
           box.className = "box";
@@ -3894,6 +3917,9 @@
 
           const label = document.createElement("div");
           label.className = "box-label";
+          if (pinTopUiBelow) {
+            label.classList.add("flip-below");
+          }
           label.style.color = color;
           label.style.borderColor = hexToRgba(color, 0.62);
           label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}`;
@@ -3980,6 +4006,20 @@
         historyBackBtn.title = historyBackBtn.disabled
           ? "No previous reviewed page in history."
           : "Open previous reviewed page";
+
+        const forwardPageId = nextHistoryPageId(state.history, state.historyIndex);
+        if (Number.isInteger(forwardPageId) && forwardPageId > 0) {
+          historyForthBtn.disabled = false;
+          historyForthBtn.title = "Open next reviewed page in history.";
+          return;
+        }
+
+        const queueTarget = Number(state.nextReviewPageId);
+        const hasQueueTarget = Number.isInteger(queueTarget) && queueTarget > 0;
+        historyForthBtn.disabled = !hasQueueTarget;
+        historyForthBtn.title = hasQueueTarget
+          ? "Open next page for OCR review."
+          : "No next page for OCR review.";
       }
 
       function storeHistoryState() {
@@ -4001,6 +4041,26 @@
         const normalized = normalizeReviewHistory(parsedHistory, rawIndex);
         state.history = normalized.history;
         state.historyIndex = normalized.index;
+      }
+
+      async function sanitizeHistoryAgainstServer() {
+        try {
+          const payload = await fetchJson("/api/pages");
+          const validPageIds = new Set(
+            (Array.isArray(payload?.pages) ? payload.pages : [])
+              .filter((page) => !Boolean(page?.is_missing))
+              .map((page) => Number(page?.id))
+              .filter((id) => Number.isInteger(id) && id > 0),
+          );
+          validPageIds.add(state.pageId);
+          const filtered = filterReviewHistory(state.history, state.historyIndex, validPageIds);
+          state.history = filtered.history;
+          state.historyIndex = filtered.index;
+          storeHistoryState();
+        } catch {
+          // Keep local history when server list is temporarily unavailable.
+        }
+        updateHistoryControls();
       }
 
       function updateHistoryOnVisit() {
@@ -4041,13 +4101,14 @@
       async function loadForthAvailability() {
         try {
           const payload = await fetchJson(`/api/pages/${state.pageId}/ocr-review-next`);
-          const hasForth = Boolean(payload?.has_next) && Number.isInteger(payload?.next_page_id);
-          historyForthBtn.disabled = !hasForth;
-          historyForthBtn.title = hasForth ? "Open next page for OCR review" : "No next page for OCR review.";
+          state.nextReviewPageId =
+            Boolean(payload?.has_next) && Number.isInteger(payload?.next_page_id)
+              ? Number(payload.next_page_id)
+              : null;
         } catch {
-          historyForthBtn.disabled = true;
-          historyForthBtn.title = "Cannot load next page now.";
+          state.nextReviewPageId = null;
         }
+        updateHistoryControls();
       }
 
       async function markReviewed() {
@@ -4177,6 +4238,7 @@
         applyPanelVisibility();
         state.pageId = pageId;
         loadHistoryState();
+        await sanitizeHistoryAgainstServer();
         updateHistoryOnVisit();
 
         try {
@@ -4208,17 +4270,28 @@
       });
 
       historyForthBtn.addEventListener("click", async () => {
-        try {
-          const payload = await fetchJson(`/api/pages/${state.pageId}/ocr-review-next`);
-          if (!payload || !payload.has_next || !Number.isInteger(payload.next_page_id)) {
-            historyForthBtn.disabled = true;
-            historyForthBtn.title = "No next page for OCR review.";
-            return;
-          }
-          window.location.href = `/static/ocr_review.html?page_id=${payload.next_page_id}`;
-        } catch (error) {
-          setStatus(`Failed to open next page: ${error.message}`, { isError: true });
+        const forwardPageId = nextHistoryPageId(state.history, state.historyIndex);
+        if (Number.isInteger(forwardPageId) && forwardPageId > 0) {
+          state.historyIndex = Math.min(state.history.length - 1, Math.max(0, state.historyIndex + 1));
+          storeHistoryState();
+          window.location.href = `/static/ocr_review.html?page_id=${forwardPageId}`;
+          return;
         }
+
+        let queueTarget = Number(state.nextReviewPageId);
+        if (!Number.isInteger(queueTarget) || queueTarget <= 0) {
+          try {
+            await loadForthAvailability();
+          } catch {
+            // Keep existing disabled state if queue availability check fails.
+          }
+          queueTarget = Number(state.nextReviewPageId);
+        }
+        if (!Number.isInteger(queueTarget) || queueTarget <= 0) {
+          updateHistoryControls();
+          return;
+        }
+        window.location.href = `/static/ocr_review.html?page_id=${queueTarget}`;
       });
 
       toggleSourceBtn.addEventListener("click", () => togglePanel("source"));

@@ -530,7 +530,7 @@
       .image-wrap {
         position: relative;
         width: max-content;
-        margin: 0 auto;
+        margin: 24px auto 0;
       }
 
       #page-image {
@@ -1089,9 +1089,12 @@
         computeDraggedBBox,
         computeViewportScrollTargetForLayoutId,
         computeZoomScale,
+        filterReviewHistory,
         mergeLayoutsForReview,
+        nextHistoryPageId,
         normalizeReviewHistory,
         nextLayoutReviewUrl,
+        normalizeZoomMode,
         pointHandleForCoordinateKey,
         previousHistoryPageId,
         reorderReadingOrderIds,
@@ -1215,7 +1218,11 @@
       }
 
       function applyStoredZoomSettings() {
-        state.zoomMode = "automatic";
+        state.zoomMode = normalizeZoomMode(readStorage(STORAGE_KEYS.zoomMode), {
+          fallback: "automatic",
+          allowCustom: true,
+        });
+        state.zoomPercent = 100;
         const storedPercent = readStorage(STORAGE_KEYS.zoomPercent);
         if (storedPercent !== null) {
           state.zoomPercent = clampZoomPercent(storedPercent);
@@ -1364,9 +1371,16 @@
         historyBackBtn.title =
           backTarget === null ? "No previously reviewed page in this session history." : "Previous reviewed page";
 
-        const hasForth = Number.isInteger(state.nextReviewPageId) && state.nextReviewPageId > 0;
-        historyForthBtn.disabled = !hasForth;
-        historyForthBtn.title = hasForth
+        const forwardTarget = nextHistoryPageId(state.reviewHistory, state.reviewHistoryIndex);
+        if (Number.isInteger(forwardTarget) && forwardTarget > 0) {
+          historyForthBtn.disabled = false;
+          historyForthBtn.title = "Open next reviewed page in this session history.";
+          return;
+        }
+
+        const hasQueueTarget = Number.isInteger(state.nextReviewPageId) && state.nextReviewPageId > 0;
+        historyForthBtn.disabled = !hasQueueTarget;
+        historyForthBtn.title = hasQueueTarget
           ? "Open next page waiting for layout review."
           : "No next page waiting for layout review.";
       }
@@ -1385,6 +1399,30 @@
         const normalized = normalizeReviewHistory(parsedHistory, rawIndex);
         state.reviewHistory = normalized.history;
         state.reviewHistoryIndex = normalized.index;
+      }
+
+      async function sanitizeReviewHistoryAgainstServer() {
+        try {
+          const payload = await fetchJson("/api/pages");
+          const validPageIds = new Set(
+            (Array.isArray(payload?.pages) ? payload.pages : [])
+              .filter((page) => !Boolean(page?.is_missing))
+              .map((page) => Number(page?.id))
+              .filter((id) => Number.isInteger(id) && id > 0),
+          );
+          validPageIds.add(pageId);
+          const filtered = filterReviewHistory(
+            state.reviewHistory,
+            state.reviewHistoryIndex,
+            validPageIds,
+          );
+          state.reviewHistory = filtered.history;
+          state.reviewHistoryIndex = filtered.index;
+          persistReviewHistory();
+        } catch {
+          // Keep local history when server list is temporarily unavailable.
+        }
+        updateHistoryNavButtons();
       }
 
       function registerCurrentPageInHistory() {
@@ -3445,6 +3483,17 @@
         window.location.href = `/static/layouts.html?page_id=${targetPageId}`;
       });
       historyForthBtn.addEventListener("click", () => {
+        const forwardTarget = nextHistoryPageId(state.reviewHistory, state.reviewHistoryIndex);
+        if (Number.isInteger(forwardTarget) && forwardTarget > 0) {
+          state.reviewHistoryIndex = Math.min(
+            state.reviewHistory.length - 1,
+            Math.max(0, state.reviewHistoryIndex + 1),
+          );
+          persistReviewHistory();
+          window.location.href = `/static/layouts.html?page_id=${forwardTarget}`;
+          return;
+        }
+
         const nextPageId = Number(state.nextReviewPageId);
         if (!Number.isInteger(nextPageId) || nextPageId <= 0) {
           return;
@@ -3636,6 +3685,7 @@
           rebuildZoomPresetOptions();
           applyStoredZoomSettings();
           loadReviewHistory();
+          await sanitizeReviewHistoryAgainstServer();
           registerCurrentPageInHistory();
           loadLayoutDraftState();
           await loadPage();
