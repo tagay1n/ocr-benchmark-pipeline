@@ -573,40 +573,19 @@
       }
 
       .reconstructed-floating-controls .render-mode-toggle {
-        box-shadow: 0 1px 6px rgba(26, 30, 34, 0.18);
+        box-shadow: 0 6px 16px rgba(26, 30, 34, 0.16);
       }
 
       .render-mode-toggle {
-        display: inline-flex;
-        align-items: center;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        overflow: hidden;
-        background: #efece2;
+        padding: 4px;
+        border-radius: 10px;
+        background: #f3f0e7;
       }
 
       .render-mode-btn {
-        border: 0;
-        border-right: 1px solid var(--border);
-        border-radius: 0;
         min-height: 28px;
-        padding: 0 10px;
+        padding: 5px 10px;
         font-size: 12px;
-        color: #5f5b50;
-        background: transparent;
-      }
-
-      .render-mode-btn:last-child {
-        border-right: 0;
-      }
-
-      .render-mode-btn:hover:not(:disabled) {
-        background: #e7e2d4;
-      }
-
-      .render-mode-btn.active {
-        background: #0b7a75;
-        color: #ffffff;
       }
 
       .preview-viewport {
@@ -1206,9 +1185,9 @@
 
         <section id="reconstructed-panel" class="panel image-panel">
           <div id="reconstructed-floating-controls" class="reconstructed-floating-controls">
-            <div class="render-mode-toggle" role="group" aria-label="Reconstructed content mode">
-              <button id="render-markdown-btn" class="render-mode-btn active" type="button" aria-pressed="true">Markdown</button>
-              <button id="render-raw-btn" class="render-mode-btn" type="button" aria-pressed="false">Raw</button>
+            <div class="render-mode-toggle panel-toggles" role="group" aria-label="Reconstructed content mode">
+              <button id="render-markdown-btn" class="render-mode-btn toggle-btn active" type="button" aria-pressed="true">Markdown</button>
+              <button id="render-raw-btn" class="render-mode-btn toggle-btn" type="button" aria-pressed="false">Raw</button>
             </div>
           </div>
           <div id="reconstructed-viewport" class="preview-viewport">
