@@ -125,6 +125,10 @@ def _scan_finished_message(prefix: str, payload: dict[str, object]) -> str:
     )
 
 
+LAYOUT_REVIEW_QUEUE_STATUS = "layout_detected"
+OCR_REVIEW_QUEUE_STATUS = "ocr_done"
+
+
 def _run_discovery_scan_with_events(
     *,
     trigger: str,
@@ -608,132 +612,70 @@ def page_layouts(page_id: int) -> dict[str, object]:
     return {"page_id": page_id, "count": len(layouts), "layouts": layouts}
 
 
-@app.get("/api/layout-review/next")
-def next_layout_review_page_global() -> dict[str, object]:
-    with get_session() as session:
-        row = session.execute(
-            select(Page.id, Page.rel_path)
-            .where(Page.is_missing.is_(False))
-            .where(Page.status == "layout_detected")
-            .order_by(Page.id.asc())
-            .limit(1)
-        ).first()
-
+def _next_page_response_from_row(row: tuple[object, ...] | None) -> dict[str, object]:
     if row is None:
         return {
             "has_next": False,
             "next_page_id": None,
             "next_page_rel_path": None,
         }
-
     return {
         "has_next": True,
         "next_page_id": int(row[0]),
         "next_page_rel_path": row[1],
     }
+
+
+def _next_page_for_status(
+    *,
+    status: str,
+    current_page_id: int | None = None,
+) -> dict[str, object]:
+    with get_session() as session:
+        base_query = (
+            select(Page.id, Page.rel_path)
+            .where(Page.is_missing.is_(False))
+            .where(Page.status == status)
+        )
+        if current_page_id is None:
+            row = session.execute(base_query.order_by(Page.id.asc()).limit(1)).first()
+            return _next_page_response_from_row(row)
+
+        row = session.execute(
+            base_query.where(Page.id > current_page_id).order_by(Page.id.asc()).limit(1)
+        ).first()
+        if row is None:
+            row = session.execute(
+                base_query.where(Page.id < current_page_id).order_by(Page.id.asc()).limit(1)
+            ).first()
+    return _next_page_response_from_row(row)
+
+
+def _ensure_page_exists_or_404(page_id: int) -> None:
+    if get_page(page_id) is None:
+        raise HTTPException(status_code=404, detail="Page not found.")
+
+
+@app.get("/api/layout-review/next")
+def next_layout_review_page_global() -> dict[str, object]:
+    return _next_page_for_status(status=LAYOUT_REVIEW_QUEUE_STATUS)
 
 
 @app.get("/api/ocr-review/next")
 def next_ocr_review_page_global() -> dict[str, object]:
-    with get_session() as session:
-        row = session.execute(
-            select(Page.id, Page.rel_path)
-            .where(Page.is_missing.is_(False))
-            .where(Page.status == "ocr_done")
-            .order_by(Page.id.asc())
-            .limit(1)
-        ).first()
-
-    if row is None:
-        return {
-            "has_next": False,
-            "next_page_id": None,
-            "next_page_rel_path": None,
-        }
-
-    return {
-        "has_next": True,
-        "next_page_id": int(row[0]),
-        "next_page_rel_path": row[1],
-    }
+    return _next_page_for_status(status=OCR_REVIEW_QUEUE_STATUS)
 
 
 @app.get("/api/pages/{page_id}/layout-review-next")
 def next_layout_review_page(page_id: int) -> dict[str, object]:
-    page = get_page(page_id)
-    if page is None:
-        raise HTTPException(status_code=404, detail="Page not found.")
-
-    with get_session() as session:
-        row = session.execute(
-            select(Page.id, Page.rel_path)
-            .where(Page.is_missing.is_(False))
-            .where(Page.status == "layout_detected")
-            .where(Page.id > page_id)
-            .order_by(Page.id.asc())
-            .limit(1)
-        ).first()
-        if row is None:
-            row = session.execute(
-                select(Page.id, Page.rel_path)
-                .where(Page.is_missing.is_(False))
-                .where(Page.status == "layout_detected")
-                .where(Page.id < page_id)
-                .order_by(Page.id.asc())
-                .limit(1)
-            ).first()
-
-    if row is None:
-        return {
-            "has_next": False,
-            "next_page_id": None,
-            "next_page_rel_path": None,
-        }
-
-    return {
-        "has_next": True,
-        "next_page_id": int(row[0]),
-        "next_page_rel_path": row[1],
-    }
+    _ensure_page_exists_or_404(page_id)
+    return _next_page_for_status(status=LAYOUT_REVIEW_QUEUE_STATUS, current_page_id=page_id)
 
 
 @app.get("/api/pages/{page_id}/ocr-review-next")
 def next_ocr_review_page(page_id: int) -> dict[str, object]:
-    page = get_page(page_id)
-    if page is None:
-        raise HTTPException(status_code=404, detail="Page not found.")
-
-    with get_session() as session:
-        row = session.execute(
-            select(Page.id, Page.rel_path)
-            .where(Page.is_missing.is_(False))
-            .where(Page.status == "ocr_done")
-            .where(Page.id > page_id)
-            .order_by(Page.id.asc())
-            .limit(1)
-        ).first()
-        if row is None:
-            row = session.execute(
-                select(Page.id, Page.rel_path)
-                .where(Page.is_missing.is_(False))
-                .where(Page.status == "ocr_done")
-                .where(Page.id < page_id)
-                .order_by(Page.id.asc())
-                .limit(1)
-            ).first()
-
-    if row is None:
-        return {
-            "has_next": False,
-            "next_page_id": None,
-            "next_page_rel_path": None,
-        }
-
-    return {
-        "has_next": True,
-        "next_page_id": int(row[0]),
-        "next_page_rel_path": row[1],
-    }
+    _ensure_page_exists_or_404(page_id)
+    return _next_page_for_status(status=OCR_REVIEW_QUEUE_STATUS, current_page_id=page_id)
 
 
 @app.post("/api/pages/{page_id}/layouts/detect")

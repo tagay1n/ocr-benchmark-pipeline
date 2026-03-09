@@ -69,8 +69,6 @@ const pagesSortButtons = Array.from(
   document.querySelectorAll("button[data-pages-sort-key]"),
 );
 
-let nextReviewPageId = null;
-let nextOcrReviewPageId = null;
 let currentPages = [];
 let pagesSortState = { ...DEFAULT_DASHBOARD_SORT };
 let pipelinePanelExpanded = false;
@@ -98,6 +96,28 @@ const TIME_FORMAT = {
   minute: "2-digit",
   second: "2-digit",
   hour12: false,
+};
+
+const REVIEW_ACTIONS = Object.freeze({
+  layout: {
+    button: reviewLayoutsBtn,
+    pendingStatus: "layout_detected",
+    fallbackOpenTitle: "Open next layout review page",
+    noItemsTitle: "No images available for layout review.",
+    hrefBase: "/static/layouts.html?page_id=",
+  },
+  ocr: {
+    button: reviewOcrBtn,
+    pendingStatus: "ocr_done",
+    fallbackOpenTitle: "Open next OCR review page",
+    noItemsTitle: "No images available for OCR review.",
+    hrefBase: "/static/ocr_review.html?page_id=",
+  },
+});
+
+const reviewActionState = {
+  layout: { nextPageId: null },
+  ocr: { nextPageId: null },
 };
 
 function formatDateTime(value) {
@@ -315,40 +335,38 @@ function renderPages(pages) {
   }
 }
 
-function syncNextReviewFromPages() {
-  const pending = currentPages
-    .filter((page) => !page.is_missing && page.status === "layout_detected")
-    .sort((a, b) => Number(a.id) - Number(b.id));
-  if (pending.length > 0) {
-    const next = pending[0];
-    nextReviewPageId = Number(next.id);
-    reviewLayoutsBtn.disabled = false;
-    reviewLayoutsBtn.title = next.rel_path
-      ? `Open next page: ${next.rel_path}`
-      : "Open next layout review page";
+function applyReviewActionAvailability(actionKey, nextPageId, nextPageRelPath) {
+  const action = REVIEW_ACTIONS[actionKey];
+  const state = reviewActionState[actionKey];
+  if (!action || !state) {
     return;
   }
-  nextReviewPageId = null;
-  reviewLayoutsBtn.disabled = true;
-  reviewLayoutsBtn.title = "No images available for layout review.";
+  state.nextPageId = Number.isInteger(nextPageId) && nextPageId > 0 ? Number(nextPageId) : null;
+  if (state.nextPageId !== null) {
+    action.button.disabled = false;
+    action.button.title = nextPageRelPath
+      ? `Open next page: ${nextPageRelPath}`
+      : action.fallbackOpenTitle;
+    return;
+  }
+  action.button.disabled = true;
+  action.button.title = action.noItemsTitle;
 }
 
-function syncNextOcrReviewFromPages() {
+function syncReviewActionFromPages(actionKey) {
+  const action = REVIEW_ACTIONS[actionKey];
+  if (!action) {
+    return;
+  }
   const pending = currentPages
-    .filter((page) => !page.is_missing && page.status === "ocr_done")
+    .filter((page) => !page.is_missing && page.status === action.pendingStatus)
     .sort((a, b) => Number(a.id) - Number(b.id));
   if (pending.length > 0) {
     const next = pending[0];
-    nextOcrReviewPageId = Number(next.id);
-    reviewOcrBtn.disabled = false;
-    reviewOcrBtn.title = next.rel_path
-      ? `Open next page: ${next.rel_path}`
-      : "Open next OCR review page";
+    applyReviewActionAvailability(actionKey, Number(next.id), next.rel_path);
     return;
   }
-  nextOcrReviewPageId = null;
-  reviewOcrBtn.disabled = true;
-  reviewOcrBtn.title = "No images available for OCR review.";
+  applyReviewActionAvailability(actionKey, null, null);
 }
 
 function syncExportFromPages() {
@@ -427,32 +445,21 @@ function renderActivity(activity) {
   }
 }
 
-function applyNextReviewState(payload) {
+function applyNextReviewStatePayload(actionKey, payload) {
   if (payload && payload.has_next && Number.isInteger(payload.next_page_id) && payload.next_page_id > 0) {
-    nextReviewPageId = payload.next_page_id;
-    reviewLayoutsBtn.disabled = false;
-    reviewLayoutsBtn.title = payload.next_page_rel_path
-      ? `Open next page: ${payload.next_page_rel_path}`
-      : "Open next layout review page";
+    applyReviewActionAvailability(actionKey, payload.next_page_id, payload.next_page_rel_path || null);
     return;
   }
-  nextReviewPageId = null;
-  reviewLayoutsBtn.disabled = true;
-  reviewLayoutsBtn.title = "No images available for layout review.";
+  applyReviewActionAvailability(actionKey, null, null);
 }
 
-function applyNextOcrReviewState(payload) {
-  if (payload && payload.has_next && Number.isInteger(payload.next_page_id) && payload.next_page_id > 0) {
-    nextOcrReviewPageId = payload.next_page_id;
-    reviewOcrBtn.disabled = false;
-    reviewOcrBtn.title = payload.next_page_rel_path
-      ? `Open next page: ${payload.next_page_rel_path}`
-      : "Open next OCR review page";
+function openNextReviewActionPage(actionKey) {
+  const action = REVIEW_ACTIONS[actionKey];
+  const state = reviewActionState[actionKey];
+  if (!action || !state || !Number.isInteger(state.nextPageId) || state.nextPageId <= 0) {
     return;
   }
-  nextOcrReviewPageId = null;
-  reviewOcrBtn.disabled = true;
-  reviewOcrBtn.title = "No images available for OCR review.";
+  window.location.href = `${action.hrefBase}${state.nextPageId}`;
 }
 
 function syncLastProcessedEventId(events) {
@@ -528,8 +535,8 @@ function applyStatusUpdatesFromEvents(events) {
     if (pagesSortState.columnKey === "status") {
       renderPages(currentPages);
     }
-    syncNextReviewFromPages();
-    syncNextOcrReviewFromPages();
+    syncReviewActionFromPages("layout");
+    syncReviewActionFromPages("ocr");
     syncExportFromPages();
   }
 }
@@ -548,8 +555,8 @@ async function reloadDashboard() {
   syncExportFromPages();
   renderDuplicates(duplicatesPayload.duplicates);
   renderActivity(activityPayload);
-  applyNextReviewState(nextReviewPayload);
-  applyNextOcrReviewState(nextOcrPayload);
+  applyNextReviewStatePayload("layout", nextReviewPayload);
+  applyNextReviewStatePayload("ocr", nextOcrPayload);
   applyRuntimeOptions(runtimeOptionsPayload);
   syncLastProcessedEventId(activityPayload.recent_events);
 }
@@ -703,10 +710,31 @@ async function runFinalExport() {
   } finally {
     scanBtn.disabled = false;
     wipeBtn.disabled = false;
-    syncNextReviewFromPages();
-    syncNextOcrReviewFromPages();
+    syncReviewActionFromPages("layout");
+    syncReviewActionFromPages("ocr");
     syncExportFromPages();
   }
+}
+
+function bindRuntimeOptionToggle(toggleElement, optionKey) {
+  toggleElement.addEventListener("change", async () => {
+    const previousValue = Boolean(runtimeOptions[optionKey]);
+    toggleElement.disabled = true;
+    try {
+      const payload = await fetchJson("/api/runtime-options", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          [optionKey]: toggleElement.checked,
+        }),
+      });
+      applyRuntimeOptions(payload);
+    } catch (error) {
+      console.error(`Failed to update runtime options: ${error.message}`);
+      toggleElement.checked = previousValue;
+      applyRuntimeOptions(runtimeOptions);
+    }
+  });
 }
 
 pipelineToggle.addEventListener("click", () => {
@@ -714,14 +742,10 @@ pipelineToggle.addEventListener("click", () => {
 });
 scanBtn.addEventListener("click", runScan);
 reviewLayoutsBtn.addEventListener("click", () => {
-  if (Number.isInteger(nextReviewPageId) && nextReviewPageId > 0) {
-    window.location.href = `/static/layouts.html?page_id=${nextReviewPageId}`;
-  }
+  openNextReviewActionPage("layout");
 });
 reviewOcrBtn.addEventListener("click", () => {
-  if (Number.isInteger(nextOcrReviewPageId) && nextOcrReviewPageId > 0) {
-    window.location.href = `/static/ocr_review.html?page_id=${nextOcrReviewPageId}`;
-  }
+  openNextReviewActionPage("ocr");
 });
 for (const sortBtn of pagesSortButtons) {
   sortBtn.addEventListener("click", () => {
@@ -769,42 +793,8 @@ pagesBody.addEventListener("click", (event) => {
     openRemoveModal(pageId);
   }
 });
-autoDetectLayoutsToggle.addEventListener("change", async () => {
-  const previousValue = runtimeOptions.auto_detect_layouts_after_discovery;
-  autoDetectLayoutsToggle.disabled = true;
-  try {
-    const payload = await fetchJson("/api/runtime-options", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        auto_detect_layouts_after_discovery: autoDetectLayoutsToggle.checked,
-      }),
-    });
-    applyRuntimeOptions(payload);
-  } catch (error) {
-    console.error(`Failed to update runtime options: ${error.message}`);
-    autoDetectLayoutsToggle.checked = previousValue;
-    applyRuntimeOptions(runtimeOptions);
-  }
-});
-autoExtractTextToggle.addEventListener("change", async () => {
-  const previousValue = runtimeOptions.auto_extract_text_after_layout_review;
-  autoExtractTextToggle.disabled = true;
-  try {
-    const payload = await fetchJson("/api/runtime-options", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        auto_extract_text_after_layout_review: autoExtractTextToggle.checked,
-      }),
-    });
-    applyRuntimeOptions(payload);
-  } catch (error) {
-    console.error(`Failed to update runtime options: ${error.message}`);
-    autoExtractTextToggle.checked = previousValue;
-    applyRuntimeOptions(runtimeOptions);
-  }
-});
+bindRuntimeOptionToggle(autoDetectLayoutsToggle, "auto_detect_layouts_after_discovery");
+bindRuntimeOptionToggle(autoExtractTextToggle, "auto_extract_text_after_layout_review");
 exportFinalBtn.addEventListener("click", runFinalExport);
 wipeBtn.addEventListener("click", openWipeModal);
 wipeCancelBtn.addEventListener("click", closeWipeModal);
