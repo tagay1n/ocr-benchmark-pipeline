@@ -10,6 +10,33 @@ export function isLineSyncEnabledOutputFormat(outputFormat) {
   return String(outputFormat || "").trim().toLowerCase() === "markdown";
 }
 
+function toFiniteScroll(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return numeric;
+}
+
+export function resolveViewportScrollSyncUpdate({
+  sourceLeft,
+  sourceTop,
+  targetLeft,
+  targetTop,
+} = {}) {
+  const nextLeft = toFiniteScroll(sourceLeft);
+  const nextTop = toFiniteScroll(sourceTop);
+  const currentLeft = toFiniteScroll(targetLeft);
+  const currentTop = toFiniteScroll(targetTop);
+  if (nextLeft === currentLeft && nextTop === currentTop) {
+    return null;
+  }
+  return {
+    left: nextLeft,
+    top: nextTop,
+  };
+}
+
 export function computeEditorToolbarState({ editorHidden, outputFormat } = {}) {
   const editorVisible = !Boolean(editorHidden);
   const markdownEnabled = editorVisible && String(outputFormat || "").trim().toLowerCase() === "markdown";

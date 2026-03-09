@@ -622,7 +622,7 @@
       .preview-wrap {
         position: relative;
         width: max-content;
-        margin: 0 auto;
+        margin: 24px auto 0;
       }
 
       #page-image {
@@ -635,7 +635,7 @@
       #reconstruction-surface {
         position: relative;
         background: #ffffff;
-        overflow: hidden;
+        overflow: visible;
       }
 
       .recon-item {
@@ -849,10 +849,6 @@
         z-index: 3;
       }
 
-      .box-label.flip-below {
-        top: calc(100% + 2px);
-      }
-
       .recon-label {
         position: static;
         top: auto;
@@ -868,10 +864,6 @@
         align-items: center;
         gap: 2px;
         z-index: 4;
-      }
-
-      .recon-header.flip-below {
-        top: calc(100% + 2px);
       }
 
       .recon-restore-btn {
@@ -1354,6 +1346,7 @@
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
         normalizeReconstructedRenderMode,
+        resolveViewportScrollSyncUpdate,
         resolveEditorDrawerLayout,
         tokenBoundsAtOffset,
         textOffsetForLineIndex,
@@ -1487,6 +1480,7 @@
       let editorWrapEnabled = true;
       let editorResizeSession = null;
       let altMagnifierPressed = false;
+      let scrollSyncMutedViewport = null;
 
       function updateMagnifierToggleUi() {
         if (!(magnifierToggleBtn instanceof HTMLButtonElement)) {
@@ -1653,6 +1647,37 @@
         }
         reconstructedFloatingControls.style.top = `${placement.top}px`;
         reconstructedFloatingControls.style.right = `${placement.right}px`;
+      }
+
+      function syncViewportScroll(sourceViewportEl, targetViewportEl) {
+        if (!sourceViewportEl || !targetViewportEl) {
+          return;
+        }
+        if (!state.panelVisibility.source || !state.panelVisibility.reconstructed) {
+          scrollSyncMutedViewport = null;
+          return;
+        }
+        if (scrollSyncMutedViewport === sourceViewportEl) {
+          scrollSyncMutedViewport = null;
+          return;
+        }
+        const update = resolveViewportScrollSyncUpdate({
+          sourceLeft: sourceViewportEl.scrollLeft,
+          sourceTop: sourceViewportEl.scrollTop,
+          targetLeft: targetViewportEl.scrollLeft,
+          targetTop: targetViewportEl.scrollTop,
+        });
+        if (!update) {
+          return;
+        }
+        scrollSyncMutedViewport = targetViewportEl;
+        targetViewportEl.scrollLeft = update.left;
+        targetViewportEl.scrollTop = update.top;
+        requestAnimationFrame(() => {
+          if (scrollSyncMutedViewport === targetViewportEl) {
+            scrollSyncMutedViewport = null;
+          }
+        });
       }
 
       function visiblePanelCount() {
@@ -1854,6 +1879,8 @@
         }
 
         const fitViewport = fitMeasurementForViewport(viewport);
+        const wrapStyle = window.getComputedStyle(sourceWrap);
+        const topGutter = Math.max(0, Number.parseFloat(wrapStyle.marginTop || "0") || 0);
         const scale = computeZoomScale({
           mode: state.zoomMode,
           zoomPercent: state.zoomPercent,
@@ -1861,6 +1888,7 @@
           naturalHeight,
           viewportWidth: fitViewport.width,
           viewportHeight: fitViewport.height,
+          extraVerticalSpace: topGutter,
         });
         if (!scale || !Number.isFinite(scale) || scale <= 0) {
           return;
@@ -3909,8 +3937,6 @@
         state.hoveredLine = null;
         reconstructionSurface.innerHTML = "";
         for (const output of state.outputs) {
-          const outputTop = Math.min(Number(output.bbox.y1), Number(output.bbox.y2));
-          const pinTopUiBelow = outputTop < 0.03;
           const color = colorForClass(output.class_name);
           const item = document.createElement("div");
           item.className = "recon-item";
@@ -3932,9 +3958,6 @@
 
           const header = document.createElement("div");
           header.className = "recon-header";
-          if (pinTopUiBelow) {
-            header.classList.add("flip-below");
-          }
           const showRestore = hasLocalDraftForLayout(state.localEditsByLayoutId, output.layout_id);
           let restoreBtn = null;
           if (showRestore) {
@@ -4019,8 +4042,6 @@
         sortOutputsInPlace();
         sourceOverlay.innerHTML = "";
         for (const output of state.outputs) {
-          const outputTop = Math.min(Number(output.bbox.y1), Number(output.bbox.y2));
-          const pinTopUiBelow = outputTop < 0.03;
           const color = colorForClass(output.class_name);
           const box = document.createElement("div");
           box.className = "box";
@@ -4061,9 +4082,6 @@
 
           const label = document.createElement("div");
           label.className = "box-label";
-          if (pinTopUiBelow) {
-            label.classList.add("flip-below");
-          }
           label.style.color = color;
           label.style.borderColor = hexToRgba(color, 0.62);
           label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}`;
@@ -4458,6 +4476,14 @@
         "scroll",
         () => {
           notifyReconstructedControlsActivity();
+          syncViewportScroll(reconstructedViewport, sourceViewport);
+        },
+        { passive: true },
+      );
+      sourceViewport.addEventListener(
+        "scroll",
+        () => {
+          syncViewportScroll(sourceViewport, reconstructedViewport);
         },
         { passive: true },
       );

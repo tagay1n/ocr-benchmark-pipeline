@@ -49,14 +49,17 @@ export function computeZoomScale({
   naturalHeight,
   viewportWidth,
   viewportHeight,
+  extraVerticalSpace = 0,
 }) {
   if (!naturalWidth || !naturalHeight || !viewportWidth || !viewportHeight) {
     return null;
   }
 
+  const verticalInset = Math.max(0, Number(extraVerticalSpace) || 0);
+  const effectiveViewportHeight = Math.max(1, viewportHeight - verticalInset);
   const fitWidthScale = viewportWidth / naturalWidth;
-  const fitHeightScale = viewportHeight / naturalHeight;
-  const fitPageScale = Math.min(fitWidthScale, viewportHeight / naturalHeight);
+  const fitHeightScale = effectiveViewportHeight / naturalHeight;
+  const fitPageScale = Math.min(fitWidthScale, fitHeightScale);
   const automaticScale = Math.min(fitWidthScale, 1);
 
   if (mode === "fit-page") {
@@ -489,8 +492,8 @@ export function detectOverlappingBorderSegments({
   layouts,
   contentWidth,
   contentHeight,
-  tolerancePx = 1,
-  coordinateSnapDigits = 4,
+  tolerancePx = 0,
+  coordinateSnapDigits = 6,
   minOverlapPx = 1,
 } = {}) {
   const width = Number(contentWidth);
@@ -501,10 +504,10 @@ export function detectOverlappingBorderSegments({
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
     return [];
   }
-  const tolerance = Number.isFinite(Number(tolerancePx)) ? Math.max(0, Number(tolerancePx)) : 1;
+  const tolerance = Number.isFinite(Number(tolerancePx)) ? Math.max(0, Number(tolerancePx)) : 0;
   const snapDigits = Number.isInteger(Number(coordinateSnapDigits))
     ? Math.max(0, Number(coordinateSnapDigits))
-    : 4;
+    : 6;
   const snapScale = 10 ** snapDigits;
   const snapRatio = (value) => {
     const numeric = Number(value);

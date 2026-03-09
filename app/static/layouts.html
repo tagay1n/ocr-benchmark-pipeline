@@ -1436,6 +1436,8 @@
         }
 
         const fitViewport = fitMeasurementForViewport(imageViewport);
+        const wrapStyle = window.getComputedStyle(imageWrap);
+        const topGutter = Math.max(0, Number.parseFloat(wrapStyle.marginTop || "0") || 0);
         const scale = computeZoomScale({
           mode: state.zoomMode,
           zoomPercent: state.zoomPercent,
@@ -1443,6 +1445,7 @@
           naturalHeight,
           viewportWidth: fitViewport.width,
           viewportHeight: fitViewport.height,
+          extraVerticalSpace: topGutter,
         });
         if (!scale || !Number.isFinite(scale) || scale <= 0) {
           return;

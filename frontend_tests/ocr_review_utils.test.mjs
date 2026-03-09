@@ -17,6 +17,7 @@ import {
   lineBandFromLineIndex,
   lineIndexFromTextOffset,
   normalizeReconstructedRenderMode,
+  resolveViewportScrollSyncUpdate,
   resolveEditorDrawerLayout,
   tokenBoundsAtOffset,
   textOffsetForLineIndex,
@@ -82,6 +83,36 @@ test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs"
   assert.equal(isLineSyncEnabledOutputFormat("latex"), false);
   assert.equal(isLineSyncEnabledOutputFormat("skip"), false);
   assert.equal(isLineSyncEnabledOutputFormat(""), false);
+});
+
+test("resolveViewportScrollSyncUpdate returns null for already synced scroll and next values otherwise", () => {
+  assert.equal(
+    resolveViewportScrollSyncUpdate({
+      sourceLeft: 120,
+      sourceTop: 45,
+      targetLeft: 120,
+      targetTop: 45,
+    }),
+    null,
+  );
+  assert.deepEqual(
+    resolveViewportScrollSyncUpdate({
+      sourceLeft: "80",
+      sourceTop: 30.5,
+      targetLeft: 79,
+      targetTop: 30.5,
+    }),
+    { left: 80, top: 30.5 },
+  );
+  assert.deepEqual(
+    resolveViewportScrollSyncUpdate({
+      sourceLeft: NaN,
+      sourceTop: Infinity,
+      targetLeft: 1,
+      targetTop: 2,
+    }),
+    { left: 0, top: 0 },
+  );
 });
 
 test("hasLocalDraftForLayout checks layout id normalization and map presence", () => {
