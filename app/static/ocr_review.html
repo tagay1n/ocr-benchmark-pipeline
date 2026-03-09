@@ -849,31 +849,17 @@
         z-index: 3;
       }
 
-      .recon-label {
-        position: static;
-        top: auto;
-        left: auto;
-        max-width: 240px;
-      }
-
-      .recon-header {
+      .recon-restore-btn {
         position: absolute;
         top: -20px;
-        left: 0;
-        display: inline-flex;
-        align-items: center;
-        gap: 2px;
-        z-index: 4;
-      }
-
-      .recon-restore-btn {
-        position: static;
+        right: 0;
         width: 20px;
         height: 20px;
         padding: 0;
         border-radius: 6px;
         font-size: 12px;
         line-height: 1;
+        z-index: 4;
       }
 
       .editor-drawer {
@@ -3956,12 +3942,9 @@
             openExpandedEditor(output.layout_id);
           });
 
-          const header = document.createElement("div");
-          header.className = "recon-header";
           const showRestore = hasLocalDraftForLayout(state.localEditsByLayoutId, output.layout_id);
-          let restoreBtn = null;
           if (showRestore) {
-            restoreBtn = document.createElement("button");
+            const restoreBtn = document.createElement("button");
             restoreBtn.className = "secondary recon-restore-btn";
             restoreBtn.type = "button";
             restoreBtn.textContent = "↺";
@@ -3979,19 +3962,8 @@
               event.stopPropagation();
               restoreOutputByLayoutId(output.layout_id);
             });
+            item.appendChild(restoreBtn);
           }
-
-          const label = document.createElement("div");
-          label.className = "box-label recon-label";
-          label.style.color = color;
-          label.style.borderColor = hexToRgba(color, 0.62);
-          label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}`;
-          header.appendChild(label);
-
-          if (showRestore) {
-            header.appendChild(restoreBtn);
-          }
-          item.appendChild(header);
 
           const contentNode = appendStructuredContent(item, output);
           const warningLineIndexes = outputLookalikeLineIndexes(output.layout_id);
