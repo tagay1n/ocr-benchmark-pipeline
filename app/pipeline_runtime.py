@@ -11,6 +11,15 @@ from .db import get_session
 from .layouts import detect_layouts_for_page
 from .models import Page, PipelineEvent, PipelineJob
 from .ocr_extract import extract_ocr_for_page
+from .pipeline_constants import (
+    EVENT_JOB_COMPLETED,
+    EVENT_JOB_FAILED,
+    EVENT_JOB_QUEUED,
+    EVENT_JOB_STARTED,
+    STAGE_LAYOUT_DETECT,
+    STAGE_OCR_EXTRACT,
+    stage_display_name,
+)
 
 JobHandler = Callable[[dict[str, Any]], dict[str, Any] | None]
 
@@ -47,14 +56,6 @@ def register_stage_handler(stage: str, handler: JobHandler) -> None:
         _HANDLERS[stage] = handler
 
 
-def _stage_label(stage: str) -> str:
-    if stage == "layout_detect":
-        return "layout detection"
-    if stage == "ocr_extract":
-        return "OCR extraction"
-    return stage.replace("_", " ")
-
-
 def emit_event(
     *,
     stage: str,
@@ -80,8 +81,8 @@ def register_default_handlers() -> None:
     global _DEFAULT_HANDLERS_REGISTERED
     if _DEFAULT_HANDLERS_REGISTERED:
         return
-    register_stage_handler("layout_detect", _layout_detect_handler)
-    register_stage_handler("ocr_extract", _ocr_extract_handler)
+    register_stage_handler(STAGE_LAYOUT_DETECT, _layout_detect_handler)
+    register_stage_handler(STAGE_OCR_EXTRACT, _ocr_extract_handler)
     _DEFAULT_HANDLERS_REGISTERED = True
 
 
@@ -160,19 +161,19 @@ def _finalize_job_failure(job_id: int, error: str) -> None:
 
 def _completion_message(stage: str, result: dict[str, Any] | None) -> str:
     if not result:
-        return f"Completed {_stage_label(stage)}."
+        return f"Completed {stage_display_name(stage)}."
     if result.get("skipped"):
         reason = str(result.get("reason") or "not applicable")
-        return f"Skipped {_stage_label(stage)}: {reason}."
-    if stage == "layout_detect":
+        return f"Skipped {stage_display_name(stage)}: {reason}."
+    if stage == STAGE_LAYOUT_DETECT:
         created = int(result.get("created", 0))
         return f"Completed layout detection, created {created} regions."
-    if stage == "ocr_extract":
+    if stage == STAGE_OCR_EXTRACT:
         extracted = int(result.get("extracted_count", 0))
         skipped = int(result.get("skipped_count", 0))
         requests = int(result.get("requests_count", 0))
         return f"Completed OCR extraction, extracted {extracted}, skipped {skipped}, Gemini requests {requests}."
-    return f"Completed {_stage_label(stage)}."
+    return f"Completed {stage_display_name(stage)}."
 
 
 def _worker_loop() -> None:
@@ -188,9 +189,9 @@ def _worker_loop() -> None:
         page_id = job["page_id"]
         emit_event(
             stage=stage,
-            event_type="job_started",
+            event_type=EVENT_JOB_STARTED,
             page_id=page_id,
-            message=f"Started {_stage_label(stage)}.",
+            message=f"Started {stage_display_name(stage)}.",
             data={"job_id": job["id"]},
         )
 
@@ -201,7 +202,7 @@ def _worker_loop() -> None:
             _finalize_job_failure(job["id"], error)
             emit_event(
                 stage=stage,
-                event_type="job_failed",
+                event_type=EVENT_JOB_FAILED,
                 page_id=page_id,
                 message=error,
                 data={"job_id": job["id"]},
@@ -213,7 +214,7 @@ def _worker_loop() -> None:
             _finalize_job_success(job["id"], result)
             emit_event(
                 stage=stage,
-                event_type="job_completed",
+                event_type=EVENT_JOB_COMPLETED,
                 page_id=page_id,
                 message=_completion_message(stage, result),
                 data={"job_id": job["id"], "result": result},
@@ -223,7 +224,7 @@ def _worker_loop() -> None:
             _finalize_job_failure(job["id"], error_text)
             emit_event(
                 stage=stage,
-                event_type="job_failed",
+                event_type=EVENT_JOB_FAILED,
                 page_id=page_id,
                 message=error_text,
                 data={"job_id": job["id"]},
@@ -261,9 +262,9 @@ def enqueue_job(stage: str, *, page_id: int | None, payload: dict[str, Any] | No
 
     emit_event(
         stage=stage,
-        event_type="job_queued",
+        event_type=EVENT_JOB_QUEUED,
         page_id=page_id,
-        message=f"Queued {_stage_label(stage)}.",
+        message=f"Queued {stage_display_name(stage)}.",
     )
     _ensure_worker_running()
     return True
@@ -301,7 +302,7 @@ def enqueue_layout_detection_for_new_pages() -> dict[str, int]:
 
     page_ids = [int(row) for row in rows]
     return enqueue_stage_for_pages(
-        "layout_detect",
+        STAGE_LAYOUT_DETECT,
         page_ids=page_ids,
         payload_factory=lambda _page_id: {"trigger": "auto"},
     )
@@ -310,7 +311,7 @@ def enqueue_layout_detection_for_new_pages() -> dict[str, int]:
 def _layout_detect_handler(job: dict[str, Any]) -> dict[str, Any]:
     page_id = job["page_id"]
     if page_id is None:
-        raise ValueError("layout_detect job requires page_id.")
+        raise ValueError(f"{STAGE_LAYOUT_DETECT} job requires page_id.")
 
     with get_session() as session:
         page_row = session.get(Page, page_id)
@@ -346,7 +347,7 @@ def _layout_detect_handler(job: dict[str, Any]) -> dict[str, Any]:
 def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
     page_id = job["page_id"]
     if page_id is None:
-        raise ValueError("ocr_extract job requires page_id.")
+        raise ValueError(f"{STAGE_OCR_EXTRACT} job requires page_id.")
 
     with get_session() as session:
         page_row = session.get(Page, page_id)

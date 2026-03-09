@@ -27,6 +27,36 @@ from .layouts import (
 )
 from .ocr_extract import extract_ocr_for_page
 from .models import DuplicateFile, Layout, OcrOutput, Page, PipelineEvent, PipelineJob
+from .pipeline_constants import (
+    EVENT_EXPORT_COMPLETED,
+    EVENT_EXPORT_FAILED,
+    EVENT_EXPORT_STARTED,
+    EVENT_JOBS_ENQUEUED,
+    EVENT_JOB_COMPLETED,
+    EVENT_JOB_ENQUEUED,
+    EVENT_JOB_ENQUEUE_SKIPPED,
+    EVENT_JOB_FAILED,
+    EVENT_JOB_STARTED,
+    EVENT_MANUAL_DETECT_COMPLETED,
+    EVENT_MANUAL_DETECT_FAILED,
+    EVENT_MANUAL_DETECT_STARTED,
+    EVENT_MANUAL_REVIEW_COMPLETED,
+    EVENT_MANUAL_REVIEW_COMPLETE_FAILED,
+    EVENT_MANUAL_REVIEW_COMPLETE_STARTED,
+    EVENT_PAGE_REMOVED,
+    EVENT_RUNTIME_OPTIONS_UPDATED,
+    EVENT_SCAN_FINISHED,
+    EVENT_SCAN_STARTED,
+    EVENT_WIPE_FINISHED,
+    EVENT_WIPE_STARTED,
+    STAGE_DISCOVERY,
+    STAGE_FINALIZATION,
+    STAGE_LAYOUT_DETECT,
+    STAGE_LAYOUT_REVIEW,
+    STAGE_OCR_EXTRACT,
+    STAGE_OCR_REVIEW,
+    STAGE_PIPELINE,
+)
 from .pipeline_runtime import (
     emit_event,
     enqueue_job,
@@ -52,8 +82,8 @@ async def lifespan(_: FastAPI):
     source_dir, allowed_extensions = _discovery_source_info()
     allowed_text = ", ".join(allowed_extensions)
     emit_event(
-        stage="discovery",
-        event_type="scan_started",
+        stage=STAGE_DISCOVERY,
+        event_type=EVENT_SCAN_STARTED,
         message=f"Startup discovery scan started for folder {source_dir} (formats: {allowed_text}).",
         data={
             "trigger": "startup",
@@ -64,8 +94,8 @@ async def lifespan(_: FastAPI):
     summary = discover_images()
     stats_snapshot = _pipeline_stats_snapshot()
     emit_event(
-        stage="discovery",
-        event_type="scan_finished",
+        stage=STAGE_DISCOVERY,
+        event_type=EVENT_SCAN_FINISHED,
         message=_scan_finished_message(
             "Startup discovery scan finished.",
             {
@@ -90,8 +120,8 @@ async def lifespan(_: FastAPI):
     if should_auto_detect_layouts_after_discovery():
         auto = enqueue_layout_detection_for_new_pages()
         emit_event(
-            stage="layout_detect",
-            event_type="jobs_enqueued",
+            stage=STAGE_LAYOUT_DETECT,
+            event_type=EVENT_JOBS_ENQUEUED,
             message=f"Auto-enqueued {auto['queued']} layout detection jobs after startup discovery.",
             data={"trigger": "startup", **auto},
         )
@@ -198,8 +228,8 @@ class FinalExportRequest(BaseModel):
 
 def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
     emit_event(
-        stage="layout_detect",
-        event_type="manual_detect_started",
+        stage=STAGE_LAYOUT_DETECT,
+        event_type=EVENT_MANUAL_DETECT_STARTED,
         page_id=page_id,
         message="Manual layout detection started.",
     )
@@ -215,15 +245,15 @@ def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) ->
         )
     except ValueError as error:
         emit_event(
-            stage="layout_detect",
-            event_type="manual_detect_failed",
+            stage=STAGE_LAYOUT_DETECT,
+            event_type=EVENT_MANUAL_DETECT_FAILED,
             page_id=page_id,
             message=f"Manual layout detection failed: {error}",
         )
         raise HTTPException(status_code=400, detail=str(error)) from error
     emit_event(
-        stage="layout_detect",
-        event_type="manual_detect_completed",
+        stage=STAGE_LAYOUT_DETECT,
+        event_type=EVENT_MANUAL_DETECT_COMPLETED,
         page_id=page_id,
         message=f"Manual layout detection completed with {result['created']} regions.",
         data={"created": result["created"], "class_counts": result["class_counts"]},
@@ -254,8 +284,8 @@ def _run_manual_ocr_reextract(page_id: int, params: ReextractOcrRequest) -> dict
         page_row.updated_at = _utc_now()
 
     emit_event(
-        stage="ocr_extract",
-        event_type="job_started",
+        stage=STAGE_OCR_EXTRACT,
+        event_type=EVENT_JOB_STARTED,
         page_id=page_id,
         message="Manual OCR reextraction started.",
         data={
@@ -281,8 +311,8 @@ def _run_manual_ocr_reextract(page_id: int, params: ReextractOcrRequest) -> dict
                 page_row.status = "ocr_failed"
                 page_row.updated_at = _utc_now()
         emit_event(
-            stage="ocr_extract",
-            event_type="job_failed",
+            stage=STAGE_OCR_EXTRACT,
+            event_type=EVENT_JOB_FAILED,
             page_id=page_id,
             message=f"Manual OCR reextraction failed: {error}",
             data={"trigger": "manual_reextract"},
@@ -290,8 +320,8 @@ def _run_manual_ocr_reextract(page_id: int, params: ReextractOcrRequest) -> dict
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     emit_event(
-        stage="ocr_extract",
-        event_type="job_completed",
+        stage=STAGE_OCR_EXTRACT,
+        event_type=EVENT_JOB_COMPLETED,
         page_id=page_id,
         message=(
             f"Manual OCR reextraction completed. "
@@ -314,8 +344,8 @@ def scan_images() -> dict[str, object]:
     source_dir, allowed_extensions = _discovery_source_info()
     allowed_text = ", ".join(allowed_extensions)
     emit_event(
-        stage="discovery",
-        event_type="scan_started",
+        stage=STAGE_DISCOVERY,
+        event_type=EVENT_SCAN_STARTED,
         message=f"Discovery scan started for folder {source_dir} (formats: {allowed_text}).",
         data={
             "trigger": "api",
@@ -335,8 +365,8 @@ def scan_images() -> dict[str, object]:
         **stats_snapshot,
     }
     emit_event(
-        stage="discovery",
-        event_type="scan_finished",
+        stage=STAGE_DISCOVERY,
+        event_type=EVENT_SCAN_FINISHED,
         message=_scan_finished_message("Discovery scan finished.", response),
         data={"trigger": "api", **response},
     )
@@ -344,8 +374,8 @@ def scan_images() -> dict[str, object]:
         auto = enqueue_layout_detection_for_new_pages()
         response["auto_layout_detection"] = auto
         emit_event(
-            stage="layout_detect",
-            event_type="jobs_enqueued",
+            stage=STAGE_LAYOUT_DETECT,
+            event_type=EVENT_JOBS_ENQUEUED,
             message=f"Auto-enqueued {auto['queued']} layout detection jobs after discovery scan.",
             data={"trigger": "api", **auto},
         )
@@ -363,8 +393,8 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
     if not payload.confirm:
         raise HTTPException(status_code=400, detail="Wipe not confirmed.")
     emit_event(
-        stage="pipeline",
-        event_type="wipe_started",
+        stage=STAGE_PIPELINE,
+        event_type=EVENT_WIPE_STARTED,
         message="Pipeline state wipe started.",
     )
 
@@ -388,8 +418,8 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
         source_dir, allowed_extensions = _discovery_source_info()
         allowed_text = ", ".join(allowed_extensions)
         emit_event(
-            stage="discovery",
-            event_type="scan_started",
+            stage=STAGE_DISCOVERY,
+            event_type=EVENT_SCAN_STARTED,
             message=f"Discovery scan started after wipe for folder {source_dir} (formats: {allowed_text}).",
             data={
                 "trigger": "wipe",
@@ -409,8 +439,8 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
             **stats_snapshot,
         }
         emit_event(
-            stage="discovery",
-            event_type="scan_finished",
+            stage=STAGE_DISCOVERY,
+            event_type=EVENT_SCAN_FINISHED,
             message=_scan_finished_message("Discovery scan finished after wipe.", rescan_summary),
             data={"trigger": "wipe", **rescan_summary},
         )
@@ -418,15 +448,15 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
             register_default_handlers()
             auto_layout_detection = enqueue_layout_detection_for_new_pages()
             emit_event(
-                stage="layout_detect",
-                event_type="jobs_enqueued",
+                stage=STAGE_LAYOUT_DETECT,
+                event_type=EVENT_JOBS_ENQUEUED,
                 message=f"Auto-enqueued {auto_layout_detection['queued']} layout detection jobs after wipe scan.",
                 data={"trigger": "wipe", **auto_layout_detection},
             )
 
     emit_event(
-        stage="pipeline",
-        event_type="wipe_finished",
+        stage=STAGE_PIPELINE,
+        event_type=EVENT_WIPE_FINISHED,
         message="Pipeline state wipe finished.",
         data={"deleted_counts": counts, "rescanned": payload.rescan},
     )
@@ -456,8 +486,8 @@ def put_runtime_options(payload: RuntimeOptionsUpdateRequest) -> dict[str, objec
         auto_extract_text_after_layout_review=payload.auto_extract_text_after_layout_review,
     )
     emit_event(
-        stage="pipeline",
-        event_type="runtime_options_updated",
+        stage=STAGE_PIPELINE,
+        event_type=EVENT_RUNTIME_OPTIONS_UPDATED,
         message=(
             "Runtime pipeline options updated: "
             f"auto detect after discovery={snapshot.auto_detect_layouts_after_discovery}, "
@@ -556,8 +586,8 @@ def remove_page(page_id: int) -> dict[str, object]:
 
     stats_snapshot = _pipeline_stats_snapshot()
     emit_event(
-        stage="discovery",
-        event_type="page_removed",
+        stage=STAGE_DISCOVERY,
+        event_type=EVENT_PAGE_REMOVED,
         message=f"Removed page {rel_path} from dashboard dataset.",
         data={
             "page_id": page_id,
@@ -841,8 +871,8 @@ def remove_layout(layout_id: int) -> dict[str, object]:
 @app.post("/api/pages/{page_id}/layouts/review-complete")
 def complete_layout_review(page_id: int) -> dict[str, object]:
     emit_event(
-        stage="layout_review",
-        event_type="manual_review_complete_started",
+        stage=STAGE_LAYOUT_REVIEW,
+        event_type=EVENT_MANUAL_REVIEW_COMPLETE_STARTED,
         page_id=page_id,
         message="Layout review completion requested.",
     )
@@ -850,33 +880,33 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
         result = mark_layout_reviewed(page_id)
     except ValueError as error:
         emit_event(
-            stage="layout_review",
-            event_type="manual_review_complete_failed",
+            stage=STAGE_LAYOUT_REVIEW,
+            event_type=EVENT_MANUAL_REVIEW_COMPLETE_FAILED,
             page_id=page_id,
             message=f"Layout review completion failed: {error}",
         )
         raise HTTPException(status_code=400, detail=str(error)) from error
     emit_event(
-        stage="layout_review",
-        event_type="manual_review_completed",
+        stage=STAGE_LAYOUT_REVIEW,
+        event_type=EVENT_MANUAL_REVIEW_COMPLETED,
         page_id=page_id,
         message="Layout review completed.",
         data={"layout_count": result["layout_count"]},
     )
     if should_auto_extract_text_after_layout_review():
-        enqueued = enqueue_job("ocr_extract", page_id=page_id, payload={"trigger": "layout_review_complete"})
+        enqueued = enqueue_job(STAGE_OCR_EXTRACT, page_id=page_id, payload={"trigger": "layout_review_complete"})
         if enqueued:
             emit_event(
-                stage="ocr_extract",
-                event_type="job_enqueued",
+                stage=STAGE_OCR_EXTRACT,
+                event_type=EVENT_JOB_ENQUEUED,
                 page_id=page_id,
                 message="Queued OCR extraction after layout review completion.",
                 data={"trigger": "layout_review_complete"},
             )
         else:
             emit_event(
-                stage="ocr_extract",
-                event_type="job_enqueue_skipped",
+                stage=STAGE_OCR_EXTRACT,
+                event_type=EVENT_JOB_ENQUEUE_SKIPPED,
                 page_id=page_id,
                 message="Skipped queuing OCR extraction because a job is already queued or running.",
                 data={"trigger": "layout_review_complete"},
@@ -911,8 +941,8 @@ def patch_ocr_output(layout_id: int, payload: UpdateOcrOutputRequest) -> dict[st
 @app.post("/api/pages/{page_id}/ocr/review-complete")
 def complete_ocr_review(page_id: int) -> dict[str, object]:
     emit_event(
-        stage="ocr_review",
-        event_type="manual_review_complete_started",
+        stage=STAGE_OCR_REVIEW,
+        event_type=EVENT_MANUAL_REVIEW_COMPLETE_STARTED,
         page_id=page_id,
         message="OCR review completion requested.",
     )
@@ -920,15 +950,15 @@ def complete_ocr_review(page_id: int) -> dict[str, object]:
         result = mark_ocr_reviewed(page_id)
     except ValueError as error:
         emit_event(
-            stage="ocr_review",
-            event_type="manual_review_complete_failed",
+            stage=STAGE_OCR_REVIEW,
+            event_type=EVENT_MANUAL_REVIEW_COMPLETE_FAILED,
             page_id=page_id,
             message=f"OCR review completion failed: {error}",
         )
         raise HTTPException(status_code=400, detail=str(error)) from error
     emit_event(
-        stage="ocr_review",
-        event_type="manual_review_completed",
+        stage=STAGE_OCR_REVIEW,
+        event_type=EVENT_MANUAL_REVIEW_COMPLETED,
         page_id=page_id,
         message="OCR review completed.",
         data={"output_count": result["output_count"]},
@@ -947,23 +977,23 @@ def run_final_export(payload: FinalExportRequest) -> dict[str, object]:
     if not payload.confirm:
         raise HTTPException(status_code=400, detail="Final export not confirmed.")
     emit_event(
-        stage="finalization",
-        event_type="export_started",
+        stage=STAGE_FINALIZATION,
+        event_type=EVENT_EXPORT_STARTED,
         message="Final dataset export started.",
     )
     try:
         result = export_final_dataset()
     except ValueError as error:
         emit_event(
-            stage="finalization",
-            event_type="export_failed",
+            stage=STAGE_FINALIZATION,
+            event_type=EVENT_EXPORT_FAILED,
             message=f"Final dataset export failed: {error}",
         )
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     emit_event(
-        stage="finalization",
-        event_type="export_completed",
+        stage=STAGE_FINALIZATION,
+        event_type=EVENT_EXPORT_COMPLETED,
         message=(
             "Final dataset export completed. "
             f"Pages: {result['page_count']}, images: {result['image_count']}, reconstructed: {result['reconstructed_count']}."

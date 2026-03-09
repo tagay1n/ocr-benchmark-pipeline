@@ -587,6 +587,11 @@
         normalizeDashboardSortState,
         sortDashboardPages,
       } from "/static/js/dashboard_sorting_utils.mjs";
+      import {
+        inferPageStatusFromPipelineEvent,
+        stageDisplayName,
+      } from "/static/js/pipeline_event_constants.mjs";
+      import { fetchJson } from "/static/js/api_client.mjs";
 
       const STORAGE_KEYS = {
         pipelinePanelExpanded: "dashboard.pipeline_panel_expanded",
@@ -677,14 +682,6 @@
         second: "2-digit",
         hour12: false,
       };
-
-      async function fetchJson(url, options) {
-        const response = await fetch(url, options);
-        if (!response.ok) {
-          throw new Error(`Request failed: ${response.status}`);
-        }
-        return response.json();
-      }
 
       function formatDateTime(value) {
         const date = new Date(value);
@@ -968,19 +965,11 @@
         duplicateList.appendChild(ul);
       }
 
-      function stageDisplayName(stage) {
-        if (!stage) return "Pipeline";
-        if (stage === "layout_detect") return "Layout detection";
-        if (stage === "ocr_extract") return "OCR extraction";
-        if (stage === "ocr_review") return "OCR review";
-        return toSentenceCaseLabel(stage);
-      }
-
       function renderActivity(activity) {
         const running = activity.in_progress;
         if (running) {
           const pageText = running.rel_path ? ` | ${running.rel_path}` : "";
-          pipelineHeadline.textContent = `Running ${stageDisplayName(running.stage)}${pageText}`;
+          pipelineHeadline.textContent = `Running ${stageDisplayName(running.stage, toSentenceCaseLabel)}${pageText}`;
         } else if (activity.worker_running) {
           pipelineHeadline.textContent = "Pipeline worker active";
         } else {
@@ -993,7 +982,7 @@
         if (queued.by_stage && Object.keys(queued.by_stage).length > 0) {
           queueParts.push(
             Object.entries(queued.by_stage)
-              .map(([stage, count]) => `${stageDisplayName(stage)}=${count}`)
+              .map(([stage, count]) => `${stageDisplayName(stage, toSentenceCaseLabel)}=${count}`)
               .join(", "),
           );
         }
@@ -1064,34 +1053,6 @@
         lastProcessedEventId = maxId;
       }
 
-      function inferPageStatusFromEvent(event) {
-        const stage = String(event?.stage || "");
-        const eventType = String(event?.event_type || "");
-        const result = event?.data && typeof event.data === "object" ? event.data.result : null;
-        if (stage === "layout_detect") {
-          if (eventType === "job_started") return "layout_detecting";
-          if (eventType === "job_completed" && !(result && result.skipped)) return "layout_detected";
-          if (eventType === "job_failed") return "new";
-          if (eventType === "manual_detect_completed") return "layout_detected";
-          return null;
-        }
-        if (stage === "layout_review") {
-          if (eventType === "manual_review_completed") return "layout_reviewed";
-          return null;
-        }
-        if (stage === "ocr_extract") {
-          if (eventType === "job_started") return "ocr_extracting";
-          if (eventType === "job_completed" && !(result && result.skipped)) return "ocr_done";
-          if (eventType === "job_failed") return "ocr_failed";
-          return null;
-        }
-        if (stage === "ocr_review") {
-          if (eventType === "manual_review_completed") return "ocr_reviewed";
-          return null;
-        }
-        return null;
-      }
-
       function applyPageStatusUpdate(pageId, status) {
         const page = currentPages.find((row) => Number(row.id) === Number(pageId));
         if (!page) {
@@ -1138,7 +1099,7 @@
           if (!Number.isInteger(pageId) || pageId <= 0) {
             continue;
           }
-          const nextStatus = inferPageStatusFromEvent(event);
+          const nextStatus = inferPageStatusFromPipelineEvent(event);
           if (!nextStatus) {
             continue;
           }

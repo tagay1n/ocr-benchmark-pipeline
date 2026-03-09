@@ -7,6 +7,10 @@ function readHtml(path) {
   return readFileSync(path, "utf8");
 }
 
+function readModule(path) {
+  return readFileSync(path, "utf8");
+}
+
 test("dashboard HTML exposes required pipeline controls and backend routes", () => {
   const html = readHtml("app/static/index.html");
   const requiredIds = [
@@ -30,22 +34,27 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(html.includes('"/api/final/export"'), true);
   assert.equal(html.includes('"/api/runtime-options"'), true);
   assert.equal(html.includes('"/static/js/dashboard_sorting_utils.mjs"'), true);
+  assert.equal(html.includes('"/static/js/pipeline_event_constants.mjs"'), true);
+  assert.equal(html.includes('"/static/js/api_client.mjs"'), true);
 });
 
 test("layout review HTML keeps detection+zoom integration hooks", () => {
   const html = readHtml("app/static/layouts.html");
+  const pageModule = readModule("app/static/js/layout_review_page.mjs");
   assert.equal(html.includes('id="zoom-percent-input"'), true);
   assert.equal(html.includes('id="zoom-trigger"'), true);
   assert.equal(html.includes('id="zoom-menu"'), true);
   assert.equal(html.includes("layout-bbox-editor"), true);
-  assert.equal(html.includes("`/api/pages/${pageId}/layouts/detect`"), true);
-  assert.equal(html.includes('bindingLinesLayer.id = "bind-lines-layer"'), true);
-  assert.equal(html.includes("box-bind-btn"), true);
-  assert.equal(html.includes("caption-bind-chip-remove"), true);
-  assert.equal(html.includes("layout-show-bbox-btn"), true);
   assert.equal(html.includes('id="magnifier-toggle-btn"'), true);
-  assert.equal(html.includes('"/static/js/magnifier.mjs"'), true);
-  assert.equal(html.includes('"/static/js/layout_class_catalog.mjs"'), true);
+  assert.equal(html.includes('src="/static/js/layout_review_page.mjs"'), true);
+  assert.equal(pageModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
+  assert.equal(pageModule.includes('bindingLinesLayer.id = "bind-lines-layer"'), true);
+  assert.equal(pageModule.includes("box-bind-btn"), true);
+  assert.equal(pageModule.includes("caption-bind-chip-remove"), true);
+  assert.equal(pageModule.includes("layout-show-bbox-btn"), true);
+  assert.equal(pageModule.includes('"/static/js/magnifier.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/layout_class_catalog.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/api_client.mjs"'), true);
 });
 
 test("layout class catalog module exports stable class policy", async () => {
@@ -79,6 +88,7 @@ test("layout class catalog module exports stable class policy", async () => {
 
 test("ocr review HTML keeps extraction/editor integration hooks", () => {
   const html = readHtml("app/static/ocr_review.html");
+  const pageModule = readModule("app/static/js/ocr_review_page.mjs");
   const requiredIds = [
     'id="zoom-percent-input"',
     'id="zoom-trigger"',
@@ -95,13 +105,34 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
   }
-  assert.equal(html.includes("`/api/pages/${state.pageId}/ocr/reextract`"), true);
-  assert.equal(html.includes("renderSourceCaptionBindingLines"), true);
-  assert.equal(html.includes('"./js/magnifier.mjs"'), true);
-  assert.equal(html.includes('"./js/layout_class_catalog.mjs"'), true);
+  assert.equal(html.includes('src="/static/js/ocr_review_page.mjs"'), true);
+  assert.equal(pageModule.includes("`/api/pages/${state.pageId}/ocr/reextract`"), true);
+  assert.equal(pageModule.includes("renderSourceCaptionBindingLines"), true);
+  assert.equal(pageModule.includes('"./magnifier.mjs"'), true);
+  assert.equal(pageModule.includes('"./layout_class_catalog.mjs"'), true);
+  assert.equal(pageModule.includes('"./api_client.mjs"'), true);
 });
 
 test("ocr review HTML no longer hardcodes class color map", () => {
-  const html = readHtml("app/static/ocr_review.html");
-  assert.equal(html.includes("const CLASS_COLORS = {"), false);
+  const moduleCode = readModule("app/static/js/ocr_review_page.mjs");
+  assert.equal(moduleCode.includes("const CLASS_COLORS = {"), false);
+});
+
+test("pipeline event constants module exposes stable stage/event keys", async () => {
+  const moduleUrl = pathToFileURL(`${process.cwd()}/app/static/js/pipeline_event_constants.mjs`).href;
+  const constants = await import(moduleUrl);
+  assert.equal(constants.PIPELINE_STAGE.DISCOVERY, "discovery");
+  assert.equal(constants.PIPELINE_STAGE.OCR_EXTRACT, "ocr_extract");
+  assert.equal(constants.PIPELINE_EVENT.JOB_STARTED, "job_started");
+  assert.equal(constants.PIPELINE_EVENT.MANUAL_REVIEW_COMPLETED, "manual_review_completed");
+  assert.equal(typeof constants.stageDisplayName, "function");
+  assert.equal(typeof constants.inferPageStatusFromPipelineEvent, "function");
+  assert.equal(
+    constants.inferPageStatusFromPipelineEvent({
+      stage: "ocr_extract",
+      event_type: "job_completed",
+      data: { result: { skipped: false } },
+    }),
+    "ocr_done",
+  );
 });
