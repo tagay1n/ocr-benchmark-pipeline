@@ -10,6 +10,7 @@ import {
 import { fetchJson } from "./api_client.mjs";
 import {
   normalizeNextPagePayload,
+  pipelineProgressFromSummary,
 } from "./dashboard_review_actions_utils.mjs";
 import {
   readStorage,
@@ -425,20 +426,17 @@ function applyReviewActionAvailability(actionKey, nextPageId, nextPageRelPath) {
   action.button.title = action.noItemsTitle;
 }
 
-function ocrReviewedCountFromSummary(summaryPayload) {
-  const byStatus = summaryPayload?.by_status && typeof summaryPayload.by_status === "object"
-    ? summaryPayload.by_status
-    : {};
-  const rawCount = byStatus.ocr_reviewed ?? byStatus.OCR_REVIEWED ?? 0;
-  const parsed = Number(rawCount);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 0;
-  }
-  return Math.floor(parsed);
+function applyPipelineProgressLabels(summaryPayload) {
+  const progress = pipelineProgressFromSummary(summaryPayload);
+  scanBtn.textContent = `Scan(${progress.total})`;
+  reviewLayoutsBtn.textContent = `Review layouts(${progress.layoutReviewed}/${progress.total})`;
+  reviewOcrBtn.textContent = `Review OCR(${progress.ocrReviewed}/${progress.total})`;
+  return progress;
 }
 
 function applyPagesSummary(summaryPayload) {
-  const reviewedCount = ocrReviewedCountFromSummary(summaryPayload);
+  const progress = applyPipelineProgressLabels(summaryPayload);
+  const reviewedCount = progress.ocrReviewed;
   if (reviewedCount > 0) {
     exportFinalBtn.disabled = false;
     exportFinalBtn.title = `Export ${reviewedCount} OCR-reviewed page${reviewedCount === 1 ? "" : "s"}.`;

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   findNextPageForStatus,
   normalizeNextPagePayload,
+  pipelineProgressFromSummary,
 } from "../app/static/js/dashboard_review_actions_utils.mjs";
 
 test("normalizeNextPagePayload accepts valid payload and rejects invalid shape", () => {
@@ -62,5 +63,40 @@ test("findNextPageForStatus tolerates malformed pages payload", () => {
   assert.deepEqual(findNextPageForStatus(null, "layout_detected"), {
     nextPageId: null,
     nextPageRelPath: null,
+  });
+});
+
+test("pipelineProgressFromSummary computes stage counters across mixed status key styles", () => {
+  const progress = pipelineProgressFromSummary({
+    total_pages: 100,
+    by_status: {
+      LAYOUT_REVIEWED: 40,
+      ocr_extracting: 3,
+      OCR_DONE: 20,
+      "ocr-failed": 2,
+      ocr_reviewed: 27,
+      new: 8,
+    },
+  });
+
+  assert.deepEqual(progress, {
+    total: 100,
+    layoutReviewed: 92,
+    ocrReviewed: 27,
+  });
+});
+
+test("pipelineProgressFromSummary clamps malformed values to safe non-negative counts", () => {
+  const progress = pipelineProgressFromSummary({
+    total_pages: "bad",
+    by_status: {
+      ocr_reviewed: "6.9",
+      layout_reviewed: -10,
+    },
+  });
+  assert.deepEqual(progress, {
+    total: 0,
+    layoutReviewed: 0,
+    ocrReviewed: 0,
   });
 });

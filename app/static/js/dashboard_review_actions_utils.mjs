@@ -28,3 +28,47 @@ export function findNextPageForStatus(pages, pendingStatus) {
     nextPageRelPath: pending[0].rel_path ? String(pending[0].rel_path) : null,
   };
 }
+
+function normalizeSummaryStatusKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function toNonNegativeInt(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return Math.floor(parsed);
+}
+
+export function pipelineProgressFromSummary(summaryPayload) {
+  const total = toNonNegativeInt(summaryPayload?.total_pages);
+  const rawByStatus = summaryPayload?.by_status && typeof summaryPayload.by_status === "object"
+    ? summaryPayload.by_status
+    : {};
+
+  const byStatus = {};
+  for (const [statusKey, rawCount] of Object.entries(rawByStatus)) {
+    const key = normalizeSummaryStatusKey(statusKey);
+    byStatus[key] = (byStatus[key] || 0) + toNonNegativeInt(rawCount);
+  }
+
+  const layoutReviewed = [
+    "layout_reviewed",
+    "ocr_extracting",
+    "ocr_done",
+    "ocr_failed",
+    "ocr_reviewed",
+  ].reduce((sum, statusKey) => sum + toNonNegativeInt(byStatus[statusKey]), 0);
+
+  const ocrReviewed = toNonNegativeInt(byStatus.ocr_reviewed);
+
+  return {
+    total,
+    layoutReviewed: Math.min(total, layoutReviewed),
+    ocrReviewed: Math.min(total, ocrReviewed),
+  };
+}

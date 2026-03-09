@@ -15,7 +15,7 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
 ## Current Product Surface
 
 - Dashboard (`/`):
-  - Pipeline actions: `Scan -> Review layouts -> Review OCR -> Export`.
+  - Pipeline actions with live counters: `Scan(total) -> Review layouts(done/total) -> Review OCR(done/total) -> Export`.
   - Live backend activity panel (SSE stream).
   - Duplicate-file warnings.
   - Sortable + paginated indexed-images table (default: `Added time` newest first).
