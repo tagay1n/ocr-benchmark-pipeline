@@ -178,6 +178,10 @@
         width: 38px;
         height: 38px;
         padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
         border: 1px solid var(--border);
         background: #ece8df;
         color: var(--ink);
@@ -580,6 +584,20 @@
         inset: 0;
         pointer-events: none;
         z-index: 0;
+      }
+
+      .overlap-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 3;
+      }
+
+      .overlap-segment {
+        position: absolute;
+        border-radius: 2px;
+        opacity: 0.92;
+        box-shadow: 0 0 0 1px rgba(131, 37, 37, 0.14);
       }
 
       .draw-layer {
@@ -1122,6 +1140,7 @@
       import {
         clampZoomPercent,
         compactReadingOrdersAfterDeletion,
+        detectOverlappingBorderSegments,
         computeDraggedBBox,
         computeViewportScrollTargetForLayoutId,
         computeZoomScale,
@@ -2383,15 +2402,22 @@
         defs.appendChild(marker);
         bindingLinesLayer.appendChild(defs);
         overlay.appendChild(bindingLinesLayer);
+        const overlapLayer = document.createElement("div");
+        overlapLayer.className = "overlap-layer";
+        overlay.appendChild(overlapLayer);
 
         const activeBindingCaptionId = Number(state.activeBindingCaptionId);
         const activeBindingTargetIds = Number.isInteger(activeBindingCaptionId) && activeBindingCaptionId > 0
           ? new Set(captionTargetIds(activeBindingCaptionId))
           : new Set();
+        const layoutColorById = new Map();
 
         for (const layout of state.layouts) {
           const layoutId = Number(layout.id);
           const color = colorForClass(layout.class_name);
+          if (Number.isInteger(layoutId) && layoutId > 0) {
+            layoutColorById.set(layoutId, color);
+          }
           const box = document.createElement("div");
           box.className = "box";
           box.dataset.layoutId = String(layoutId);
@@ -2480,6 +2506,51 @@
           }
 
           overlay.appendChild(box);
+        }
+
+        const overlapSegments = detectOverlappingBorderSegments({
+          layouts: state.layouts,
+          contentWidth: overlayWidth,
+          contentHeight: overlayHeight,
+          tolerancePx: 1,
+          minOverlapPx: 1,
+        });
+        const overlapThickness = 3;
+        for (const segment of overlapSegments) {
+          const orientation = String(segment.orientation || "");
+          const coordPx = Number(segment.coordPx);
+          const startPx = Number(segment.startPx);
+          const endPx = Number(segment.endPx);
+          if (
+            !Number.isFinite(coordPx) ||
+            !Number.isFinite(startPx) ||
+            !Number.isFinite(endPx) ||
+            endPx <= startPx
+          ) {
+            continue;
+          }
+          const mainColor =
+            layoutColorById.get(Number(segment.layoutIdA)) ||
+            layoutColorById.get(Number(segment.layoutIdB)) ||
+            "#355fa8";
+          const overlapEl = document.createElement("div");
+          overlapEl.className = "overlap-segment";
+          if (orientation === "horizontal") {
+            overlapEl.style.left = `${startPx.toFixed(2)}px`;
+            overlapEl.style.top = `${(coordPx - overlapThickness / 2).toFixed(2)}px`;
+            overlapEl.style.width = `${(endPx - startPx).toFixed(2)}px`;
+            overlapEl.style.height = `${overlapThickness}px`;
+            overlapEl.style.background = `repeating-linear-gradient(90deg, ${hexToRgba(mainColor, 0.95)} 0 5px, ${hexToRgba("#cc2f2f", 0.95)} 5px 10px)`;
+          } else if (orientation === "vertical") {
+            overlapEl.style.left = `${(coordPx - overlapThickness / 2).toFixed(2)}px`;
+            overlapEl.style.top = `${startPx.toFixed(2)}px`;
+            overlapEl.style.width = `${overlapThickness}px`;
+            overlapEl.style.height = `${(endPx - startPx).toFixed(2)}px`;
+            overlapEl.style.background = `repeating-linear-gradient(180deg, ${hexToRgba(mainColor, 0.95)} 0 5px, ${hexToRgba("#cc2f2f", 0.95)} 5px 10px)`;
+          } else {
+            continue;
+          }
+          overlapLayer.appendChild(overlapEl);
         }
 
         const pixelRectFromBBox = (bbox) => {

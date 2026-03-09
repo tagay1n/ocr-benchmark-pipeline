@@ -9,6 +9,7 @@ import {
   computeApproxLineBand,
   computeApproxLineBandByIndex,
   computeDraggedBBox,
+  detectOverlappingBorderSegments,
   filterReviewHistory,
   mergeLayoutsForReview,
   computeViewportCenterPadding,
@@ -658,4 +659,96 @@ test("computeDraggedBBox randomized invariants", () => {
     assert.ok(bbox.x2 > bbox.x1);
     assert.ok(bbox.y2 > bbox.y1);
   }
+});
+
+test("detectOverlappingBorderSegments finds shared vertical and horizontal edges", () => {
+  const overlaps = detectOverlappingBorderSegments({
+    layouts: [
+      { id: 1, bbox: { x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.5 } },
+      { id: 2, bbox: { x1: 0.05, y1: 0.1, x2: 0.4, y2: 0.8 } },
+    ],
+    contentWidth: 1000,
+    contentHeight: 1000,
+    minOverlapPx: 8,
+  });
+
+  const vertical = overlaps.find((item) => item.orientation === "vertical");
+  const horizontal = overlaps.find((item) => item.orientation === "horizontal");
+  assert.ok(vertical);
+  assert.ok(horizontal);
+  assert.equal(Math.round(vertical.coordPx), 400);
+  assert.equal(Math.round(vertical.startPx), 100);
+  assert.equal(Math.round(vertical.endPx), 500);
+  assert.equal(Math.round(horizontal.coordPx), 100);
+  assert.equal(Math.round(horizontal.startPx), 100);
+  assert.equal(Math.round(horizontal.endPx), 400);
+});
+
+test("detectOverlappingBorderSegments matches within 1px and requires non-zero shared length by default", () => {
+  const farDifferent = detectOverlappingBorderSegments({
+    layouts: [
+      { id: 1, bbox: { x1: 0.2, y1: 0.1, x2: 0.4, y2: 0.6 } },
+      { id: 2, bbox: { x1: 0.402, y1: 0.2, x2: 0.7, y2: 0.7 } },
+    ],
+    contentWidth: 1000,
+    contentHeight: 1000,
+    minOverlapPx: 1,
+  });
+  assert.equal(farDifferent.length, 0);
+
+  const onePixelCloseMatch = detectOverlappingBorderSegments({
+    layouts: [
+      { id: 1, bbox: { x1: 0.2, y1: 0.1, x2: 0.4, y2: 0.6 } },
+      { id: 2, bbox: { x1: 0.401, y1: 0.2, x2: 0.7, y2: 0.7 } },
+    ],
+    contentWidth: 1000,
+    contentHeight: 1000,
+    minOverlapPx: 1,
+  });
+  assert.ok(onePixelCloseMatch.some((item) => item.orientation === "vertical"));
+
+  const uiPrecisionMatch = detectOverlappingBorderSegments({
+    layouts: [
+      { id: 1, bbox: { x1: 0.2, y1: 0.1, x2: 0.4, y2: 0.6 } },
+      { id: 2, bbox: { x1: 0.40004, y1: 0.2, x2: 0.7, y2: 0.7 } },
+    ],
+    contentWidth: 1000,
+    contentHeight: 1000,
+    minOverlapPx: 8,
+  });
+  assert.ok(uiPrecisionMatch.some((item) => item.orientation === "vertical"));
+
+  const touchingPointOnly = detectOverlappingBorderSegments({
+    layouts: [
+      { id: 1, bbox: { x1: 0.2, y1: 0.1, x2: 0.4, y2: 0.6 } },
+      { id: 2, bbox: { x1: 0.4, y1: 0.6, x2: 0.7, y2: 0.9 } },
+    ],
+    contentWidth: 1000,
+    contentHeight: 1000,
+  });
+  assert.equal(touchingPointOnly.length, 0);
+
+  const minOverlapFiltered = detectOverlappingBorderSegments({
+    layouts: [
+      { id: 1, bbox: { x1: 0.2, y1: 0.1, x2: 0.4, y2: 0.6 } },
+      { id: 2, bbox: { x1: 0.4, y1: 0.595, x2: 0.7, y2: 0.9 } },
+    ],
+    contentWidth: 1000,
+    contentHeight: 1000,
+    minOverlapPx: 8,
+  });
+  assert.equal(minOverlapFiltered.length, 0);
+
+  const deepInteriorOverlap = detectOverlappingBorderSegments({
+    layouts: [
+      { id: 1, bbox: { x1: 0.1, y1: 0.1, x2: 0.8, y2: 0.8 } },
+      { id: 2, bbox: { x1: 0.3, y1: 0.3, x2: 0.9, y2: 0.9 } },
+    ],
+    contentWidth: 1000,
+    contentHeight: 1000,
+    tolerancePx: 1,
+    minOverlapPx: 1,
+  });
+  assert.ok(deepInteriorOverlap.some((item) => item.orientation === "vertical"));
+  assert.ok(deepInteriorOverlap.some((item) => item.orientation === "horizontal"));
 });

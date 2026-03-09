@@ -485,6 +485,241 @@ export function computeDraggedBBox({
   };
 }
 
+export function detectOverlappingBorderSegments({
+  layouts,
+  contentWidth,
+  contentHeight,
+  tolerancePx = 1,
+  coordinateSnapDigits = 4,
+  minOverlapPx = 1,
+} = {}) {
+  const width = Number(contentWidth);
+  const height = Number(contentHeight);
+  if (!Array.isArray(layouts) || layouts.length < 2) {
+    return [];
+  }
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return [];
+  }
+  const tolerance = Number.isFinite(Number(tolerancePx)) ? Math.max(0, Number(tolerancePx)) : 1;
+  const snapDigits = Number.isInteger(Number(coordinateSnapDigits))
+    ? Math.max(0, Number(coordinateSnapDigits))
+    : 4;
+  const snapScale = 10 ** snapDigits;
+  const snapRatio = (value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return Number.NaN;
+    }
+    return Math.round(numeric * snapScale) / snapScale;
+  };
+  const minOverlap = Number.isFinite(Number(minOverlapPx)) ? Math.max(0, Number(minOverlapPx)) : 1;
+  const clampX = (value) => Math.max(0, Math.min(width, value));
+  const clampY = (value) => Math.max(0, Math.min(height, value));
+
+  const rects = [];
+  const edges = [];
+  for (const layout of layouts) {
+    const layoutId = Number(layout?.id);
+    const bbox = layout?.bbox;
+    if (!Number.isInteger(layoutId) || layoutId <= 0 || !bbox) {
+      continue;
+    }
+    const rawX1 = snapRatio(bbox.x1) * width;
+    const rawY1 = snapRatio(bbox.y1) * height;
+    const rawX2 = snapRatio(bbox.x2) * width;
+    const rawY2 = snapRatio(bbox.y2) * height;
+    if (![rawX1, rawY1, rawX2, rawY2].every(Number.isFinite)) {
+      continue;
+    }
+    const x1 = Math.min(clampX(rawX1), clampX(rawX2));
+    const x2 = Math.max(clampX(rawX1), clampX(rawX2));
+    const y1 = Math.min(clampY(rawY1), clampY(rawY2));
+    const y2 = Math.max(clampY(rawY1), clampY(rawY2));
+    if (x2 <= x1 || y2 <= y1) {
+      continue;
+    }
+    rects.push({ layoutId, x1, y1, x2, y2 });
+    edges.push({ orientation: "vertical", coordPx: x1, startPx: y1, endPx: y2, layoutId });
+    edges.push({ orientation: "vertical", coordPx: x2, startPx: y1, endPx: y2, layoutId });
+    edges.push({ orientation: "horizontal", coordPx: y1, startPx: x1, endPx: x2, layoutId });
+    edges.push({ orientation: "horizontal", coordPx: y2, startPx: x1, endPx: x2, layoutId });
+  }
+
+  const overlapKeySet = new Set();
+  const overlaps = [];
+  const addOverlap = ({
+    orientation,
+    coordPx,
+    startPx,
+    endPx,
+    layoutIdA,
+    layoutIdB,
+  }) => {
+    if (!Number.isFinite(coordPx) || !Number.isFinite(startPx) || !Number.isFinite(endPx)) {
+      return;
+    }
+    if (endPx - startPx < minOverlap) {
+      return;
+    }
+    const idA = Number(layoutIdA);
+    const idB = Number(layoutIdB);
+    if (!Number.isInteger(idA) || !Number.isInteger(idB) || idA <= 0 || idB <= 0 || idA === idB) {
+      return;
+    }
+    const lowId = Math.min(idA, idB);
+    const highId = Math.max(idA, idB);
+    const key = [
+      String(orientation),
+      coordPx.toFixed(3),
+      startPx.toFixed(3),
+      endPx.toFixed(3),
+      lowId,
+      highId,
+    ].join("|");
+    if (overlapKeySet.has(key)) {
+      return;
+    }
+    overlapKeySet.add(key);
+    overlaps.push({
+      orientation: String(orientation),
+      coordPx,
+      startPx,
+      endPx,
+      layoutIdA: idA,
+      layoutIdB: idB,
+    });
+  };
+
+  for (let index = 0; index < edges.length; index += 1) {
+    const left = edges[index];
+    for (let inner = index + 1; inner < edges.length; inner += 1) {
+      const right = edges[inner];
+      if (left.layoutId === right.layoutId) {
+        continue;
+      }
+      if (left.orientation !== right.orientation) {
+        continue;
+      }
+      if (Math.abs(left.coordPx - right.coordPx) > tolerance) {
+        continue;
+      }
+      const startPx = Math.max(left.startPx, right.startPx);
+      const endPx = Math.min(left.endPx, right.endPx);
+      if (!Number.isFinite(startPx) || !Number.isFinite(endPx)) {
+        continue;
+      }
+      addOverlap({
+        orientation: left.orientation,
+        coordPx: (left.coordPx + right.coordPx) / 2,
+        startPx,
+        endPx,
+        layoutIdA: left.layoutId,
+        layoutIdB: right.layoutId,
+      });
+    }
+  }
+
+  for (let index = 0; index < rects.length; index += 1) {
+    const left = rects[index];
+    for (let inner = index + 1; inner < rects.length; inner += 1) {
+      const right = rects[inner];
+      const overlapYStart = Math.max(left.y1, right.y1);
+      const overlapYEnd = Math.min(left.y2, right.y2);
+      const overlapXStart = Math.max(left.x1, right.x1);
+      const overlapXEnd = Math.min(left.x2, right.x2);
+
+      if (overlapYEnd - overlapYStart >= minOverlap) {
+        if (left.x1 > right.x1 + tolerance && left.x1 < right.x2 - tolerance) {
+          addOverlap({
+            orientation: "vertical",
+            coordPx: left.x1,
+            startPx: overlapYStart,
+            endPx: overlapYEnd,
+            layoutIdA: left.layoutId,
+            layoutIdB: right.layoutId,
+          });
+        }
+        if (left.x2 > right.x1 + tolerance && left.x2 < right.x2 - tolerance) {
+          addOverlap({
+            orientation: "vertical",
+            coordPx: left.x2,
+            startPx: overlapYStart,
+            endPx: overlapYEnd,
+            layoutIdA: left.layoutId,
+            layoutIdB: right.layoutId,
+          });
+        }
+        if (right.x1 > left.x1 + tolerance && right.x1 < left.x2 - tolerance) {
+          addOverlap({
+            orientation: "vertical",
+            coordPx: right.x1,
+            startPx: overlapYStart,
+            endPx: overlapYEnd,
+            layoutIdA: right.layoutId,
+            layoutIdB: left.layoutId,
+          });
+        }
+        if (right.x2 > left.x1 + tolerance && right.x2 < left.x2 - tolerance) {
+          addOverlap({
+            orientation: "vertical",
+            coordPx: right.x2,
+            startPx: overlapYStart,
+            endPx: overlapYEnd,
+            layoutIdA: right.layoutId,
+            layoutIdB: left.layoutId,
+          });
+        }
+      }
+
+      if (overlapXEnd - overlapXStart >= minOverlap) {
+        if (left.y1 > right.y1 + tolerance && left.y1 < right.y2 - tolerance) {
+          addOverlap({
+            orientation: "horizontal",
+            coordPx: left.y1,
+            startPx: overlapXStart,
+            endPx: overlapXEnd,
+            layoutIdA: left.layoutId,
+            layoutIdB: right.layoutId,
+          });
+        }
+        if (left.y2 > right.y1 + tolerance && left.y2 < right.y2 - tolerance) {
+          addOverlap({
+            orientation: "horizontal",
+            coordPx: left.y2,
+            startPx: overlapXStart,
+            endPx: overlapXEnd,
+            layoutIdA: left.layoutId,
+            layoutIdB: right.layoutId,
+          });
+        }
+        if (right.y1 > left.y1 + tolerance && right.y1 < left.y2 - tolerance) {
+          addOverlap({
+            orientation: "horizontal",
+            coordPx: right.y1,
+            startPx: overlapXStart,
+            endPx: overlapXEnd,
+            layoutIdA: right.layoutId,
+            layoutIdB: left.layoutId,
+          });
+        }
+        if (right.y2 > left.y1 + tolerance && right.y2 < left.y2 - tolerance) {
+          addOverlap({
+            orientation: "horizontal",
+            coordPx: right.y2,
+            startPx: overlapXStart,
+            endPx: overlapXEnd,
+            layoutIdA: right.layoutId,
+            layoutIdB: left.layoutId,
+          });
+        }
+      }
+    }
+  }
+
+  return overlaps;
+}
+
 export function computeViewportCenterPadding({
   contentWidth,
   contentHeight,
