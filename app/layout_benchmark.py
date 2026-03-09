@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import json
+import math
 import time
 from pathlib import Path
 from threading import Lock
@@ -13,7 +14,7 @@ from sqlalchemy import func, select
 
 from .config import settings
 from .db import get_session
-from .layout_classes import normalize_detected_class_name
+from .layout_classes import normalize_class_name
 from .layout_detection_defaults import get_layout_detection_defaults, update_layout_detection_defaults
 from .layouts import _detect_doclaynet_layouts
 from .models import Layout, LayoutBenchmarkResult, LayoutBenchmarkRun, Page, PipelineJob
@@ -38,20 +39,16 @@ AUTO_APPLY_MIN_SAMPLE_SIZE = 10
 AUTO_APPLY_MIN_RELATIVE_IMPROVEMENT = 0.025
 AUTO_APPLY_STABILITY_PAGES = 2
 PROGRESS_EMIT_INTERVAL_SECONDS = 1.5
-MATCH_IOU_THRESHOLD = 0.5
 
-CLASS_WEIGHTS: dict[str, float] = {
-    "text": 1.0,
-    "section_header": 1.15,
-    "caption": 1.2,
-    "table": 1.25,
-    "formula": 1.25,
-    "footnote": 0.95,
-    "page_header": 0.8,
-    "page_footer": 0.8,
-    "picture": 0.7,
-    "list_item": 1.0,
+BENCHMARK_CLASS_REMAP: dict[str, str] = {
+    # Keep benchmark aligned with detection postprocessing, but preserve list_item as a distinct class.
+    "title": "section_header",
 }
+
+AP_IOU_THRESHOLDS: tuple[float, ...] = tuple(round(0.5 + 0.05 * index, 2) for index in range(10))
+
+HARD_CASE_CLASSES = frozenset({"table", "formula", "caption", "picture", "footnote", "list_item"})
+HARD_CASE_MIN_LAYOUTS = 8
 
 _ELIGIBLE_STATUSES = frozenset(
     {
@@ -118,8 +115,8 @@ def _config_label(config: dict[str, Any]) -> str:
 
 
 def _normalize_layout_class_for_benchmark(class_name: str) -> str:
-    # Keep benchmark scoring consistent with detector output normalization policy.
-    return normalize_detected_class_name(class_name)
+    normalized = normalize_class_name(class_name)
+    return BENCHMARK_CLASS_REMAP.get(normalized, normalized)
 
 
 def _bbox_iou(box_a: dict[str, float], box_b: dict[str, float]) -> float:
@@ -152,40 +149,79 @@ def _bbox_iou(box_a: dict[str, float], box_b: dict[str, float]) -> float:
     return intersection / union
 
 
-def _greedy_match_counts(
+def _compute_ap_from_pr_curve(recalls: list[float], precisions: list[float]) -> float:
+    if not recalls or not precisions or len(recalls) != len(precisions):
+        return 0.0
+    # COCO-style interpolation: precision envelope sampled at 101 recall points.
+    recall_values = [0.0] + recalls + [1.0]
+    precision_values = [0.0] + precisions + [0.0]
+    for index in range(len(precision_values) - 2, -1, -1):
+        precision_values[index] = max(precision_values[index], precision_values[index + 1])
+    area_sum = 0.0
+    value_index = 0
+    for point in range(101):
+        target_recall = point / 100.0
+        while value_index < len(recall_values) and recall_values[value_index] < target_recall:
+            value_index += 1
+        if value_index >= len(precision_values):
+            area_sum += 0.0
+        else:
+            area_sum += float(precision_values[value_index])
+    return area_sum / 101.0
+
+
+def _average_precision_by_iou_threshold(
     gt_boxes: list[dict[str, Any]],
     pred_boxes: list[dict[str, Any]],
-    *,
-    iou_threshold: float,
-) -> tuple[int, int, int]:
+) -> list[tuple[float, float]] | None:
     if not gt_boxes:
-        return 0, len(pred_boxes), 0
+        return [] if pred_boxes else None
     if not pred_boxes:
-        return 0, 0, len(gt_boxes)
+        return [(threshold, 0.0) for threshold in AP_IOU_THRESHOLDS]
 
-    candidates: list[tuple[float, int, int]] = []
-    for gt_idx, gt_box in enumerate(gt_boxes):
-        for pred_idx, pred_box in enumerate(pred_boxes):
-            iou = _bbox_iou(gt_box, pred_box)
-            if iou >= iou_threshold:
-                candidates.append((iou, gt_idx, pred_idx))
-    candidates.sort(key=lambda row: row[0], reverse=True)
+    sorted_pred = sorted(
+        pred_boxes,
+        key=lambda row: float(row.get("confidence") if row.get("confidence") is not None else 0.0),
+        reverse=True,
+    )
+    gt_total = float(len(gt_boxes))
+    ap_values: list[tuple[float, float]] = []
+    for iou_threshold in AP_IOU_THRESHOLDS:
+        matched_gt: set[int] = set()
+        tp_prefix: list[float] = []
+        fp_prefix: list[float] = []
+        tp_total = 0.0
+        fp_total = 0.0
+        for pred_box in sorted_pred:
+            best_gt_idx = -1
+            best_iou = 0.0
+            for gt_idx, gt_box in enumerate(gt_boxes):
+                if gt_idx in matched_gt:
+                    continue
+                iou = _bbox_iou(gt_box, pred_box)
+                if iou >= iou_threshold and iou > best_iou:
+                    best_iou = iou
+                    best_gt_idx = gt_idx
+            if best_gt_idx >= 0:
+                matched_gt.add(best_gt_idx)
+                tp_total += 1.0
+            else:
+                fp_total += 1.0
+            tp_prefix.append(tp_total)
+            fp_prefix.append(fp_total)
 
-    matched_gt: set[int] = set()
-    matched_pred: set[int] = set()
-    for _iou, gt_idx, pred_idx in candidates:
-        if gt_idx in matched_gt or pred_idx in matched_pred:
-            continue
-        matched_gt.add(gt_idx)
-        matched_pred.add(pred_idx)
-
-    tp = len(matched_gt)
-    fp = len(pred_boxes) - tp
-    fn = len(gt_boxes) - tp
-    return tp, fp, fn
+        recalls = [tp / gt_total for tp in tp_prefix]
+        precisions = [
+            (tp_prefix[index] / (tp_prefix[index] + fp_prefix[index]))
+            if (tp_prefix[index] + fp_prefix[index]) > 0
+            else 0.0
+            for index in range(len(tp_prefix))
+        ]
+        ap_values.append((float(iou_threshold), _compute_ap_from_pr_curve(recalls, precisions)))
+    return ap_values
 
 
-def _weighted_f1_score(
+def _map50_95_score(
     gt_layouts: tuple[dict[str, Any], ...],
     pred_layouts: list[dict[str, Any]],
 ) -> tuple[float, dict[str, Any]]:
@@ -201,33 +237,86 @@ def _weighted_f1_score(
 
     class_names = sorted(set(gt_by_class.keys()) | set(pred_by_class.keys()))
     if not class_names:
-        return 1.0, {"per_class": {}, "weighted_f1": 1.0}
+        return 1.0, {"per_class": {}, "map50_95": 1.0, "map50": 1.0}
 
-    weighted_sum = 0.0
-    total_weight = 0.0
     per_class: dict[str, dict[str, float]] = {}
+    class_map_values: list[float] = []
+    class_ap50_values: list[float] = []
     for class_name in class_names:
         gt_boxes = gt_by_class.get(class_name, [])
         pred_boxes = pred_by_class.get(class_name, [])
-        tp, fp, fn = _greedy_match_counts(gt_boxes, pred_boxes, iou_threshold=MATCH_IOU_THRESHOLD)
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-        weight = float(CLASS_WEIGHTS.get(class_name, 1.0))
-        weighted_sum += weight * f1
-        total_weight += weight
+        ap_by_threshold = _average_precision_by_iou_threshold(gt_boxes, pred_boxes)
+        if ap_by_threshold is None:
+            continue
+        ap50_95 = (
+            sum(ap_value for _threshold, ap_value in ap_by_threshold) / len(ap_by_threshold)
+            if ap_by_threshold
+            else 0.0
+        )
+        class_map_values.append(float(ap50_95))
+
+        ap50 = next((ap for threshold, ap in ap_by_threshold if math.isclose(threshold, 0.5, abs_tol=1e-9)), 0.0)
+        class_ap50_values.append(ap50)
         per_class[class_name] = {
-            "tp": float(tp),
-            "fp": float(fp),
-            "fn": float(fn),
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "weight": weight,
+            "ap50_95": float(ap50_95),
+            "ap50": ap50,
+            "support": float(len(gt_boxes)),
+            "predictions": float(len(pred_boxes)),
         }
 
-    weighted_f1 = weighted_sum / total_weight if total_weight > 0 else 0.0
-    return weighted_f1, {"per_class": per_class, "weighted_f1": weighted_f1}
+    mean_map50_95 = sum(class_map_values) / len(class_map_values) if class_map_values else 1.0
+    mean_map50 = sum(class_ap50_values) / len(class_ap50_values) if class_ap50_values else 1.0
+    return mean_map50_95, {
+        "per_class": per_class,
+        "map50_95": mean_map50_95,
+        "map50": mean_map50,
+    }
+
+
+def _normalize_prediction_rows(pred_layouts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_rows: list[dict[str, Any]] = []
+    for row in pred_layouts:
+        if not isinstance(row, dict):
+            continue
+        class_name = str(row.get("class_name") or "").strip()
+        if not class_name:
+            continue
+        class_name = _normalize_layout_class_for_benchmark(class_name)
+        try:
+            x1 = float(row["x1"])
+            y1 = float(row["y1"])
+            x2 = float(row["x2"])
+            y2 = float(row["y2"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        confidence_value = row.get("confidence")
+        try:
+            confidence = None if confidence_value is None else float(confidence_value)
+        except (TypeError, ValueError):
+            confidence = None
+        normalized_rows.append(
+            {
+                "class_name": class_name,
+                "confidence": confidence,
+                "x1": x1,
+                "y1": y1,
+                "x2": x2,
+                "y2": y2,
+            }
+        )
+    return normalized_rows
+
+
+def _safe_load_predictions(predictions_json: str | None) -> tuple[bool, list[dict[str, Any]]]:
+    if predictions_json is None:
+        return False, []
+    try:
+        payload = json.loads(predictions_json)
+    except json.JSONDecodeError:
+        return False, []
+    if not isinstance(payload, list):
+        return False, []
+    return True, _normalize_prediction_rows(payload)
 
 
 def _serialize_fingerprint_layouts(layout_rows: list[Layout]) -> str:
@@ -354,8 +443,14 @@ def _save_page_result(
     config: dict[str, Any],
     score: float,
     metrics: dict[str, Any],
+    predictions: list[dict[str, Any]],
 ) -> None:
     now = _utc_now()
+    predictions_payload = json.dumps(
+        _normalize_prediction_rows(predictions),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    )
     model_checkpoint = str(config["model_checkpoint"])
     image_size = int(config["image_size"])
     confidence_threshold = float(config["confidence_threshold"])
@@ -382,6 +477,7 @@ def _save_page_result(
                     iou_threshold=iou_threshold,
                     score=float(score),
                     metrics_json=json.dumps(metrics, ensure_ascii=True, separators=(",", ":")),
+                    predictions_json=predictions_payload,
                     created_at=now,
                     updated_at=now,
                 )
@@ -389,6 +485,7 @@ def _save_page_result(
         else:
             row.score = float(score)
             row.metrics_json = json.dumps(metrics, ensure_ascii=True, separators=(",", ":"))
+            row.predictions_json = predictions_payload
             row.updated_at = now
 
 
@@ -469,6 +566,45 @@ def _start_run(force_full_rerun: bool) -> int:
         return int(row.id)
 
 
+def recover_layout_benchmark_after_restart() -> dict[str, int]:
+    """Mark stale benchmark jobs/runs as failed after service restart."""
+    now = _utc_now()
+    recovery_error = "Interrupted by service restart."
+    recovered_jobs = 0
+    recovered_runs = 0
+
+    with get_session() as session:
+        stale_jobs = session.execute(
+            select(PipelineJob)
+            .where(PipelineJob.stage == STAGE_LAYOUT_BENCHMARK)
+            .where(PipelineJob.status.in_(("queued", "running")))
+            .order_by(PipelineJob.id.asc())
+        ).scalars().all()
+        for job in stale_jobs:
+            job.status = "failed"
+            job.error = recovery_error if not job.error else str(job.error)
+            job.finished_at = now
+            job.updated_at = now
+            recovered_jobs += 1
+
+        stale_runs = session.execute(
+            select(LayoutBenchmarkRun)
+            .where(LayoutBenchmarkRun.status == "running")
+            .order_by(LayoutBenchmarkRun.id.asc())
+        ).scalars().all()
+        for run in stale_runs:
+            run.status = "failed"
+            run.error = recovery_error if not run.error else str(run.error)
+            run.finished_at = now
+            run.updated_at = now
+            recovered_runs += 1
+
+    return {
+        "recovered_jobs": recovered_jobs,
+        "recovered_runs": recovered_runs,
+    }
+
+
 def _detect_for_page(page: BenchmarkPage, config: dict[str, Any]) -> list[dict[str, Any]]:
     image_path = (settings.source_dir / page.rel_path).resolve()
     source_root = settings.source_dir.resolve()
@@ -513,6 +649,41 @@ def _aggregate_scores(
             "per_page": per_page,
         }
     return aggregate
+
+
+def _safe_load_metrics(metrics_json: str | None) -> dict[str, Any]:
+    if not metrics_json:
+        return {}
+    try:
+        payload = json.loads(metrics_json)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _load_hard_case_page_ids(page_ids: set[int]) -> set[int]:
+    if not page_ids:
+        return set()
+
+    with get_session() as session:
+        layout_rows = session.execute(
+            select(Layout.page_id, Layout.class_name).where(Layout.page_id.in_(sorted(page_ids)))
+        ).all()
+
+    counts_by_page: dict[int, dict[str, int]] = {}
+    for raw_page_id, raw_class_name in layout_rows:
+        page_id = int(raw_page_id)
+        class_name = _normalize_layout_class_for_benchmark(str(raw_class_name))
+        bucket = counts_by_page.setdefault(page_id, {})
+        bucket[class_name] = int(bucket.get(class_name, 0)) + 1
+
+    hard_case_page_ids: set[int] = set()
+    for page_id, class_counts in counts_by_page.items():
+        total_layouts = int(sum(class_counts.values()))
+        has_hard_class = any(int(class_counts.get(class_name, 0)) > 0 for class_name in HARD_CASE_CLASSES)
+        if has_hard_class or total_layouts >= HARD_CASE_MIN_LAYOUTS:
+            hard_case_page_ids.add(page_id)
+    return hard_case_page_ids
 
 
 def _apply_suggested_defaults_if_needed(
@@ -579,23 +750,24 @@ def run_layout_benchmark(
     for page in pages:
         page_scores[page.page_id] = _load_existing_scores_for_page(page.page_id, page.fingerprint)
 
-    total_tasks = 0
+    total_tasks = len(pages) * len(configs)
+    cached_tasks = 0
     skipped_tasks = 0
     for page in pages:
         existing_scores = page_scores[page.page_id]
         for config in configs:
             key = _config_key(config)
             if not force_full_rerun and key in existing_scores:
-                skipped_tasks += 1
-                continue
-            total_tasks += 1
+                cached_tasks += 1
+
+    processed_tasks = cached_tasks
 
     _upsert_run(
         run_id=run_id,
         total_pages=len(pages),
         total_configs=len(configs),
         total_tasks=total_tasks,
-        processed_tasks=0,
+        processed_tasks=processed_tasks,
         skipped_tasks=skipped_tasks,
         status="running",
     )
@@ -606,14 +778,14 @@ def run_layout_benchmark(
                 "total_pages": len(pages),
                 "total_configs": len(configs),
                 "total_tasks": total_tasks,
-                "processed_tasks": 0,
+                "processed_tasks": processed_tasks,
                 "skipped_tasks": skipped_tasks,
+                "cached_tasks": cached_tasks,
                 "status": "running",
                 "message": "Layout benchmark started.",
             }
         )
 
-    processed_tasks = 0
     last_emit = 0.0
     try:
         for page in pages:
@@ -644,6 +816,7 @@ def run_layout_benchmark(
                         "total_tasks": total_tasks,
                         "processed_tasks": processed_tasks,
                         "skipped_tasks": skipped_tasks,
+                        "cached_tasks": cached_tasks,
                         "best_config": best_config,
                         "best_score": None if best_stats is None else float(best_stats["mean_score"]),
                         "applied_defaults": False,
@@ -665,13 +838,14 @@ def run_layout_benchmark(
                     continue
 
                 predicted = _detect_for_page(page, config)
-                score, metrics = _weighted_f1_score(page.gt_layouts, predicted)
+                score, metrics = _map50_95_score(page.gt_layouts, predicted)
                 _save_page_result(
                     page_id=page.page_id,
                     fingerprint=page.fingerprint,
                     config=config,
                     score=score,
                     metrics=metrics,
+                    predictions=predicted,
                 )
                 page_scores[page.page_id][key] = float(score)
                 processed_tasks += 1
@@ -698,6 +872,7 @@ def run_layout_benchmark(
                             "total_tasks": total_tasks,
                             "processed_tasks": processed_tasks,
                             "skipped_tasks": skipped_tasks,
+                            "cached_tasks": cached_tasks,
                             "status": "running",
                             "current_page_id": page.page_id,
                             "current_rel_path": page.rel_path,
@@ -736,6 +911,7 @@ def run_layout_benchmark(
             "total_tasks": total_tasks,
             "processed_tasks": processed_tasks,
             "skipped_tasks": skipped_tasks,
+            "cached_tasks": cached_tasks,
             "best_config": best_config,
             "best_score": None if best_stats is None else float(best_stats["mean_score"]),
             "applied_defaults": applied_defaults,
@@ -748,7 +924,7 @@ def run_layout_benchmark(
                     **result,
                     "message": (
                         "Layout benchmark finished. "
-                        f"Processed {processed_tasks}, skipped {skipped_tasks}, pages {len(pages)}."
+                        f"Processed {processed_tasks}, cached {cached_tasks}, skipped {skipped_tasks}, pages {len(pages)}."
                     ),
                 }
             )
@@ -779,6 +955,51 @@ def run_layout_benchmark(
             )
         clear_layout_benchmark_stop_request()
         raise
+
+
+def recalculate_layout_benchmark_scores() -> dict[str, Any]:
+    pages = _load_eligible_pages()
+    pages_by_id = {int(page.page_id): page for page in pages}
+    now = _utc_now()
+
+    with get_session() as session:
+        rows = session.execute(
+            select(LayoutBenchmarkResult).order_by(LayoutBenchmarkResult.id.asc())
+        ).scalars().all()
+
+        total_rows = len(rows)
+        recalculated_rows = 0
+        skipped_no_page = 0
+        skipped_fingerprint_mismatch = 0
+        skipped_no_predictions = 0
+
+        for row in rows:
+            page = pages_by_id.get(int(row.page_id))
+            if page is None:
+                skipped_no_page += 1
+                continue
+            if str(row.page_fingerprint) != str(page.fingerprint):
+                skipped_fingerprint_mismatch += 1
+                continue
+
+            has_predictions, predictions = _safe_load_predictions(row.predictions_json)
+            if not has_predictions:
+                skipped_no_predictions += 1
+                continue
+
+            score, metrics = _map50_95_score(page.gt_layouts, predictions)
+            row.score = float(score)
+            row.metrics_json = json.dumps(metrics, ensure_ascii=True, separators=(",", ":"))
+            row.updated_at = now
+            recalculated_rows += 1
+
+    return {
+        "total_rows": total_rows,
+        "recalculated_rows": recalculated_rows,
+        "skipped_no_page": skipped_no_page,
+        "skipped_fingerprint_mismatch": skipped_fingerprint_mismatch,
+        "skipped_no_predictions": skipped_no_predictions,
+    }
 
 
 def get_latest_benchmark_status() -> dict[str, Any]:
@@ -867,6 +1088,9 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
             continue
         latest_per_page_and_config[key] = row
 
+    page_ids = {int(page_id) for page_id, *_rest in latest_per_page_and_config.keys()}
+    hard_case_page_ids = _load_hard_case_page_ids(page_ids)
+
     aggregate: dict[tuple[str, int, str, str], dict[str, Any]] = {}
     for row in latest_per_page_and_config.values():
         config_key = (
@@ -883,16 +1107,105 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
                 "confidence_threshold": float(row.confidence_threshold),
                 "iou_threshold": float(row.iou_threshold),
                 "score_sum": 0.0,
+                "score_sum_sq": 0.0,
                 "page_count": 0,
+                "min_score": None,
+                "max_score": None,
+                "hard_case_score_sum": 0.0,
+                "hard_case_page_count": 0,
+                "class_totals": {},
             },
         )
-        bucket["score_sum"] += float(row.score)
+        score = float(row.score)
+        bucket["score_sum"] += score
+        bucket["score_sum_sq"] += score * score
         bucket["page_count"] += 1
+        if bucket["min_score"] is None or score < float(bucket["min_score"]):
+            bucket["min_score"] = score
+        if bucket["max_score"] is None or score > float(bucket["max_score"]):
+            bucket["max_score"] = score
+        if int(row.page_id) in hard_case_page_ids:
+            bucket["hard_case_score_sum"] += score
+            bucket["hard_case_page_count"] += 1
+
+        metrics = _safe_load_metrics(row.metrics_json)
+        per_class = metrics.get("per_class")
+        if isinstance(per_class, dict):
+            class_totals = bucket["class_totals"]
+            for class_name_raw, class_metrics_raw in per_class.items():
+                if not isinstance(class_metrics_raw, dict):
+                    continue
+                class_name = _normalize_layout_class_for_benchmark(str(class_name_raw))
+                ap50_95 = class_metrics_raw.get("ap50_95")
+                if ap50_95 is None:
+                    # Backward compatibility for legacy rows that used F1 as class score.
+                    ap50_95_value = float(class_metrics_raw.get("f1", 0.0) or 0.0)
+                else:
+                    ap50_95_value = float(ap50_95 or 0.0)
+                ap50 = class_metrics_raw.get("ap50")
+                if ap50 is None:
+                    # Legacy rows do not carry AP50 separately.
+                    ap50_value = ap50_95_value
+                else:
+                    ap50_value = float(ap50 or 0.0)
+                support_value = float(class_metrics_raw.get("support", 0.0) or 0.0)
+                predictions_value = class_metrics_raw.get("predictions")
+                if predictions_value is None:
+                    # Legacy fallback: derive predictions from tp+fp when available.
+                    predictions_value = float(class_metrics_raw.get("tp", 0.0) or 0.0) + float(
+                        class_metrics_raw.get("fp", 0.0) or 0.0
+                    )
+                predictions_value = float(predictions_value or 0.0)
+                class_bucket = class_totals.setdefault(
+                    class_name,
+                    {
+                        "ap50_95_sum": 0.0,
+                        "ap50_sum": 0.0,
+                        "count": 0.0,
+                        "support_sum": 0.0,
+                        "predictions_sum": 0.0,
+                    },
+                )
+                class_bucket["ap50_95_sum"] += ap50_95_value
+                class_bucket["ap50_sum"] += ap50_value
+                class_bucket["count"] += 1.0
+                class_bucket["support_sum"] += support_value
+                class_bucket["predictions_sum"] += predictions_value
 
     grid_rows: list[dict[str, Any]] = []
     for bucket in aggregate.values():
         page_count = int(bucket["page_count"])
-        mean_score = float(bucket["score_sum"]) / page_count if page_count > 0 else 0.0
+        score_sum = float(bucket["score_sum"])
+        score_sum_sq = float(bucket["score_sum_sq"])
+        mean_score = score_sum / page_count if page_count > 0 else 0.0
+        variance = (score_sum_sq / page_count) - (mean_score * mean_score) if page_count > 0 else 0.0
+        std_dev = math.sqrt(max(0.0, variance))
+        min_score = float(bucket["min_score"]) if bucket["min_score"] is not None else 0.0
+        max_score = float(bucket["max_score"]) if bucket["max_score"] is not None else 0.0
+        hard_case_page_count = int(bucket["hard_case_page_count"])
+        hard_case_score = (
+            float(bucket["hard_case_score_sum"]) / hard_case_page_count
+            if hard_case_page_count > 0
+            else None
+        )
+
+        per_class: dict[str, dict[str, float]] = {}
+        class_totals = bucket["class_totals"]
+        for class_name in sorted(class_totals.keys()):
+            totals = class_totals[class_name]
+            count = float(totals.get("count", 0.0))
+            if count <= 0:
+                continue
+            ap50_95 = float(totals.get("ap50_95_sum", 0.0)) / count
+            ap50 = float(totals.get("ap50_sum", 0.0)) / count
+            per_class[class_name] = {
+                "ap50_95": ap50_95,
+                "ap50": ap50,
+                "support": float(totals.get("support_sum", 0.0)),
+                "predictions": float(totals.get("predictions_sum", 0.0)),
+                "count": count,
+            }
+
         grid_rows.append(
             {
                 "model_checkpoint": str(bucket["model_checkpoint"]),
@@ -901,21 +1214,37 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
                 "iou_threshold": float(bucket["iou_threshold"]),
                 "page_count": page_count,
                 "mean_score": mean_score,
+                "min_score": min_score,
+                "max_score": max_score,
+                "std_dev": std_dev,
+                "hard_case_score": hard_case_score,
+                "hard_case_page_count": hard_case_page_count,
+                "per_class": per_class,
             }
         )
 
     grid_rows.sort(
         key=lambda row: (
-            float(row["mean_score"]),
-            int(row["page_count"]),
+            -float(row["mean_score"]),
+            -float(row["hard_case_score"]) if row["hard_case_score"] is not None else 1.0,
+            float(row["std_dev"]),
+            -float(row["min_score"]),
+            -int(row["page_count"]),
             str(row["model_checkpoint"]),
             int(row["image_size"]),
-        ),
-        reverse=True,
+        )
     )
     best_row = grid_rows[0] if grid_rows else None
+    class_names = sorted(
+        {
+            str(class_name)
+            for row in grid_rows
+            for class_name in row.get("per_class", {}).keys()
+        }
+    )
     return {
         "rows": grid_rows,
+        "class_names": class_names,
         "best_config": (
             None
             if best_row is None

@@ -145,7 +145,8 @@
         cursor: not-allowed;
       }
 
-      #benchmark-toggle-btn.is-busy {
+      #benchmark-toggle-btn.is-busy,
+      #benchmark-rescore-btn.is-busy {
         position: relative;
         color: transparent;
       }
@@ -158,6 +159,17 @@
         border-radius: 999px;
         border: 2px solid rgba(255, 255, 255, 0.45);
         border-top-color: #ffffff;
+        animation: spin 720ms linear infinite;
+      }
+
+      #benchmark-rescore-btn.is-busy::after {
+        content: "";
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        border: 2px solid rgba(11, 122, 117, 0.35);
+        border-top-color: var(--accent);
         animation: spin 720ms linear infinite;
       }
 
@@ -391,6 +403,33 @@
         background: #efe9d7;
       }
 
+      .class-metrics-section {
+        margin-top: 12px;
+        border-top: 1px solid var(--border);
+        padding-top: 12px;
+      }
+
+      .class-metrics-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .class-metrics-controls label {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .class-metrics-controls select {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #fff;
+        padding: 5px 8px;
+        min-width: 260px;
+        max-width: min(100vw - 64px, 760px);
+      }
+
       .empty {
         color: var(--muted);
       }
@@ -434,6 +473,7 @@
       <section class="header">
         <h1>Layout benchmark</h1>
         <div class="header-actions">
+          <button id="benchmark-rescore-btn" class="secondary" type="button">Recalculate score</button>
           <button id="benchmark-toggle-btn" type="button">Start benchmark</button>
           <label for="benchmark-force-rerun-toggle">
             <input id="benchmark-force-rerun-toggle" type="checkbox" />
@@ -492,16 +532,19 @@
           <div id="benchmark-leaderboard-panel" class="tab-panel" role="tabpanel">
             <table>
               <thead>
-                <tr>
-                  <th>State</th>
-                  <th>Model</th>
-                  <th>Image size</th>
-                  <th>Conf</th>
-                  <th>IoU</th>
-                  <th>Mean score</th>
-                  <th>Pages</th>
-                </tr>
-              </thead>
+              <tr>
+                <th>State</th>
+                <th>Model</th>
+                <th>Image size</th>
+                <th>Conf</th>
+                <th>IoU</th>
+                <th>Mean mAP50-95</th>
+                <th>Min mAP50-95</th>
+                <th>Std dev</th>
+                <th>Hard-case mAP50-95</th>
+                <th>Pages</th>
+              </tr>
+            </thead>
               <tbody id="benchmark-grid-body"></tbody>
             </table>
           </div>
@@ -539,6 +582,25 @@
                 <tbody id="benchmark-heatmap-body"></tbody>
               </table>
             </div>
+          </div>
+
+          <div class="class-metrics-section">
+            <div class="class-metrics-controls">
+              <label for="benchmark-class-config">Per-class metrics</label>
+              <select id="benchmark-class-config"></select>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Class</th>
+                  <th>AP50-95</th>
+                  <th>AP50</th>
+                  <th>Support</th>
+                  <th>Predictions</th>
+                </tr>
+              </thead>
+              <tbody id="benchmark-class-body"></tbody>
+            </table>
           </div>
         </section>
 

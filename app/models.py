@@ -190,5 +190,6 @@ class LayoutBenchmarkResult(Base):
     iou_threshold: Mapped[float] = mapped_column(Float, nullable=False)
     score: Mapped[float] = mapped_column(Float, nullable=False)
     metrics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    predictions_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)

@@ -10,6 +10,7 @@ from .config import settings as settings
 from .db import init_db
 from .models import Layout, OcrOutput, Page, PipelineEvent, PipelineJob
 from .ocr_extract import extract_ocr_for_page as extract_ocr_for_page
+from .layout_benchmark import recover_layout_benchmark_after_restart
 from .pipeline_runtime import (
     emit_event as emit_event,
     enqueue_job as enqueue_job,
@@ -20,6 +21,7 @@ from .runtime_options import reset_runtime_options_from_settings
 from .api import benchmark_router, discovery_router, pipeline_router, review_router
 from .api.benchmark import (
     layout_benchmark_grid,
+    rescore_layout_benchmark,
     layout_benchmark_status,
     layout_detection_defaults,
     run_layout_benchmark_job,
@@ -80,6 +82,7 @@ from .api.shared import run_startup_scan
 async def lifespan(_: FastAPI):
     init_db()
     register_default_handlers()
+    recover_layout_benchmark_after_restart()
     reset_runtime_options_from_settings()
     run_startup_scan()
     yield

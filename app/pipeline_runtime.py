@@ -184,9 +184,10 @@ def _completion_message(stage: str, result: dict[str, Any] | None) -> str:
         pages = int(result.get("total_pages", 0))
         processed = int(result.get("processed_tasks", 0))
         skipped = int(result.get("skipped_tasks", 0))
+        cached = int(result.get("cached_tasks", 0))
         return (
             "Completed layout benchmark, "
-            f"pages {pages}, processed {processed}, skipped {skipped}."
+            f"pages {pages}, processed {processed}, cached {cached}, skipped {skipped}."
         )
     return f"Completed {stage_display_name(stage)}."
 

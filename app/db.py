@@ -201,9 +201,38 @@ def _migrate_sqlite_layouts_order_constraints(engine: Engine) -> None:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON;")
 
 
+def _sqlite_table_has_column(connection: Connection, table_name: str, column_name: str) -> bool:
+    rows = connection.exec_driver_sql(f"PRAGMA table_info('{table_name}')").all()
+    for row in rows:
+        row_values = tuple(row)
+        if len(row_values) < 2:
+            continue
+        if str(row_values[1]) == column_name:
+            return True
+    return False
+
+
+def _migrate_sqlite_layout_benchmark_predictions_column(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.connect() as connection:
+        if not _sqlite_table_exists(connection, "layout_benchmark_results"):
+            return
+        if _sqlite_table_has_column(connection, "layout_benchmark_results", "predictions_json"):
+            return
+        # PRAGMA reads can trigger SQLite autobegin; ensure no active txn before DDL.
+        if connection.in_transaction():
+            connection.commit()
+        connection.exec_driver_sql("ALTER TABLE layout_benchmark_results ADD COLUMN predictions_json TEXT;")
+        if connection.in_transaction():
+            connection.commit()
+
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite_layouts_order_constraints(engine)
+    _migrate_sqlite_layout_benchmark_predictions_column(engine)
     # Ensure metadata-defined indexes/constraints are present after migrations.
     Base.metadata.create_all(bind=engine)

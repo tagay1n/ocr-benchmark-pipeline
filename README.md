@@ -24,8 +24,10 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Per-row actions: open Layout/OCR review and remove an image (with confirmation).
 - Layout benchmark (`/static/layout_benchmark.html`):
   - Start/stop benchmark run.
-  - Live backend activity feed for benchmark stage.
-  - Config grid with current running params highlight and best-so-far config.
+  - `Recalculate score` action to recompute scores from stored benchmark predictions without rerunning detection.
+  - Leaderboard + explorer matrix views with current running params highlight and best-so-far config.
+  - Hard-case subset reporting per config (`hard_case_score`, page count).
+  - Per-class metrics table (AP50-95/AP50/support/predictions) for selected config.
 - Layout review (`/static/layouts.html?page_id=<id>`):
   - Editable class, reading order, bbox.
   - Drag-and-drop reading order.

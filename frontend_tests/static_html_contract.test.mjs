@@ -53,6 +53,7 @@ test("layout benchmark page keeps run/stop/grid integration hooks", () => {
   const pageModule = readModule("app/static/js/layout_benchmark_page.mjs");
   const requiredIds = [
     'id="benchmark-toggle-btn"',
+    'id="benchmark-rescore-btn"',
     'id="benchmark-force-rerun-toggle"',
     'id="benchmark-run-status"',
     'id="benchmark-processed-tasks"',
@@ -71,6 +72,8 @@ test("layout benchmark page keeps run/stop/grid integration hooks", () => {
     'id="benchmark-explorer-iou"',
     'id="benchmark-heatmap-head"',
     'id="benchmark-heatmap-body"',
+    'id="benchmark-class-config"',
+    'id="benchmark-class-body"',
   ];
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
@@ -80,6 +83,7 @@ test("layout benchmark page keeps run/stop/grid integration hooks", () => {
   assert.equal(pageModule.includes('"/api/layout-benchmark/grid"'), true);
   assert.equal(pageModule.includes('"/api/layout-benchmark/run"'), true);
   assert.equal(pageModule.includes('"/api/layout-benchmark/stop"'), true);
+  assert.equal(pageModule.includes('"/api/layout-benchmark/rescore"'), true);
   assert.equal(pageModule.includes('"/api/pipeline/activity/stream?limit=60"'), true);
 });
 

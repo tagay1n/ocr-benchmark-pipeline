@@ -2,6 +2,7 @@ import { fetchJson } from "./api_client.mjs";
 import { PIPELINE_STAGE } from "./pipeline_event_constants.mjs";
 
 const benchmarkToggleBtn = document.getElementById("benchmark-toggle-btn");
+const benchmarkRescoreBtn = document.getElementById("benchmark-rescore-btn");
 const forceRerunToggle = document.getElementById("benchmark-force-rerun-toggle");
 const runStatusEl = document.getElementById("benchmark-run-status");
 const processedTasksEl = document.getElementById("benchmark-processed-tasks");
@@ -24,6 +25,8 @@ const explorerIouSelect = document.getElementById("benchmark-explorer-iou");
 const explorerCaption = document.getElementById("benchmark-explorer-caption");
 const heatmapHead = document.getElementById("benchmark-heatmap-head");
 const heatmapBody = document.getElementById("benchmark-heatmap-body");
+const classConfigSelect = document.getElementById("benchmark-class-config");
+const classBody = document.getElementById("benchmark-class-body");
 
 const state = {
   status: null,
@@ -32,6 +35,7 @@ const state = {
   currentConfig: null,
   bestConfig: null,
   busyAction: false,
+  busyRescore: false,
   lastBenchmarkEventId: 0,
   refreshInFlight: false,
   refreshTimer: null,
@@ -42,6 +46,8 @@ const state = {
   selectedImgsz: "",
   selectedConf: "",
   selectedIou: "",
+  classNames: [],
+  selectedClassConfigKey: "",
 };
 
 function toFiniteNumber(value) {
@@ -82,24 +88,51 @@ function configLabel(config) {
   return `${model} imgsz=${imageSize} conf=${conf.toFixed(2)} iou=${iou.toFixed(2)}`;
 }
 
+function formatClassLabel(value) {
+  const normalized = String(value || "")
+    .replace(/_/g, " ")
+    .trim();
+  if (!normalized) {
+    return "-";
+  }
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
 function setActionBusy(busy) {
   state.busyAction = Boolean(busy);
   benchmarkToggleBtn.classList.toggle("is-busy", state.busyAction);
   renderActionButton();
+  renderRescoreButton();
+}
+
+function setRescoreBusy(busy) {
+  state.busyRescore = Boolean(busy);
+  benchmarkRescoreBtn.classList.toggle("is-busy", state.busyRescore);
+  renderActionButton();
+  renderRescoreButton();
 }
 
 function renderActionButton() {
   if (state.isRunning) {
     benchmarkToggleBtn.textContent = "Stop benchmark";
     benchmarkToggleBtn.classList.add("danger");
-    benchmarkToggleBtn.disabled = state.busyAction;
+    benchmarkToggleBtn.disabled = state.busyAction || state.busyRescore;
     benchmarkToggleBtn.title = "Stop the running layout benchmark.";
     return;
   }
   benchmarkToggleBtn.textContent = "Start benchmark";
   benchmarkToggleBtn.classList.remove("danger");
-  benchmarkToggleBtn.disabled = state.busyAction;
+  benchmarkToggleBtn.disabled = state.busyAction || state.busyRescore;
   benchmarkToggleBtn.title = "Start layout benchmark.";
+}
+
+function renderRescoreButton() {
+  benchmarkRescoreBtn.textContent = "Recalculate score";
+  benchmarkRescoreBtn.classList.remove("danger");
+  benchmarkRescoreBtn.disabled = state.busyAction || state.busyRescore || state.isRunning;
+  benchmarkRescoreBtn.title = state.isRunning
+    ? "Stop benchmark before recalculating scores."
+    : "Recalculate benchmark scores from stored predictions.";
 }
 
 function renderSummary() {
@@ -147,7 +180,7 @@ function renderLeaderboard() {
 
   if (rows.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td class="empty" colspan="7">No benchmark results yet.</td>';
+    tr.innerHTML = '<td class="empty" colspan="10">No benchmark results yet.</td>';
     gridBody.appendChild(tr);
     return;
   }
@@ -169,6 +202,42 @@ function renderLeaderboard() {
     if (aScore !== null && bScore === null) {
       return -1;
     }
+    const aStd = toFiniteNumber(a.std_dev);
+    const bStd = toFiniteNumber(b.std_dev);
+    if (aStd !== null && bStd !== null && aStd !== bStd) {
+      return aStd - bStd;
+    }
+    if (aStd === null && bStd !== null) {
+      return 1;
+    }
+    if (aStd !== null && bStd === null) {
+      return -1;
+    }
+
+    const aMin = toFiniteNumber(a.min_score);
+    const bMin = toFiniteNumber(b.min_score);
+    if (aMin !== null && bMin !== null && aMin !== bMin) {
+      return bMin - aMin;
+    }
+    if (aMin === null && bMin !== null) {
+      return 1;
+    }
+    if (aMin !== null && bMin === null) {
+      return -1;
+    }
+
+    const aHard = toFiniteNumber(a.hard_case_score);
+    const bHard = toFiniteNumber(b.hard_case_score);
+    if (aHard !== null && bHard !== null && aHard !== bHard) {
+      return bHard - aHard;
+    }
+    if (aHard === null && bHard !== null) {
+      return 1;
+    }
+    if (aHard !== null && bHard === null) {
+      return -1;
+    }
+
     const aPages = Number(a.page_count || 0);
     const bPages = Number(b.page_count || 0);
     if (aPages !== bPages) {
@@ -201,6 +270,23 @@ function renderLeaderboard() {
       typeof row.mean_score === "number" && Number.isFinite(row.mean_score)
         ? row.mean_score.toFixed(4)
         : "-";
+    const minScore =
+      typeof row.min_score === "number" && Number.isFinite(row.min_score)
+        ? row.min_score.toFixed(4)
+        : "-";
+    const stdDev =
+      typeof row.std_dev === "number" && Number.isFinite(row.std_dev)
+        ? row.std_dev.toFixed(4)
+        : "-";
+    const hardCaseScore =
+      typeof row.hard_case_score === "number" && Number.isFinite(row.hard_case_score)
+        ? row.hard_case_score.toFixed(4)
+        : "-";
+    const hardCasePages =
+      Number.isInteger(row.hard_case_page_count) && row.hard_case_page_count > 0
+        ? row.hard_case_page_count
+        : null;
+    const hardCaseCell = hardCasePages === null ? hardCaseScore : `${hardCaseScore} (p:${hardCasePages})`;
     const pageCount =
       Number.isInteger(row.page_count) && row.page_count >= 0
         ? String(row.page_count)
@@ -213,9 +299,101 @@ function renderLeaderboard() {
       <td>${Number(row.confidence_threshold || 0).toFixed(2)}</td>
       <td>${Number(row.iou_threshold || 0).toFixed(2)}</td>
       <td>${meanScore}</td>
+      <td>${minScore}</td>
+      <td>${stdDev}</td>
+      <td>${hardCaseCell}</td>
       <td>${pageCount}</td>
     `;
     gridBody.appendChild(tr);
+  }
+}
+
+function renderClassMetrics() {
+  classBody.innerHTML = "";
+  const rows = Array.isArray(state.gridRows) ? state.gridRows : [];
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td class="empty" colspan="5">No per-class metrics yet.</td>';
+    classBody.appendChild(tr);
+    classConfigSelect.innerHTML = "";
+    classConfigSelect.disabled = true;
+    return;
+  }
+
+  const options = rows.map((row) => ({
+    key: configKey(row),
+    label: configLabel(row),
+  }));
+  const optionKeys = options.map((entry) => entry.key).filter(Boolean);
+  const bestKey = configKey(state.bestConfig);
+  const currentKey = configKey(state.currentConfig);
+  const fallbackKey =
+    optionKeys.includes(state.selectedClassConfigKey)
+      ? state.selectedClassConfigKey
+      : optionKeys.includes(bestKey)
+        ? bestKey
+        : optionKeys.includes(currentKey)
+          ? currentKey
+          : optionKeys[0] || "";
+  state.selectedClassConfigKey = fallbackKey;
+
+  classConfigSelect.innerHTML = "";
+  for (const option of options) {
+    if (!option.key) {
+      continue;
+    }
+    const optionEl = document.createElement("option");
+    optionEl.value = option.key;
+    optionEl.textContent = option.label;
+    classConfigSelect.appendChild(optionEl);
+  }
+  classConfigSelect.disabled = !fallbackKey;
+  if (fallbackKey) {
+    classConfigSelect.value = fallbackKey;
+  }
+
+  const selectedRow = rows.find((row) => configKey(row) === fallbackKey) || rows[0];
+  const perClass = selectedRow?.per_class && typeof selectedRow.per_class === "object"
+    ? selectedRow.per_class
+    : {};
+  const classNames = Array.isArray(state.classNames) && state.classNames.length > 0
+    ? state.classNames
+    : Object.keys(perClass);
+
+  if (classNames.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td class="empty" colspan="5">No class-level metrics available.</td>';
+    classBody.appendChild(tr);
+    return;
+  }
+
+  for (const className of classNames) {
+    const metrics = perClass[className];
+    const ap50_95 =
+      typeof metrics?.ap50_95 === "number" && Number.isFinite(metrics.ap50_95)
+        ? metrics.ap50_95.toFixed(4)
+        : "-";
+    const ap50 =
+      typeof metrics?.ap50 === "number" && Number.isFinite(metrics.ap50)
+        ? metrics.ap50.toFixed(4)
+        : "-";
+    const support =
+      typeof metrics?.support === "number" && Number.isFinite(metrics.support)
+        ? String(Math.round(metrics.support))
+        : "-";
+    const predictions =
+      typeof metrics?.predictions === "number" && Number.isFinite(metrics.predictions)
+        ? String(Math.round(metrics.predictions))
+        : "-";
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${formatClassLabel(className)}</td>
+      <td>${ap50_95}</td>
+      <td>${ap50}</td>
+      <td>${support}</td>
+      <td>${predictions}</td>
+    `;
+    classBody.appendChild(tr);
   }
 }
 
@@ -490,11 +668,14 @@ function applyPayloads(statusPayload, gridPayload) {
   state.isRunning = Boolean(statusPayload?.is_running);
   state.currentConfig = statusPayload?.run?.current_config || null;
   state.bestConfig = gridPayload?.best_config || statusPayload?.run?.best_config || null;
+  state.classNames = Array.isArray(gridPayload?.class_names) ? gridPayload.class_names : [];
 
   renderActionButton();
+  renderRescoreButton();
   renderSummary();
   renderLeaderboard();
   renderExplorer();
+  renderClassMetrics();
 }
 
 async function refreshAll() {
@@ -570,7 +751,7 @@ function startStream() {
 }
 
 async function onToggleBenchmarkClick() {
-  if (state.busyAction) {
+  if (state.busyAction || state.busyRescore) {
     return;
   }
   setActionBusy(true);
@@ -592,6 +773,21 @@ async function onToggleBenchmarkClick() {
   }
 }
 
+async function onRescoreClick() {
+  if (state.busyAction || state.busyRescore || state.isRunning) {
+    return;
+  }
+  setRescoreBusy(true);
+  try {
+    await fetchJson("/api/layout-benchmark/rescore", { method: "POST" });
+    await refreshAll();
+  } catch (error) {
+    console.error(`Benchmark rescore failed: ${error.message}`);
+  } finally {
+    setRescoreBusy(false);
+  }
+}
+
 function onExplorerModeChange() {
   state.explorerMode = explorerModeSelect.value === "model_imgsz" ? "model_imgsz" : "conf_iou";
   renderExplorer();
@@ -606,6 +802,7 @@ function onExplorerFilterChange() {
 }
 
 benchmarkToggleBtn.addEventListener("click", onToggleBenchmarkClick);
+benchmarkRescoreBtn.addEventListener("click", onRescoreClick);
 leaderboardTabBtn.addEventListener("click", () => {
   setActiveView("leaderboard");
 });
@@ -617,6 +814,10 @@ explorerModelSelect.addEventListener("change", onExplorerFilterChange);
 explorerImgszSelect.addEventListener("change", onExplorerFilterChange);
 explorerConfSelect.addEventListener("change", onExplorerFilterChange);
 explorerIouSelect.addEventListener("change", onExplorerFilterChange);
+classConfigSelect.addEventListener("change", () => {
+  state.selectedClassConfigKey = classConfigSelect.value;
+  renderClassMetrics();
+});
 
 window.addEventListener("beforeunload", () => {
   closeStream();

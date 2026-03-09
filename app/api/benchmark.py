@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select, update
 
 from ..db import get_session
@@ -10,6 +10,7 @@ from ..layout_benchmark import (
     BENCHMARK_MODEL_CHECKPOINTS,
     get_latest_benchmark_status,
     get_layout_benchmark_grid,
+    recalculate_layout_benchmark_scores,
     request_layout_benchmark_stop,
 )
 from ..layout_detection_defaults import get_layout_detection_defaults
@@ -134,3 +135,28 @@ def stop_layout_benchmark_job() -> dict[str, object]:
         "running_stop_requested": bool(running_found),
         "queued_cancelled": int(queued_cancelled),
     }
+
+
+@router.post("/api/layout-benchmark/rescore")
+def rescore_layout_benchmark() -> dict[str, object]:
+    register_default_handlers()
+    status = get_latest_benchmark_status()
+    if bool(status.get("is_running")):
+        raise HTTPException(status_code=409, detail="Cannot recalculate scores while benchmark is running.")
+
+    emit_event(
+        stage=STAGE_LAYOUT_BENCHMARK,
+        event_type=EVENT_JOB_PROGRESS,
+        message="Layout benchmark score recalculation started.",
+    )
+    result = recalculate_layout_benchmark_scores()
+    emit_event(
+        stage=STAGE_LAYOUT_BENCHMARK,
+        event_type=EVENT_JOB_PROGRESS,
+        message=(
+            "Layout benchmark score recalculation finished. "
+            f"Recalculated {int(result['recalculated_rows'])}/{int(result['total_rows'])} rows."
+        ),
+        data=result,
+    )
+    return result

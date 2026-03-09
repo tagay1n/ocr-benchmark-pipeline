@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from sqlalchemy import select
 
 from app import (
@@ -76,6 +77,23 @@ class LayoutBenchmarkTests(unittest.TestCase):
             )
             main.complete_layout_review(page_id)
         return page_ids
+
+    def _seed_reviewed_page_with_layouts(
+        self,
+        rel_path: str,
+        layouts_payload: list[main.CreateLayoutRequest],
+    ) -> int:
+        self._write_image(rel_path, rel_path.encode("utf-8"))
+        main.scan_images()
+        pages = main.list_pages()["pages"]
+        matching = next((page for page in pages if str(page.get("rel_path")) == rel_path), None)
+        if matching is None:
+            raise AssertionError(f"Page not found after scan: {rel_path}")
+        page_id = int(matching["id"])
+        for payload in layouts_payload:
+            main.create_page_layout(page_id, payload)
+        main.complete_layout_review(page_id)
+        return page_id
 
     def _fake_detect(self, model_checkpoint: str) -> tuple[list[dict[str, float | str]], dict[str, object]]:
         rows = []
@@ -155,8 +173,10 @@ class LayoutBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(first["processed_tasks"], 1)
         self.assertEqual(first["skipped_tasks"], 0)
-        self.assertEqual(second["processed_tasks"], 0)
-        self.assertEqual(second["skipped_tasks"], 1)
+        self.assertEqual(first["cached_tasks"], 0)
+        self.assertEqual(second["processed_tasks"], 1)
+        self.assertEqual(second["skipped_tasks"], 0)
+        self.assertEqual(second["cached_tasks"], 1)
         self.assertEqual(detect_mock.call_count, 1)
 
     def test_run_layout_benchmark_auto_applies_better_defaults(self) -> None:
@@ -223,6 +243,103 @@ class LayoutBenchmarkTests(unittest.TestCase):
         self.assertGreaterEqual(len(payload["rows"]), 1)
         self.assertEqual(payload["best_config"]["model_checkpoint"], "bench-b.pt")
         self.assertGreater(float(payload["best_score"]), 0.0)
+        first_row = payload["rows"][0]
+        self.assertIn("min_score", first_row)
+        self.assertIn("max_score", first_row)
+        self.assertIn("std_dev", first_row)
+        self.assertIn("hard_case_score", first_row)
+        self.assertIn("hard_case_page_count", first_row)
+        self.assertIn("per_class", first_row)
+        self.assertGreaterEqual(float(first_row["min_score"]), 0.0)
+        self.assertGreaterEqual(float(first_row["max_score"]), float(first_row["min_score"]))
+        self.assertGreaterEqual(float(first_row["std_dev"]), 0.0)
+        self.assertIn("class_names", payload)
+        self.assertIn("text", payload["class_names"])
+
+    def test_layout_benchmark_grid_reports_hard_case_and_per_class_metrics(self) -> None:
+        self._seed_reviewed_page_with_layouts(
+            "bench/text_only.png",
+            [
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=1,
+                    bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.85, y2=0.8),
+                )
+            ],
+        )
+        self._seed_reviewed_page_with_layouts(
+            "bench/table_page.png",
+            [
+                main.CreateLayoutRequest(
+                    class_name="table",
+                    reading_order=1,
+                    bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.75),
+                )
+            ],
+        )
+
+        def detect_side_effect(
+            image_path: Path,
+            *,
+            model_checkpoint: str | None,
+            confidence_threshold: float | None,
+            iou_threshold: float | None,
+            image_size: int | None,
+            max_detections: int | None,
+            agnostic_nms: bool | None,
+        ):
+            del model_checkpoint, confidence_threshold, iou_threshold, image_size, max_detections, agnostic_nms
+            image_name = image_path.name
+            if image_name == "text_only.png":
+                return (
+                    [
+                        {
+                            "class_name": "text",
+                            "confidence": 0.9,
+                            "x1": 0.1,
+                            "y1": 0.1,
+                            "x2": 0.85,
+                            "y2": 0.8,
+                        }
+                    ],
+                    {
+                        "model_checkpoint": "bench-b.pt",
+                        "confidence_threshold": 0.2,
+                        "iou_threshold": 0.5,
+                        "image_size": 512,
+                        "max_detections": 300,
+                        "agnostic_nms": False,
+                    },
+                )
+            return (
+                [],
+                {
+                    "model_checkpoint": "bench-b.pt",
+                    "confidence_threshold": 0.2,
+                    "iou_threshold": 0.5,
+                    "image_size": 512,
+                    "max_detections": 300,
+                    "agnostic_nms": False,
+                },
+            )
+
+        with (
+            patch.object(layout_benchmark, "BENCHMARK_MODEL_CHECKPOINTS", ("bench-b.pt",)),
+            patch.object(layout_benchmark, "BENCHMARK_IMAGE_SIZES", (512,)),
+            patch.object(layout_benchmark, "BENCHMARK_CONFIDENCE_THRESHOLDS", (0.2,)),
+            patch.object(layout_benchmark, "BENCHMARK_IOU_THRESHOLDS", (0.5,)),
+            patch.object(layout_benchmark, "_detect_doclaynet_layouts", side_effect=detect_side_effect),
+        ):
+            layout_benchmark.run_layout_benchmark(force_full_rerun=False)
+
+        payload = main.layout_benchmark_grid()
+        row = payload["rows"][0]
+        self.assertEqual(int(row["page_count"]), 2)
+        self.assertEqual(int(row["hard_case_page_count"]), 1)
+        self.assertEqual(float(row["hard_case_score"]), 0.0)
+        self.assertIn("text", row["per_class"])
+        self.assertIn("table", row["per_class"])
+        self.assertGreater(float(row["per_class"]["text"]["ap50_95"]), float(row["per_class"]["table"]["ap50_95"]))
 
     def test_layout_benchmark_stop_endpoint_cancels_queued_jobs(self) -> None:
         now = main._utc_now()
@@ -297,6 +414,193 @@ class LayoutBenchmarkTests(unittest.TestCase):
         self.assertTrue(result["stopped"])
         self.assertEqual(result["processed_tasks"], 1)
         self.assertEqual(result["total_tasks"], 2)
+
+    def test_recover_layout_benchmark_after_restart_clears_stale_jobs_and_run(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                layout_benchmark.LayoutBenchmarkRun(
+                    status="running",
+                    force_full_rerun=False,
+                    total_pages=2,
+                    total_configs=1,
+                    total_tasks=2,
+                    processed_tasks=1,
+                    skipped_tasks=0,
+                    current_page_id=None,
+                    current_config_json=None,
+                    best_config_json=None,
+                    applied_defaults=False,
+                    error=None,
+                    created_at=now,
+                    updated_at=now,
+                    finished_at=None,
+                )
+            )
+            session.add(
+                main.PipelineJob(
+                    stage=STAGE_LAYOUT_BENCHMARK,
+                    page_id=None,
+                    status="running",
+                    payload_json='{"force_full_rerun":false}',
+                    result_json=None,
+                    error=None,
+                    attempts=1,
+                    created_at=now,
+                    updated_at=now,
+                    started_at=now,
+                    finished_at=None,
+                )
+            )
+            session.add(
+                main.PipelineJob(
+                    stage=STAGE_LAYOUT_BENCHMARK,
+                    page_id=None,
+                    status="queued",
+                    payload_json='{"force_full_rerun":false}',
+                    result_json=None,
+                    error=None,
+                    attempts=0,
+                    created_at=now,
+                    updated_at=now,
+                    started_at=None,
+                    finished_at=None,
+                )
+            )
+
+        recovered = layout_benchmark.recover_layout_benchmark_after_restart()
+        self.assertEqual(recovered["recovered_jobs"], 2)
+        self.assertEqual(recovered["recovered_runs"], 1)
+
+        status_payload = main.layout_benchmark_status()
+        self.assertFalse(bool(status_payload["is_running"]))
+        self.assertEqual(status_payload["run"]["status"], "failed")
+        self.assertIn("Interrupted by service restart", str(status_payload["run"]["error"]))
+
+    def test_rescore_endpoint_recalculates_scores_from_stored_predictions(self) -> None:
+        self._seed_reviewed_pages(1)
+        with (
+            patch.object(layout_benchmark, "BENCHMARK_MODEL_CHECKPOINTS", ("bench-b.pt",)),
+            patch.object(layout_benchmark, "BENCHMARK_IMAGE_SIZES", (512,)),
+            patch.object(layout_benchmark, "BENCHMARK_CONFIDENCE_THRESHOLDS", (0.2,)),
+            patch.object(layout_benchmark, "BENCHMARK_IOU_THRESHOLDS", (0.5,)),
+            patch.object(layout_benchmark, "_detect_doclaynet_layouts", return_value=self._fake_detect("bench-b.pt")),
+        ):
+            layout_benchmark.run_layout_benchmark(force_full_rerun=False)
+
+        with db.get_session() as session:
+            rows = session.execute(select(layout_benchmark.LayoutBenchmarkResult)).scalars().all()
+            self.assertGreaterEqual(len(rows), 1)
+            for row in rows:
+                row.score = 1.0
+                row.metrics_json = "{}"
+                row.predictions_json = "[]"
+                row.updated_at = main._utc_now()
+
+        result = main.rescore_layout_benchmark()
+        self.assertGreaterEqual(int(result["recalculated_rows"]), 1)
+        self.assertEqual(int(result["skipped_no_predictions"]), 0)
+
+        payload = main.layout_benchmark_grid()
+        for row_payload in payload["rows"]:
+            self.assertEqual(float(row_payload["mean_score"]), 0.0)
+
+    def test_rescore_endpoint_rejects_while_benchmark_running(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                layout_benchmark.LayoutBenchmarkRun(
+                    status="running",
+                    force_full_rerun=False,
+                    total_pages=0,
+                    total_configs=0,
+                    total_tasks=0,
+                    processed_tasks=0,
+                    skipped_tasks=0,
+                    current_page_id=None,
+                    current_config_json=None,
+                    best_config_json=None,
+                    applied_defaults=False,
+                    error=None,
+                    created_at=now,
+                    updated_at=now,
+                    finished_at=None,
+                )
+            )
+
+        with self.assertRaises(HTTPException) as error:
+            main.rescore_layout_benchmark()
+        self.assertEqual(error.exception.status_code, 409)
+
+    def test_benchmark_scoring_uses_map50_95(self) -> None:
+        gt = (
+            {
+                "class_name": "text",
+                "bbox": {"x1": 0.1, "y1": 0.1, "x2": 0.6, "y2": 0.6},
+            },
+        )
+        perfect_pred = [
+            {
+                "class_name": "text",
+                "x1": 0.1,
+                "y1": 0.1,
+                "x2": 0.6,
+                "y2": 0.6,
+            }
+        ]
+        shifted_pred = [
+            {
+                "class_name": "text",
+                "x1": 0.15,
+                "y1": 0.15,
+                "x2": 0.65,
+                "y2": 0.65,
+            }
+        ]
+
+        perfect_score, perfect_metrics = layout_benchmark._map50_95_score(gt, perfect_pred)
+        shifted_score, shifted_metrics = layout_benchmark._map50_95_score(gt, shifted_pred)
+        self.assertGreater(perfect_score, shifted_score)
+        self.assertGreater(shifted_score, 0.0)
+        self.assertEqual(float(perfect_metrics["per_class"]["text"]["ap50"]), 1.0)
+        self.assertLess(float(shifted_metrics["per_class"]["text"]["ap50_95"]), 1.0)
+
+    def test_benchmark_class_normalization_maps_title_but_keeps_list_item(self) -> None:
+        gt_header = (
+            {
+                "class_name": "section_header",
+                "bbox": {"x1": 0.1, "y1": 0.1, "x2": 0.6, "y2": 0.2},
+            },
+        )
+        title_pred = [
+            {
+                "class_name": "title",
+                "x1": 0.1,
+                "y1": 0.1,
+                "x2": 0.6,
+                "y2": 0.2,
+            }
+        ]
+        title_score, _title_metrics = layout_benchmark._map50_95_score(gt_header, title_pred)
+        self.assertEqual(title_score, 1.0)
+
+        gt_list_item = (
+            {
+                "class_name": "list_item",
+                "bbox": {"x1": 0.1, "y1": 0.2, "x2": 0.7, "y2": 0.4},
+            },
+        )
+        text_pred = [
+            {
+                "class_name": "text",
+                "x1": 0.1,
+                "y1": 0.2,
+                "x2": 0.7,
+                "y2": 0.4,
+            }
+        ]
+        mismatch_score, _mismatch_metrics = layout_benchmark._map50_95_score(gt_list_item, text_pred)
+        self.assertEqual(mismatch_score, 0.0)
 
 
 if __name__ == "__main__":
