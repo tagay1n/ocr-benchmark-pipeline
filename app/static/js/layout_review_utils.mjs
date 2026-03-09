@@ -6,6 +6,23 @@ export function clampZoomPercent(value, { min = 1, max = 400, fallback = 100 } =
   return Math.min(max, Math.max(min, numeric));
 }
 
+export const ZOOM_PRESET_PERCENTS = Object.freeze([
+  10,
+  20,
+  30,
+  40,
+  50,
+  70,
+  85,
+  100,
+  125,
+  150,
+  175,
+  200,
+  300,
+  400,
+]);
+
 export function formatZoomPercent(percentValue) {
   const rounded = Math.round(Number(percentValue) * 10) / 10;
   if (Number.isInteger(rounded)) {
@@ -27,6 +44,7 @@ export function computeZoomScale({
   }
 
   const fitWidthScale = viewportWidth / naturalWidth;
+  const fitHeightScale = viewportHeight / naturalHeight;
   const fitPageScale = Math.min(fitWidthScale, viewportHeight / naturalHeight);
   const automaticScale = Math.min(fitWidthScale, 1);
 
@@ -35,6 +53,9 @@ export function computeZoomScale({
   }
   if (mode === "fit-width") {
     return fitWidthScale;
+  }
+  if (mode === "fit-height") {
+    return fitHeightScale;
   }
   if (mode === "automatic") {
     return automaticScale;

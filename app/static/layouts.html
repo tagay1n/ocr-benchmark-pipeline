@@ -23,7 +23,9 @@
 
       body {
         margin: 0;
+        height: 100vh;
         min-height: 100vh;
+        overflow: hidden;
         font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
         color: var(--ink);
         background:
@@ -35,8 +37,9 @@
       main {
         position: relative;
         width: 100%;
+        height: 100vh;
         padding: 8px 6px;
-        min-height: 100vh;
+        min-height: 0;
         display: flex;
         flex-direction: column;
       }
@@ -428,8 +431,8 @@
       .layout-bbox-editor {
         display: none;
         margin-top: 4px;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 4px 8px;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 4px 0;
       }
 
       .layout-bbox-editor.is-open {
@@ -969,18 +972,9 @@
             <div id="zoom-menu" class="zoom-menu" hidden>
               <button class="zoom-option" type="button" data-zoom-mode="fit-page">Fit page</button>
               <button class="zoom-option" type="button" data-zoom-mode="fit-width">Fit width</button>
+              <button class="zoom-option" type="button" data-zoom-mode="fit-height">Fit height</button>
               <button class="zoom-option" type="button" data-zoom-mode="automatic">Automatic</button>
               <div class="zoom-separator"></div>
-              <button class="zoom-option" type="button" data-zoom-percent="50">50%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="70">70%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="85">85%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="100">100%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="125">125%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="150">150%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="175">175%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="200">200%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="300">300%</button>
-              <button class="zoom-option" type="button" data-zoom-percent="400">400%</button>
             </div>
           </div>
           <button id="detect-btn" type="button">Detect again</button>
@@ -1087,6 +1081,7 @@
         pointHandleForCoordinateKey,
         previousHistoryPageId,
         reorderReadingOrderIds,
+        ZOOM_PRESET_PERCENTS,
         updateReviewHistoryOnVisit,
       } from "/static/js/layout_review_utils.mjs";
 
@@ -1136,7 +1131,7 @@
       const reviewStateBadge = document.getElementById("review-state-badge");
       const zoomTrigger = document.getElementById("zoom-trigger");
       const zoomMenu = document.getElementById("zoom-menu");
-      const zoomOptions = Array.from(document.querySelectorAll(".zoom-option"));
+      let zoomOptions = [];
       const zoomPercentInput = document.getElementById("zoom-percent-input");
 
       const detectBtn = document.getElementById("detect-btn");
@@ -1183,6 +1178,28 @@
         layoutsLoaded: false,
       };
 
+      function rebuildZoomPresetOptions() {
+        const separator = zoomMenu.querySelector(".zoom-separator");
+        if (!(separator instanceof HTMLElement)) {
+          zoomOptions = Array.from(zoomMenu.querySelectorAll(".zoom-option"));
+          return;
+        }
+        for (const option of zoomMenu.querySelectorAll(".zoom-option[data-zoom-percent]")) {
+          option.remove();
+        }
+        const fragment = document.createDocumentFragment();
+        for (const percent of ZOOM_PRESET_PERCENTS) {
+          const option = document.createElement("button");
+          option.type = "button";
+          option.className = "zoom-option";
+          option.dataset.zoomPercent = String(percent);
+          option.textContent = `${percent}%`;
+          fragment.appendChild(option);
+        }
+        separator.after(fragment);
+        zoomOptions = Array.from(zoomMenu.querySelectorAll(".zoom-option"));
+      }
+
       function applyStoredZoomSettings() {
         state.zoomMode = "automatic";
         const storedPercent = readStorage(STORAGE_KEYS.zoomPercent);
@@ -1221,7 +1238,7 @@
         zoomPercentInput.value = String(Math.round(state.zoomAppliedPercent));
       }
 
-      function centerImageInViewport() {
+      function centerImageInViewport({ alignTop = false } = {}) {
         const viewportWidth = imageViewport.clientWidth;
         const viewportHeight = imageViewport.clientHeight;
         const contentWidth = imageWrap.offsetWidth;
@@ -1230,7 +1247,28 @@
           return;
         }
         imageViewport.scrollLeft = Math.max(0, Math.round((contentWidth - viewportWidth) / 2));
-        imageViewport.scrollTop = Math.max(0, Math.round((contentHeight - viewportHeight) / 2));
+        imageViewport.scrollTop = alignTop ? 0 : Math.max(0, Math.round((contentHeight - viewportHeight) / 2));
+      }
+
+      function fitMeasurementForViewport(viewport) {
+        const rect = viewport.getBoundingClientRect();
+        const visibleWidth = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
+        const visibleHeight = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
+        const width = Math.max(
+          1,
+          Math.min(
+            viewport.clientWidth || 1,
+            Math.max(1, Math.floor(visibleWidth || viewport.clientWidth || 1)),
+          ),
+        );
+        const height = Math.max(
+          1,
+          Math.min(
+            viewport.clientHeight || 1,
+            Math.max(1, Math.floor(visibleHeight || viewport.clientHeight || 1)),
+          ),
+        );
+        return { width, height };
       }
 
       function applyZoom() {
@@ -1240,20 +1278,22 @@
           return;
         }
 
+        const fitViewport = fitMeasurementForViewport(imageViewport);
         const scale = computeZoomScale({
           mode: state.zoomMode,
           zoomPercent: state.zoomPercent,
           naturalWidth,
           naturalHeight,
-          viewportWidth: Math.max(1, imageViewport.clientWidth),
-          viewportHeight: Math.max(1, imageViewport.clientHeight),
+          viewportWidth: fitViewport.width,
+          viewportHeight: fitViewport.height,
         });
         if (!scale || !Number.isFinite(scale) || scale <= 0) {
           return;
         }
 
-        const displayWidth = Math.max(1, Math.round(naturalWidth * scale));
-        const displayHeight = Math.max(1, Math.round(naturalHeight * scale));
+        const snap = state.zoomMode === "custom" ? Math.round : Math.floor;
+        const displayWidth = Math.max(1, snap(naturalWidth * scale));
+        const displayHeight = Math.max(1, snap(naturalHeight * scale));
         pageImage.style.width = `${displayWidth}px`;
         pageImage.style.height = `${displayHeight}px`;
         imageWrap.style.width = `${displayWidth}px`;
@@ -1264,7 +1304,8 @@
         updateZoomMenuSelection();
         requestAnimationFrame(() => {
           renderOverlay();
-          centerImageInViewport();
+          const alignTop = state.zoomMode === "fit-page" || state.zoomMode === "fit-height";
+          centerImageInViewport({ alignTop });
         });
       }
 
@@ -1274,7 +1315,7 @@
       }
 
       function setZoomMode(mode) {
-        if (!["fit-page", "fit-width", "automatic"].includes(mode)) {
+        if (!["fit-page", "fit-width", "fit-height", "automatic"].includes(mode)) {
           return;
         }
         state.zoomMode = mode;
@@ -3578,6 +3619,7 @@
         }
         try {
           setDrawModeActive(false);
+          rebuildZoomPresetOptions();
           applyStoredZoomSettings();
           loadReviewHistory();
           registerCurrentPageInHistory();

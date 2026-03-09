@@ -26,6 +26,7 @@ import {
   reconstructionWordSpacing,
   reorderReadingOrderIds,
   updateReviewHistoryOnVisit,
+  ZOOM_PRESET_PERCENTS,
 } from "../app/static/js/layout_review_utils.mjs";
 
 test("clampZoomPercent clamps and falls back for invalid values", () => {
@@ -50,6 +51,7 @@ test("computeZoomScale supports fit modes and custom percentages", () => {
   };
 
   assert.equal(computeZoomScale({ ...base, mode: "fit-width", zoomPercent: 100 }), 0.5);
+  assert.equal(computeZoomScale({ ...base, mode: "fit-height", zoomPercent: 100 }), 0.6);
   assert.equal(computeZoomScale({ ...base, mode: "fit-page", zoomPercent: 100 }), 0.5);
   assert.equal(computeZoomScale({ ...base, mode: "automatic", zoomPercent: 100 }), 0.5);
   assert.equal(computeZoomScale({ ...base, mode: "custom", zoomPercent: 175 }), 1.75);
@@ -77,6 +79,13 @@ test("computeZoomScale returns null when dimensions are unavailable", () => {
     viewportHeight: 700,
   });
   assert.equal(scale, null);
+});
+
+test("shared zoom presets include low-scale shortcuts and remain ordered", () => {
+  assert.deepEqual(
+    ZOOM_PRESET_PERCENTS,
+    [10, 20, 30, 40, 50, 70, 85, 100, 125, 150, 175, 200, 300, 400],
+  );
 });
 
 test("findMaxFittingFontSize chooses the largest fitting size", () => {
