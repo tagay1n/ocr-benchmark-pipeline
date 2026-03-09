@@ -121,12 +121,18 @@
         font-size: 26px;
       }
 
+      .header-title-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
       .subline {
         color: var(--muted);
       }
 
       .meta-strip {
-        margin-top: 4px;
         display: inline-flex;
         align-items: center;
         gap: 8px;
@@ -838,20 +844,24 @@
 
       .box-label {
         position: absolute;
-        top: -20px;
+        top: calc(-20px * var(--overlay-badge-scale, 1));
         left: 0;
-        font-size: 12px;
+        font-size: calc(12px * var(--overlay-badge-scale, 1));
         background: rgba(255, 253, 247, 0.92);
         color: #1e1f1c;
         border: 1px solid #cfc8b7;
-        border-radius: 6px;
-        padding: 2px 6px;
+        border-radius: calc(6px * var(--overlay-badge-scale, 1));
+        padding: calc(2px * var(--overlay-badge-scale, 1)) calc(6px * var(--overlay-badge-scale, 1));
         white-space: nowrap;
         max-width: 240px;
         overflow: hidden;
         text-overflow: ellipsis;
         pointer-events: none;
         z-index: 3;
+      }
+
+      .source-box-label {
+        transform: translateY(calc(-20px * var(--overlay-badge-scale, 1)));
       }
 
       .recon-restore-btn {
@@ -1132,11 +1142,11 @@
       </nav>
 
       <section class="header">
-        <div>
+        <div class="header-title-row">
           <h1>OCR review</h1>
           <div class="meta-strip">
-            <span id="review-state-badge" class="review-state-badge unknown" hidden></span>
             <span id="page-meta" class="subline"></span>
+            <span id="review-state-badge" class="review-state-badge unknown" hidden></span>
           </div>
         </div>
         <div class="actions">
@@ -1304,6 +1314,7 @@
         computeApproxLineBand,
         computeApproxLineBandByIndex,
         computeZoomScale,
+        computeOverlayBadgeScale,
         computeViewportScrollTargetForLayoutId,
         countStretchableSpaces,
         filterReviewHistory,
@@ -1901,6 +1912,7 @@
         pageImage.style.height = height;
         sourceWrap.style.width = width;
         sourceWrap.style.height = height;
+        sourceWrap.style.setProperty("--overlay-badge-scale", String(computeOverlayBadgeScale(scale)));
         reconstructedWrap.style.width = width;
         reconstructedWrap.style.height = height;
         reconstructionSurface.style.width = width;
@@ -4246,9 +4258,9 @@
           });
 
           const label = document.createElement("div");
-          label.className = "box-label";
+          label.className = "box-label source-box-label";
           label.style.left = style.left;
-          label.style.top = `calc(${style.top} - 20px)`;
+          label.style.top = style.top;
           label.style.color = color;
           label.style.borderColor = hexToRgba(color, 0.62);
           label.dataset.layoutId = String(output.layout_id);

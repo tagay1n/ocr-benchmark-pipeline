@@ -636,14 +636,14 @@
 
       .box-label {
         position: absolute;
-        top: -20px;
+        top: calc(-20px * var(--overlay-badge-scale, 1));
         left: 0;
-        font-size: 12px;
+        font-size: calc(12px * var(--overlay-badge-scale, 1));
         background: rgba(255, 253, 247, 0.92);
         color: #1e1f1c;
         border: 1px solid #cfc8b7;
-        border-radius: 6px;
-        padding: 2px 6px;
+        border-radius: calc(6px * var(--overlay-badge-scale, 1));
+        padding: calc(2px * var(--overlay-badge-scale, 1)) calc(6px * var(--overlay-badge-scale, 1));
         white-space: nowrap;
         pointer-events: none;
       }
@@ -1168,6 +1168,7 @@
         computeDraggedBBox,
         computeViewportScrollTargetForLayoutId,
         computeZoomScale,
+        computeOverlayBadgeScale,
         filterReviewHistory,
         mergeLayoutsForReview,
         nextHistoryPageId,
@@ -1458,6 +1459,7 @@
         pageImage.style.height = `${displayHeight}px`;
         imageWrap.style.width = `${displayWidth}px`;
         imageWrap.style.height = `${displayHeight}px`;
+        imageWrap.style.setProperty("--overlay-badge-scale", String(computeOverlayBadgeScale(scale)));
 
         state.zoomAppliedPercent = Math.round(scale * 1000) / 10;
         setZoomInputFromApplied();

@@ -77,6 +77,25 @@ export function computeZoomScale({
   return clampZoomPercent(zoomPercent) / 100;
 }
 
+export function computeOverlayBadgeScale(
+  zoomScale,
+  {
+    minScale = 0.1,
+    maxScale = 18,
+    multiplier = 3,
+  } = {},
+) {
+  const scale = Number(zoomScale);
+  const min = Math.max(0.01, Number(minScale) || 0.1);
+  const max = Math.max(min, Number(maxScale) || min);
+  const factor = Math.max(0.1, Number(multiplier) || 3);
+  if (!Number.isFinite(scale) || scale <= 0) {
+    return factor;
+  }
+  // Keep overlay badges directly proportional to image zoom.
+  return Math.min(max, Math.max(min, scale * factor));
+}
+
 export function reconstructionLineHeight(outputFormat) {
   const normalized = String(outputFormat || "").trim().toLowerCase();
   if (normalized === "latex") {

@@ -9,6 +9,7 @@ import {
   computeApproxLineBand,
   computeApproxLineBandByIndex,
   computeDraggedBBox,
+  computeOverlayBadgeScale,
   detectOverlappingBorderSegments,
   filterReviewHistory,
   mergeLayoutsForReview,
@@ -106,6 +107,15 @@ test("computeZoomScale returns null when dimensions are unavailable", () => {
     viewportHeight: 700,
   });
   assert.equal(scale, null);
+});
+
+test("computeOverlayBadgeScale stays proportional to zoom with safety clamps", () => {
+  assert.equal(computeOverlayBadgeScale(1), 3);
+  assert.equal(computeOverlayBadgeScale(0.5), 1.5);
+  assert.equal(computeOverlayBadgeScale(2), 6);
+  assert.equal(computeOverlayBadgeScale(999), 18);
+  assert.equal(computeOverlayBadgeScale(0), 3);
+  assert.equal(computeOverlayBadgeScale(Number.NaN), 3);
 });
 
 test("shared zoom presets include low-scale shortcuts and remain ordered", () => {
