@@ -106,7 +106,6 @@ class OcrExtractInternalsTests(unittest.TestCase):
         template = "class={class_name}; targets={caption_targets}; rule={format_rule}{caption_line}"
         expected = {
             "text": "markdown",
-            "title": "markdown",
             "section_header": "markdown",
             "page_header": "markdown",
             "page_footer": "markdown",

@@ -37,7 +37,6 @@ MARKDOWN_CLASSES = {
     "page_header",
     "section_header",
     "text",
-    "title",
 }
 HTML_CLASSES = {"table"}
 LATEX_CLASSES = {"formula"}

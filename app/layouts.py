@@ -22,6 +22,13 @@ DOC_LAYOUTNET_DEFAULT_MAX_DET = 300
 DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS = False
 CAPTION_CLASS_NAME = "caption"
 CAPTION_TARGET_CLASS_NAMES = {"table", "picture", "formula"}
+DETECTED_CLASS_REMAP = {
+    "title": "section_header",
+    "list_item": "text",
+}
+PERSISTED_CLASS_REMAP = {
+    "title": "section_header",
+}
 
 _DOC_LAYOUTNET_MODEL = None
 _DOC_LAYOUTNET_MODEL_LOCK = Lock()
@@ -38,6 +45,16 @@ def _clamp01(value: float) -> float:
 def _normalize_class_name(value: str) -> str:
     normalized = value.strip().lower().replace("-", "_").replace("/", "_")
     return "_".join(normalized.split())
+
+
+def _normalize_detected_class_name(value: str) -> str:
+    class_name = _normalize_class_name(value)
+    return DETECTED_CLASS_REMAP.get(class_name, class_name)
+
+
+def _normalize_persisted_class_name(value: str) -> str:
+    class_name = _normalize_class_name(value)
+    return PERSISTED_CLASS_REMAP.get(class_name, class_name)
 
 
 def _load_doclaynet_model():
@@ -141,7 +158,7 @@ def _detect_doclaynet_layouts(
 
         rows.append(
             {
-                "class_name": _normalize_class_name(raw_name),
+                "class_name": _normalize_detected_class_name(raw_name),
                 "confidence": float(confidence.item()),
                 "x1": x1,
                 "y1": y1,
@@ -261,6 +278,13 @@ def detect_layouts_for_page(
         max_detections=max_detections,
         agnostic_nms=agnostic_nms,
     )
+    detected_rows = [
+        {
+            **row,
+            "class_name": _normalize_detected_class_name(str(row.get("class_name", ""))),
+        }
+        for row in detected_rows
+    ]
     detector_params = {
         "confidence_threshold": thresholds["confidence_threshold"],
         "iou_threshold": thresholds["iou_threshold"],
@@ -339,7 +363,7 @@ def create_layout(
     reading_order: int | None,
 ) -> dict[str, Any]:
     validate_bbox(x1, y1, x2, y2)
-    class_name = _normalize_class_name(class_name)
+    class_name = _normalize_persisted_class_name(class_name)
     now = _utc_now()
 
     with get_session() as session:
@@ -387,7 +411,7 @@ def update_layout(
     y2: float | None,
 ) -> dict[str, Any]:
     now = _utc_now()
-    next_class_name_input = None if class_name is None else _normalize_class_name(class_name)
+    next_class_name_input = None if class_name is None else _normalize_persisted_class_name(class_name)
     with get_session() as session:
         layout = session.get(Layout, layout_id)
         if layout is None:

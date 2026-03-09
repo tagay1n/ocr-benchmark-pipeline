@@ -110,12 +110,12 @@ test("computeZoomScale returns null when dimensions are unavailable", () => {
 });
 
 test("computeOverlayBadgeScale stays proportional to zoom with safety clamps", () => {
-  assert.equal(computeOverlayBadgeScale(1), 3);
-  assert.equal(computeOverlayBadgeScale(0.5), 1.5);
-  assert.equal(computeOverlayBadgeScale(2), 6);
+  assert.equal(computeOverlayBadgeScale(1), 1.5);
+  assert.equal(computeOverlayBadgeScale(0.5), 0.75);
+  assert.equal(computeOverlayBadgeScale(2), 3);
   assert.equal(computeOverlayBadgeScale(999), 18);
-  assert.equal(computeOverlayBadgeScale(0), 3);
-  assert.equal(computeOverlayBadgeScale(Number.NaN), 3);
+  assert.equal(computeOverlayBadgeScale(0), 1.5);
+  assert.equal(computeOverlayBadgeScale(Number.NaN), 1.5);
 });
 
 test("shared zoom presets include low-scale shortcuts and remain ordered", () => {

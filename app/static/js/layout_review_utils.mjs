@@ -82,13 +82,13 @@ export function computeOverlayBadgeScale(
   {
     minScale = 0.1,
     maxScale = 18,
-    multiplier = 3,
+    multiplier = 1.5,
   } = {},
 ) {
   const scale = Number(zoomScale);
   const min = Math.max(0.01, Number(minScale) || 0.1);
   const max = Math.max(min, Number(maxScale) || min);
-  const factor = Math.max(0.1, Number(multiplier) || 3);
+  const factor = Math.max(0.1, Number(multiplier) || 1.5);
   if (!Number.isFinite(scale) || scale <= 0) {
     return factor;
   }

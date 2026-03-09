@@ -77,10 +77,30 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
                 bbox=main.BBoxPayload(x1=0.1, y1=0.3, x2=0.9, y2=0.4),
             ),
         )["layout"]
+        third = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="Title",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.41, x2=0.9, y2=0.5),
+            ),
+        )["layout"]
+        fourth = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="List item",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.51, x2=0.9, y2=0.6),
+            ),
+        )["layout"]
         self.assertEqual(first["class_name"], "section_header")
         self.assertEqual(second["class_name"], "text")
+        self.assertEqual(third["class_name"], "section_header")
+        self.assertEqual(fourth["class_name"], "list_item")
         self.assertEqual(int(first["reading_order"]), 1)
         self.assertEqual(int(second["reading_order"]), 2)
+        self.assertEqual(int(third["reading_order"]), 3)
+        self.assertEqual(int(fourth["reading_order"]), 4)
 
     def test_replace_caption_bindings_deduplicates_and_sorts_target_ids(self) -> None:
         self._write_image("layout/caption-binding.png")
@@ -216,8 +236,8 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         )
 
         detected_rows = [
-            {"class_name": "text", "confidence": 0.9, "x1": 0.2, "y1": 0.2, "x2": 0.4, "y2": 0.4},
-            {"class_name": "table", "confidence": 0.8, "x1": 0.45, "y1": 0.45, "x2": 0.8, "y2": 0.8},
+            {"class_name": "list_item", "confidence": 0.9, "x1": 0.2, "y1": 0.2, "x2": 0.4, "y2": 0.4},
+            {"class_name": "title", "confidence": 0.8, "x1": 0.45, "y1": 0.45, "x2": 0.8, "y2": 0.8},
         ]
         params = {
             "confidence_threshold": 0.25,
@@ -229,10 +249,11 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         with patch.object(layouts, "_detect_doclaynet_layouts", return_value=(detected_rows, params)):
             result = main.detect_page_layouts(page_id, main.DetectLayoutsRequest(replace_existing=False))
         self.assertEqual(result["created"], 2)
+        self.assertEqual(result["class_counts"], {"text": 1, "section_header": 1})
 
         page_layouts = main.page_layouts(page_id)["layouts"]
         self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3])
-        self.assertEqual([row["class_name"] for row in page_layouts], ["text", "text", "table"])
+        self.assertEqual([row["class_name"] for row in page_layouts], ["text", "text", "section_header"])
 
     def test_get_activity_snapshot_starts_worker_when_jobs_queued(self) -> None:
         now = main._utc_now()
