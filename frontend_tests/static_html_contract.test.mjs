@@ -13,6 +13,7 @@ function readModule(path) {
 
 test("dashboard HTML exposes required pipeline controls and backend routes", () => {
   const html = readHtml("app/static/index.html");
+  const pageModule = readModule("app/static/js/dashboard_page.mjs");
   const requiredIds = [
     'id="scan-btn"',
     'id="review-layouts-btn"',
@@ -30,12 +31,13 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
   }
-  assert.equal(html.includes('"/api/pipeline/activity/stream?limit=30"'), true);
-  assert.equal(html.includes('"/api/final/export"'), true);
-  assert.equal(html.includes('"/api/runtime-options"'), true);
-  assert.equal(html.includes('"/static/js/dashboard_sorting_utils.mjs"'), true);
-  assert.equal(html.includes('"/static/js/pipeline_event_constants.mjs"'), true);
-  assert.equal(html.includes('"/static/js/api_client.mjs"'), true);
+  assert.equal(html.includes('src="/static/js/dashboard_page.mjs"'), true);
+  assert.equal(pageModule.includes('"/api/pipeline/activity/stream?limit=30"'), true);
+  assert.equal(pageModule.includes('"/api/final/export"'), true);
+  assert.equal(pageModule.includes('"/api/runtime-options"'), true);
+  assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);
+  assert.equal(pageModule.includes('"./pipeline_event_constants.mjs"'), true);
+  assert.equal(pageModule.includes('"./api_client.mjs"'), true);
 });
 
 test("layout review HTML keeps detection+zoom integration hooks", () => {

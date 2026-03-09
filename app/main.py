@@ -79,52 +79,13 @@ async def lifespan(_: FastAPI):
     init_db()
     register_default_handlers()
     reset_runtime_options_from_settings()
-    source_dir, allowed_extensions = _discovery_source_info()
-    allowed_text = ", ".join(allowed_extensions)
-    emit_event(
-        stage=STAGE_DISCOVERY,
-        event_type=EVENT_SCAN_STARTED,
-        message=f"Startup discovery scan started for folder {source_dir} (formats: {allowed_text}).",
-        data={
-            "trigger": "startup",
-            "source_dir": source_dir,
-            "allowed_extensions": allowed_extensions,
-        },
-    )
-    summary = discover_images()
-    stats_snapshot = _pipeline_stats_snapshot()
-    emit_event(
-        stage=STAGE_DISCOVERY,
-        event_type=EVENT_SCAN_FINISHED,
-        message=_scan_finished_message(
-            "Startup discovery scan finished.",
-            {
-                "scanned_files": summary.scanned_files,
-                "new_pages": summary.new_pages,
-                "updated_pages": summary.updated_pages,
-                "missing_marked": summary.missing_marked,
-                "duplicate_files": summary.duplicate_files,
-                **stats_snapshot,
-            },
-        ),
-        data={
-            "trigger": "startup",
-            "scanned_files": summary.scanned_files,
-            "new_pages": summary.new_pages,
-            "updated_pages": summary.updated_pages,
-            "missing_marked": summary.missing_marked,
-            "duplicate_files": summary.duplicate_files,
-            **stats_snapshot,
-        },
+    _run_discovery_scan_with_events(
+        trigger="startup",
+        started_message="Startup discovery scan started",
+        finished_prefix="Startup discovery scan finished.",
     )
     if should_auto_detect_layouts_after_discovery():
-        auto = enqueue_layout_detection_for_new_pages()
-        emit_event(
-            stage=STAGE_LAYOUT_DETECT,
-            event_type=EVENT_JOBS_ENQUEUED,
-            message=f"Auto-enqueued {auto['queued']} layout detection jobs after startup discovery.",
-            data={"trigger": "startup", **auto},
-        )
+        _emit_auto_layout_enqueue_event(trigger="startup", context_label="startup discovery")
     yield
 
 
@@ -162,6 +123,55 @@ def _scan_finished_message(prefix: str, payload: dict[str, object]) -> str:
         f"Total Indexed Pages: {payload['total_pages']}, Missing Pages: {payload['missing_pages']}, "
         f"Active Duplicate Files: {payload['active_duplicate_files']}."
     )
+
+
+def _run_discovery_scan_with_events(
+    *,
+    trigger: str,
+    started_message: str,
+    finished_prefix: str,
+) -> dict[str, int | str]:
+    source_dir, allowed_extensions = _discovery_source_info()
+    allowed_text = ", ".join(allowed_extensions)
+    emit_event(
+        stage=STAGE_DISCOVERY,
+        event_type=EVENT_SCAN_STARTED,
+        message=f"{started_message} for folder {source_dir} (formats: {allowed_text}).",
+        data={
+            "trigger": trigger,
+            "source_dir": source_dir,
+            "allowed_extensions": allowed_extensions,
+        },
+    )
+    summary = discover_images()
+    stats_snapshot = _pipeline_stats_snapshot()
+    payload: dict[str, int | str] = {
+        "source_dir": summary.source_dir,
+        "scanned_files": summary.scanned_files,
+        "new_pages": summary.new_pages,
+        "updated_pages": summary.updated_pages,
+        "missing_marked": summary.missing_marked,
+        "duplicate_files": summary.duplicate_files,
+        **stats_snapshot,
+    }
+    emit_event(
+        stage=STAGE_DISCOVERY,
+        event_type=EVENT_SCAN_FINISHED,
+        message=_scan_finished_message(finished_prefix, payload),
+        data={"trigger": trigger, **payload},
+    )
+    return payload
+
+
+def _emit_auto_layout_enqueue_event(*, trigger: str, context_label: str) -> dict[str, int]:
+    auto = enqueue_layout_detection_for_new_pages()
+    emit_event(
+        stage=STAGE_LAYOUT_DETECT,
+        event_type=EVENT_JOBS_ENQUEUED,
+        message=f"Auto-enqueued {auto['queued']} layout detection jobs after {context_label}.",
+        data={"trigger": trigger, **auto},
+    )
+    return auto
 
 
 class BBoxPayload(BaseModel):
@@ -341,50 +351,20 @@ def root() -> FileResponse:
 @app.post("/api/discovery/scan")
 def scan_images() -> dict[str, object]:
     register_default_handlers()
-    source_dir, allowed_extensions = _discovery_source_info()
-    allowed_text = ", ".join(allowed_extensions)
-    emit_event(
-        stage=STAGE_DISCOVERY,
-        event_type=EVENT_SCAN_STARTED,
-        message=f"Discovery scan started for folder {source_dir} (formats: {allowed_text}).",
-        data={
-            "trigger": "api",
-            "source_dir": source_dir,
-            "allowed_extensions": allowed_extensions,
-        },
+    response = _run_discovery_scan_with_events(
+        trigger="api",
+        started_message="Discovery scan started",
+        finished_prefix="Discovery scan finished.",
     )
-    summary = discover_images()
-    stats_snapshot = _pipeline_stats_snapshot()
-    response: dict[str, object] = {
-        "source_dir": summary.source_dir,
-        "scanned_files": summary.scanned_files,
-        "new_pages": summary.new_pages,
-        "updated_pages": summary.updated_pages,
-        "missing_marked": summary.missing_marked,
-        "duplicate_files": summary.duplicate_files,
-        **stats_snapshot,
-    }
-    emit_event(
-        stage=STAGE_DISCOVERY,
-        event_type=EVENT_SCAN_FINISHED,
-        message=_scan_finished_message("Discovery scan finished.", response),
-        data={"trigger": "api", **response},
-    )
-    if should_auto_detect_layouts_after_discovery():
-        auto = enqueue_layout_detection_for_new_pages()
-        response["auto_layout_detection"] = auto
-        emit_event(
-            stage=STAGE_LAYOUT_DETECT,
-            event_type=EVENT_JOBS_ENQUEUED,
-            message=f"Auto-enqueued {auto['queued']} layout detection jobs after discovery scan.",
-            data={"trigger": "api", **auto},
-        )
-    else:
-        response["auto_layout_detection"] = {
+    response["auto_layout_detection"] = (
+        _emit_auto_layout_enqueue_event(trigger="api", context_label="discovery scan")
+        if should_auto_detect_layouts_after_discovery()
+        else {
             "considered": 0,
             "queued": 0,
             "already_queued_or_running": 0,
         }
+    )
     return response
 
 
@@ -415,43 +395,16 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
     rescan_summary: dict[str, int | str] | None = None
     auto_layout_detection: dict[str, int] | None = None
     if payload.rescan:
-        source_dir, allowed_extensions = _discovery_source_info()
-        allowed_text = ", ".join(allowed_extensions)
-        emit_event(
-            stage=STAGE_DISCOVERY,
-            event_type=EVENT_SCAN_STARTED,
-            message=f"Discovery scan started after wipe for folder {source_dir} (formats: {allowed_text}).",
-            data={
-                "trigger": "wipe",
-                "source_dir": source_dir,
-                "allowed_extensions": allowed_extensions,
-            },
-        )
-        summary = discover_images()
-        stats_snapshot = _pipeline_stats_snapshot()
-        rescan_summary = {
-            "source_dir": summary.source_dir,
-            "scanned_files": summary.scanned_files,
-            "new_pages": summary.new_pages,
-            "updated_pages": summary.updated_pages,
-            "missing_marked": summary.missing_marked,
-            "duplicate_files": summary.duplicate_files,
-            **stats_snapshot,
-        }
-        emit_event(
-            stage=STAGE_DISCOVERY,
-            event_type=EVENT_SCAN_FINISHED,
-            message=_scan_finished_message("Discovery scan finished after wipe.", rescan_summary),
-            data={"trigger": "wipe", **rescan_summary},
+        rescan_summary = _run_discovery_scan_with_events(
+            trigger="wipe",
+            started_message="Discovery scan started after wipe",
+            finished_prefix="Discovery scan finished after wipe.",
         )
         if should_auto_detect_layouts_after_discovery():
             register_default_handlers()
-            auto_layout_detection = enqueue_layout_detection_for_new_pages()
-            emit_event(
-                stage=STAGE_LAYOUT_DETECT,
-                event_type=EVENT_JOBS_ENQUEUED,
-                message=f"Auto-enqueued {auto_layout_detection['queued']} layout detection jobs after wipe scan.",
-                data={"trigger": "wipe", **auto_layout_detection},
+            auto_layout_detection = _emit_auto_layout_enqueue_event(
+                trigger="wipe",
+                context_label="wipe scan",
             )
 
     emit_event(
