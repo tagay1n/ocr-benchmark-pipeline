@@ -12,6 +12,7 @@ class BBoxPayload(BaseModel):
 
 class DetectLayoutsRequest(BaseModel):
     replace_existing: bool = True
+    model_checkpoint: str | None = Field(default=None, min_length=1, max_length=160)
     confidence_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     iou_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     image_size: int | None = Field(default=None, ge=32)
@@ -63,3 +64,7 @@ class RuntimeOptionsUpdateRequest(BaseModel):
 
 class FinalExportRequest(BaseModel):
     confirm: bool = False
+
+
+class RunLayoutBenchmarkRequest(BaseModel):
+    force_full_rerun: bool = False

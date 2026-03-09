@@ -5,6 +5,7 @@ from typing import Final, Literal, TypeAlias
 PipelineStage: TypeAlias = Literal[
     "discovery",
     "layout_detect",
+    "layout_benchmark",
     "layout_review",
     "ocr_extract",
     "ocr_review",
@@ -14,6 +15,7 @@ PipelineStage: TypeAlias = Literal[
 
 STAGE_DISCOVERY: Final[PipelineStage] = "discovery"
 STAGE_LAYOUT_DETECT: Final[PipelineStage] = "layout_detect"
+STAGE_LAYOUT_BENCHMARK: Final[PipelineStage] = "layout_benchmark"
 STAGE_LAYOUT_REVIEW: Final[PipelineStage] = "layout_review"
 STAGE_OCR_EXTRACT: Final[PipelineStage] = "ocr_extract"
 STAGE_OCR_REVIEW: Final[PipelineStage] = "ocr_review"
@@ -23,6 +25,7 @@ STAGE_PIPELINE: Final[PipelineStage] = "pipeline"
 PIPELINE_STAGES: Final[tuple[PipelineStage, ...]] = (
     STAGE_DISCOVERY,
     STAGE_LAYOUT_DETECT,
+    STAGE_LAYOUT_BENCHMARK,
     STAGE_LAYOUT_REVIEW,
     STAGE_OCR_EXTRACT,
     STAGE_OCR_REVIEW,
@@ -41,6 +44,7 @@ PipelineEventType: TypeAlias = Literal[
     "job_enqueued",
     "job_enqueue_skipped",
     "job_started",
+    "job_progress",
     "job_completed",
     "job_failed",
     "manual_review_complete_started",
@@ -65,6 +69,7 @@ EVENT_JOB_QUEUED: Final[PipelineEventType] = "job_queued"
 EVENT_JOB_ENQUEUED: Final[PipelineEventType] = "job_enqueued"
 EVENT_JOB_ENQUEUE_SKIPPED: Final[PipelineEventType] = "job_enqueue_skipped"
 EVENT_JOB_STARTED: Final[PipelineEventType] = "job_started"
+EVENT_JOB_PROGRESS: Final[PipelineEventType] = "job_progress"
 EVENT_JOB_COMPLETED: Final[PipelineEventType] = "job_completed"
 EVENT_JOB_FAILED: Final[PipelineEventType] = "job_failed"
 EVENT_MANUAL_REVIEW_COMPLETE_STARTED: Final[PipelineEventType] = "manual_review_complete_started"
@@ -84,6 +89,8 @@ def stage_display_name(stage: str | None) -> str:
         return "pipeline"
     if stage == STAGE_LAYOUT_DETECT:
         return "layout detection"
+    if stage == STAGE_LAYOUT_BENCHMARK:
+        return "layout benchmark"
     if stage == STAGE_OCR_EXTRACT:
         return "OCR extraction"
     if stage == STAGE_OCR_REVIEW:

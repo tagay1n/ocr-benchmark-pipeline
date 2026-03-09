@@ -6,6 +6,7 @@ import {
   createPageLayout,
   deleteLayout,
   detectPageLayouts,
+  fetchLayoutDetectionDefaults,
   patchLayout,
   putCaptionBindings,
 } from "../app/static/js/layout_review_api.mjs";
@@ -40,11 +41,12 @@ test("layout review API module sends expected routes, methods, and payloads", as
     await deleteLayout(11);
     await putCaptionBindings(7, { bindings: [{ caption_layout_id: 1, target_layout_ids: [2] }] });
     await completeLayoutReview(7);
+    await fetchLayoutDetectionDefaults();
   } finally {
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 7);
   assert.equal(calls[0].url, "/api/pages/7/layouts/detect");
   assert.equal(calls[0].options.method, "POST");
   assert.match(String(calls[0].options.body), /confidence_threshold/);
@@ -65,6 +67,8 @@ test("layout review API module sends expected routes, methods, and payloads", as
 
   assert.equal(calls[5].url, "/api/pages/7/layouts/review-complete");
   assert.equal(calls[5].options.method, "POST");
+  assert.equal(calls[6].url, "/api/layout-detection/defaults");
+  assert.equal(calls[6].options, undefined);
 });
 
 test("ocr review API module sends expected routes and propagates backend detail errors", async () => {

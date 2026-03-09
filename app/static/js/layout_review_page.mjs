@@ -34,6 +34,7 @@
         createPageLayout,
         deleteLayout,
         detectPageLayouts,
+        fetchLayoutDetectionDefaults,
         fetchNextLayoutReviewPage,
         fetchPageDetails,
         fetchPageLayouts,
@@ -81,6 +82,7 @@
       const detectModal = document.getElementById("detect-modal");
       const detectModalRunBtn = document.getElementById("detect-modal-run-btn");
       const detectModalCancelBtn = document.getElementById("detect-modal-cancel-btn");
+      const detectModalModelInput = document.getElementById("detect-modal-model");
       const detectModalConfInput = document.getElementById("detect-modal-conf");
       const detectModalIouInput = document.getElementById("detect-modal-iou");
       const detectModalImgszInput = document.getElementById("detect-modal-imgsz");
@@ -114,6 +116,7 @@
         dragOverPosition: null,
         reviewSubmitInProgress: false,
         detectInProgress: false,
+        detectDefaultsLoaded: false,
         layoutsLoaded: false,
         magnifierEnabled: false,
       };
@@ -2073,6 +2076,48 @@
         updateHistoryNavButtons();
       }
 
+      function setDetectModalModelOptions(availableModels, selectedModel) {
+        const models = Array.isArray(availableModels) ? availableModels : [];
+        const fallbackModel = "yolo26m-doclaynet.pt";
+        const resolvedSelectedModel =
+          typeof selectedModel === "string" && selectedModel.trim().length > 0
+            ? selectedModel.trim()
+            : fallbackModel;
+        const modelSet = new Set();
+        for (const model of models) {
+          const normalized = String(model || "").trim();
+          if (!normalized) {
+            continue;
+          }
+          modelSet.add(normalized);
+        }
+        modelSet.add(resolvedSelectedModel);
+        detectModalModelInput.innerHTML = "";
+        for (const model of Array.from(modelSet.values())) {
+          const option = document.createElement("option");
+          option.value = model;
+          option.textContent = model;
+          detectModalModelInput.appendChild(option);
+        }
+        detectModalModelInput.value = resolvedSelectedModel;
+      }
+
+      async function ensureDetectModalDefaultsLoaded() {
+        if (state.detectDefaultsLoaded) {
+          return;
+        }
+        const defaultsPayload = await fetchLayoutDetectionDefaults();
+        const defaults =
+          defaultsPayload && typeof defaultsPayload.defaults === "object"
+            ? defaultsPayload.defaults
+            : {};
+        setDetectModalModelOptions(defaultsPayload?.available_models, defaults.model_checkpoint);
+        detectModalConfInput.value = String(Number(defaults.confidence_threshold ?? 0.25));
+        detectModalIouInput.value = String(Number(defaults.iou_threshold ?? 0.45));
+        detectModalImgszInput.value = String(Number(defaults.image_size ?? 1024));
+        state.detectDefaultsLoaded = true;
+      }
+
       function setDetectModalBusy(busy) {
         const inProgress = Boolean(busy);
         state.detectInProgress = inProgress;
@@ -2080,6 +2125,7 @@
         detectModalRunBtn.disabled = inProgress;
         detectModalRunBtn.classList.toggle("is-busy", inProgress);
         detectModalCancelBtn.disabled = inProgress;
+        detectModalModelInput.disabled = inProgress;
         detectModalConfInput.disabled = inProgress;
         detectModalIouInput.disabled = inProgress;
         detectModalImgszInput.disabled = inProgress;
@@ -2088,11 +2134,16 @@
         detectModalAgnosticNmsInput.disabled = inProgress;
       }
 
-      function openDetectModal() {
+      async function openDetectModal() {
         if (state.detectInProgress) {
           return;
         }
         detectModal.hidden = false;
+        try {
+          await ensureDetectModalDefaultsLoaded();
+        } catch (error) {
+          setStatus(`Detection defaults failed: ${error.message}`, { isError: true });
+        }
       }
 
       function closeDetectModal() {
@@ -2103,10 +2154,14 @@
       }
 
       function parseDetectModalPayload() {
+        const modelCheckpoint = String(detectModalModelInput.value || "").trim();
         const confidence = Number(detectModalConfInput.value);
         const iou = Number(detectModalIouInput.value);
         const imageSize = Number(detectModalImgszInput.value);
         const maxDetections = Number(detectModalMaxDetInput.value);
+        if (!modelCheckpoint) {
+          throw new Error("Model checkpoint must be selected.");
+        }
         if (Number.isNaN(confidence) || confidence < 0 || confidence > 1) {
           throw new Error("Confidence (`conf`) must be between 0 and 1.");
         }
@@ -2120,6 +2175,7 @@
           throw new Error("Max detections (`max_det`) must be an integer >= 1.");
         }
         return {
+          model_checkpoint: modelCheckpoint,
           replace_existing: detectModalReplaceExistingInput.checked,
           confidence_threshold: confidence,
           iou_threshold: iou,
@@ -2141,7 +2197,7 @@
           shouldCloseModal = true;
           const params = payload.inference_params || {};
           setStatus(
-            `Detection finished. Created ${payload.created} layouts. conf=${params.confidence_threshold}, iou=${params.iou_threshold}, imgsz=${params.image_size}, max_det=${params.max_detections}, agnostic_nms=${params.agnostic_nms}.`,
+            `Detection finished. Created ${payload.created} layouts. model=${payload.detector || "default"}, conf=${params.confidence_threshold}, iou=${params.iou_threshold}, imgsz=${params.image_size}, max_det=${params.max_detections}, agnostic_nms=${params.agnostic_nms}.`,
           );
           await loadPage();
           await loadLayouts();
@@ -2389,14 +2445,14 @@
         resetDrawInteraction();
       });
 
-      detectBtn.addEventListener("click", () => {
+      detectBtn.addEventListener("click", async () => {
         if (state.drawModeActive) {
           exitDrawMode();
         }
         if (state.activeBindingCaptionId !== null) {
           setActiveBindingCaption(null);
         }
-        openDetectModal();
+        await openDetectModal();
       });
       addBtn.addEventListener("click", () => {
         if (state.activeBindingCaptionId !== null) {

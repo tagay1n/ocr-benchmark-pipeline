@@ -1130,6 +1130,12 @@
         </p>
         <div class="modal-grid">
           <div class="modal-field">
+            <label for="detect-modal-model">Model checkpoint</label>
+            <select id="detect-modal-model">
+              <option value="yolo26m-doclaynet.pt">yolo26m-doclaynet.pt</option>
+            </select>
+          </div>
+          <div class="modal-field">
             <label for="detect-modal-conf">Confidence (`conf` 0..1)</label>
             <input id="detect-modal-conf" type="number" min="0" max="1" step="0.01" value="0.25" />
           </div>

@@ -82,6 +82,7 @@ def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) ->
     try:
         result = detect_layouts_for_page(
             page_id,
+            model_checkpoint=payload.model_checkpoint,
             replace_existing=payload.replace_existing,
             confidence_threshold=payload.confidence_threshold,
             iou_threshold=payload.iou_threshold,

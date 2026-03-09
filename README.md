@@ -16,11 +16,16 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
 
 - Dashboard (`/`):
   - Pipeline actions with live counters: `Scan(total) -> Review layouts(done/total) -> Review OCR(done/total) -> Export`.
+  - `Benchmark` action opens dedicated benchmark page.
   - Live backend activity panel (SSE stream).
   - Duplicate-file warnings.
   - Sortable + paginated indexed-images table (default: `Added time` newest first).
   - Pagination controls with page size `25/50/100`.
   - Per-row actions: open Layout/OCR review and remove an image (with confirmation).
+- Layout benchmark (`/static/layout_benchmark.html`):
+  - Start/stop benchmark run.
+  - Live backend activity feed for benchmark stage.
+  - Config grid with current running params highlight and best-so-far config.
 - Layout review (`/static/layouts.html?page_id=<id>`):
   - Editable class, reading order, bbox.
   - Drag-and-drop reading order.
@@ -115,6 +120,10 @@ node --test frontend_tests/*.test.mjs
 - `POST /api/pages/{page_id}/ocr/review-complete`
 - `GET /api/pipeline/activity`
 - `GET /api/pipeline/activity/stream`
+- `GET /api/layout-benchmark/status`
+- `GET /api/layout-benchmark/grid`
+- `POST /api/layout-benchmark/run`
+- `POST /api/layout-benchmark/stop`
 
 ## OCR Prompt Debug Artifacts
 

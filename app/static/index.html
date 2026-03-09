@@ -67,6 +67,43 @@
         gap: 8px;
       }
 
+      .benchmark-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      #layout-benchmark-btn.is-busy {
+        position: relative;
+        color: transparent;
+      }
+
+      #layout-benchmark-btn.is-busy::after {
+        content: "";
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.45);
+        border-top-color: #ffffff;
+        animation: layout-benchmark-spin 720ms linear infinite;
+      }
+
+      @keyframes layout-benchmark-spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .header-top-actions {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
       .runtime-options {
         display: flex;
         flex-wrap: wrap;
@@ -520,7 +557,12 @@
             </label>
           </div>
         </div>
-        <button id="wipe-btn" class="danger-btn" type="button">Wipe DB state</button>
+        <div class="header-top-actions">
+          <div class="benchmark-controls" role="group" aria-label="Layout benchmark controls">
+            <button id="layout-benchmark-btn" class="secondary" type="button">Benchmark</button>
+          </div>
+          <button id="wipe-btn" class="danger-btn" type="button">Wipe data</button>
+        </div>
       </section>
       <section class="panel">
         <button id="pipeline-toggle" class="panel-toggle" type="button" aria-expanded="false">

@@ -29,6 +29,7 @@ const scanBtn = document.getElementById("scan-btn");
 const reviewLayoutsBtn = document.getElementById("review-layouts-btn");
 const reviewOcrBtn = document.getElementById("review-ocr-btn");
 const exportFinalBtn = document.getElementById("export-final-btn");
+const layoutBenchmarkBtn = document.getElementById("layout-benchmark-btn");
 const autoDetectLayoutsToggle = document.getElementById("auto-detect-layouts-toggle");
 const autoExtractTextToggle = document.getElementById("auto-extract-text-toggle");
 const wipeBtn = document.getElementById("wipe-btn");
@@ -446,6 +447,10 @@ function applyPagesSummary(summaryPayload) {
   exportFinalBtn.title = "No OCR-reviewed pages available for export.";
 }
 
+function openLayoutBenchmarkPage() {
+  window.location.href = "/static/layout_benchmark.html";
+}
+
 async function refreshReviewActionState() {
   const [nextReviewPayload, nextOcrPayload] = await Promise.all([
     fetchJson("/api/layout-review/next"),
@@ -593,8 +598,12 @@ function applyStatusUpdatesFromEvents(events) {
     if (!Number.isInteger(eventId) || eventId <= lastProcessedEventId) {
       continue;
     }
-    sawNewEvent = true;
     lastProcessedEventId = eventId;
+
+    if (String(event?.stage || "") === "layout_benchmark") {
+      continue;
+    }
+    sawNewEvent = true;
 
     const pageId = Number(event?.page_id);
     if (!Number.isInteger(pageId) || pageId <= 0) {
@@ -944,6 +953,7 @@ pagesBody.addEventListener("click", (event) => {
 bindRuntimeOptionToggle(autoDetectLayoutsToggle, "auto_detect_layouts_after_discovery");
 bindRuntimeOptionToggle(autoExtractTextToggle, "auto_extract_text_after_layout_review");
 exportFinalBtn.addEventListener("click", runFinalExport);
+layoutBenchmarkBtn.addEventListener("click", openLayoutBenchmarkPage);
 wipeBtn.addEventListener("click", openWipeModal);
 wipeCancelBtn.addEventListener("click", closeWipeModal);
 wipeConfirmBtn.addEventListener("click", runWipe);

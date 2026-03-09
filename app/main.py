@@ -17,7 +17,14 @@ from .pipeline_runtime import (
     register_default_handlers,
 )
 from .runtime_options import reset_runtime_options_from_settings
-from .api import discovery_router, pipeline_router, review_router
+from .api import benchmark_router, discovery_router, pipeline_router, review_router
+from .api.benchmark import (
+    layout_benchmark_grid,
+    layout_benchmark_status,
+    layout_detection_defaults,
+    run_layout_benchmark_job,
+    stop_layout_benchmark_job,
+)
 from .api.discovery import (
     list_duplicates,
     list_pages,
@@ -59,6 +66,7 @@ from .api.schemas import (
     FinalExportRequest,
     ReextractOcrRequest,
     ReplaceCaptionBindingsRequest,
+    RunLayoutBenchmarkRequest,
     RuntimeOptionsUpdateRequest,
     UpdateLayoutRequest,
     UpdateOcrOutputRequest,
@@ -82,3 +90,4 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(discovery_router)
 app.include_router(review_router)
 app.include_router(pipeline_router)
+app.include_router(benchmark_router)

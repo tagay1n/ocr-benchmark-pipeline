@@ -11,6 +11,7 @@ from sqlalchemy import delete, func, select
 
 from .config import settings
 from .db import get_session
+from .layout_detection_defaults import get_layout_detection_defaults
 from .layout_classes import (
     CAPTION_CLASS_NAME,
     CAPTION_TARGET_CLASS_NAMES,
@@ -28,7 +29,25 @@ DOC_LAYOUTNET_DEFAULT_IOU = 0.45
 DOC_LAYOUTNET_DEFAULT_MAX_DET = 300
 DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS = False
 
-_DOC_LAYOUTNET_MODEL = None
+DOC_LAYOUTNET_AVAILABLE_CHECKPOINTS = (
+    "yolov10m-doclaynet.pt",
+    "yolov10l-doclaynet.pt",
+    "yolov11m-doclaynet.pt",
+    "yolov11l-doclaynet.pt",
+    "yolov12m-doclaynet.pt",
+    "yolov12l-doclaynet.pt",
+    "yolo26m-doclaynet.pt",
+    "yolo26l-doclaynet.pt",
+)
+
+DOC_LAYOUTNET_LEGACY_CHECKPOINT_ALIASES = {
+    "yolo11m-doclaynet.pt": "yolov11m-doclaynet.pt",
+    "yolo11l-doclaynet.pt": "yolov11l-doclaynet.pt",
+    "yolo12m-doclaynet.pt": "yolov12m-doclaynet.pt",
+    "yolo12l-doclaynet.pt": "yolov12l-doclaynet.pt",
+}
+
+_DOC_LAYOUTNET_MODELS: dict[str, object] = {}
 _DOC_LAYOUTNET_MODEL_LOCK = Lock()
 
 
@@ -40,14 +59,15 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _load_doclaynet_model():
-    global _DOC_LAYOUTNET_MODEL
-    if _DOC_LAYOUTNET_MODEL is not None:
-        return _DOC_LAYOUTNET_MODEL
+def _load_doclaynet_model(checkpoint: str):
+    cached = _DOC_LAYOUTNET_MODELS.get(checkpoint)
+    if cached is not None:
+        return cached
 
     with _DOC_LAYOUTNET_MODEL_LOCK:
-        if _DOC_LAYOUTNET_MODEL is not None:
-            return _DOC_LAYOUTNET_MODEL
+        cached_locked = _DOC_LAYOUTNET_MODELS.get(checkpoint)
+        if cached_locked is not None:
+            return cached_locked
         try:
             from huggingface_hub import hf_hub_download
             from ultralytics import YOLO
@@ -59,29 +79,34 @@ def _load_doclaynet_model():
         try:
             checkpoint_path = hf_hub_download(
                 repo_id=DOC_LAYOUTNET_REPO_ID,
-                filename=DOC_LAYOUTNET_CHECKPOINT,
+                filename=checkpoint,
             )
         except Exception as error:
             raise ValueError(f"Failed to download detector checkpoint: {error}") from error
 
         try:
-            _DOC_LAYOUTNET_MODEL = YOLO(checkpoint_path)
+            _DOC_LAYOUTNET_MODELS[checkpoint] = YOLO(checkpoint_path)
         except Exception as error:
             raise ValueError(f"Failed to initialize layout detector: {error}") from error
 
-    return _DOC_LAYOUTNET_MODEL
+    return _DOC_LAYOUTNET_MODELS[checkpoint]
 
 
 def _detect_doclaynet_layouts(
     image_path: Path,
     *,
+    model_checkpoint: str | None,
     confidence_threshold: float | None,
     iou_threshold: float | None,
     image_size: int | None,
     max_detections: int | None,
     agnostic_nms: bool | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    model = _load_doclaynet_model()
+    checkpoint = str(model_checkpoint or DOC_LAYOUTNET_CHECKPOINT).strip()
+    if not checkpoint:
+        checkpoint = DOC_LAYOUTNET_CHECKPOINT
+    checkpoint = DOC_LAYOUTNET_LEGACY_CHECKPOINT_ALIASES.get(checkpoint, checkpoint)
+    model = _load_doclaynet_model(checkpoint)
 
     conf = DOC_LAYOUTNET_DEFAULT_CONF if confidence_threshold is None else confidence_threshold
     iou = DOC_LAYOUTNET_DEFAULT_IOU if iou_threshold is None else iou_threshold
@@ -89,6 +114,7 @@ def _detect_doclaynet_layouts(
     max_det = DOC_LAYOUTNET_DEFAULT_MAX_DET if max_detections is None else int(max_detections)
     agnostic = DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS if agnostic_nms is None else bool(agnostic_nms)
     inference_params = {
+        "model_checkpoint": checkpoint,
         "confidence_threshold": conf,
         "iou_threshold": iou,
         "image_size": imgsz,
@@ -230,6 +256,7 @@ def list_layouts(page_id: int) -> list[dict[str, Any]]:
 def detect_layouts_for_page(
     page_id: int,
     *,
+    model_checkpoint: str | None = None,
     replace_existing: bool,
     confidence_threshold: float | None,
     iou_threshold: float | None,
@@ -253,11 +280,22 @@ def detect_layouts_for_page(
     if not image_path.exists() or not image_path.is_file():
         raise ValueError("Image file not found on disk.")
 
+    defaults = get_layout_detection_defaults()
+    resolved_model_checkpoint = model_checkpoint or str(defaults["model_checkpoint"])
+    resolved_confidence_threshold = (
+        float(defaults["confidence_threshold"])
+        if confidence_threshold is None
+        else confidence_threshold
+    )
+    resolved_iou_threshold = float(defaults["iou_threshold"]) if iou_threshold is None else iou_threshold
+    resolved_image_size = int(defaults["image_size"]) if image_size is None else image_size
+
     detected_rows, thresholds = _detect_doclaynet_layouts(
         image_path,
-        confidence_threshold=confidence_threshold,
-        iou_threshold=iou_threshold,
-        image_size=image_size,
+        model_checkpoint=resolved_model_checkpoint,
+        confidence_threshold=resolved_confidence_threshold,
+        iou_threshold=resolved_iou_threshold,
+        image_size=resolved_image_size,
         max_detections=max_detections,
         agnostic_nms=agnostic_nms,
     )
@@ -269,13 +307,19 @@ def detect_layouts_for_page(
         for row in detected_rows
     ]
     detector_params = {
-        "confidence_threshold": thresholds["confidence_threshold"],
-        "iou_threshold": thresholds["iou_threshold"],
-        "image_size": thresholds["image_size"],
-        "max_detections": thresholds["max_detections"],
-        "agnostic_nms": thresholds["agnostic_nms"],
+        "confidence_threshold": float(
+            thresholds.get("confidence_threshold", resolved_confidence_threshold)
+        ),
+        "iou_threshold": float(thresholds.get("iou_threshold", resolved_iou_threshold)),
+        "image_size": int(thresholds.get("image_size", resolved_image_size)),
+        "max_detections": int(
+            thresholds.get("max_detections", DOC_LAYOUTNET_DEFAULT_MAX_DET)
+        ),
+        "agnostic_nms": bool(
+            thresholds.get("agnostic_nms", DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS)
+        ),
         "device": "cpu",
-        "model": DOC_LAYOUTNET_CHECKPOINT,
+        "model": str(thresholds.get("model_checkpoint", resolved_model_checkpoint)),
     }
     detector_source = f"detector:{DOC_LAYOUTNET_REPO_ID}:{json.dumps(detector_params, separators=(',', ':'))}"
 
@@ -318,7 +362,7 @@ def detect_layouts_for_page(
     class_counts = dict(Counter(row["class_name"] for row in detected_rows))
     return {
         "created": created_count,
-        "detector": f"{DOC_LAYOUTNET_REPO_ID}:{DOC_LAYOUTNET_CHECKPOINT}",
+        "detector": f"{DOC_LAYOUTNET_REPO_ID}:{detector_params['model']}",
         "thresholds": {
             "confidence_threshold": detector_params["confidence_threshold"],
             "iou_threshold": detector_params["iou_threshold"],

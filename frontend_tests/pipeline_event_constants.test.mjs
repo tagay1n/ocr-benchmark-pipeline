@@ -10,6 +10,7 @@ import {
 
 test("stageDisplayName maps known stages and falls back with custom formatter", () => {
   assert.equal(stageDisplayName(PIPELINE_STAGE.LAYOUT_DETECT), "Layout detection");
+  assert.equal(stageDisplayName(PIPELINE_STAGE.LAYOUT_BENCHMARK), "Layout benchmark");
   assert.equal(stageDisplayName(PIPELINE_STAGE.OCR_EXTRACT), "OCR extraction");
   assert.equal(stageDisplayName(PIPELINE_STAGE.OCR_REVIEW), "OCR review");
   assert.equal(stageDisplayName("layout_review"), "layout review");
@@ -97,6 +98,13 @@ test("inferPageStatusFromPipelineEvent maps OCR extraction/review transitions", 
       event_type: PIPELINE_EVENT.MANUAL_REVIEW_COMPLETED,
     }),
     "ocr_reviewed",
+  );
+  assert.equal(
+    inferPageStatusFromPipelineEvent({
+      stage: PIPELINE_STAGE.LAYOUT_BENCHMARK,
+      event_type: PIPELINE_EVENT.JOB_PROGRESS,
+    }),
+    null,
   );
   assert.equal(
     inferPageStatusFromPipelineEvent({

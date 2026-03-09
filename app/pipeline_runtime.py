@@ -8,14 +8,17 @@ from typing import Any, Callable
 from sqlalchemy import and_, func, or_, select, update
 
 from .db import get_session
+from .layout_benchmark import run_layout_benchmark
 from .layouts import detect_layouts_for_page
 from .models import Page, PipelineEvent, PipelineJob
 from .ocr_extract import extract_ocr_for_page
 from .pipeline_constants import (
     EVENT_JOB_COMPLETED,
     EVENT_JOB_FAILED,
+    EVENT_JOB_PROGRESS,
     EVENT_JOB_QUEUED,
     EVENT_JOB_STARTED,
+    STAGE_LAYOUT_BENCHMARK,
     STAGE_LAYOUT_DETECT,
     STAGE_OCR_EXTRACT,
     stage_display_name,
@@ -82,6 +85,7 @@ def register_default_handlers() -> None:
     if _DEFAULT_HANDLERS_REGISTERED:
         return
     register_stage_handler(STAGE_LAYOUT_DETECT, _layout_detect_handler)
+    register_stage_handler(STAGE_LAYOUT_BENCHMARK, _layout_benchmark_handler)
     register_stage_handler(STAGE_OCR_EXTRACT, _ocr_extract_handler)
     _DEFAULT_HANDLERS_REGISTERED = True
 
@@ -173,6 +177,17 @@ def _completion_message(stage: str, result: dict[str, Any] | None) -> str:
         skipped = int(result.get("skipped_count", 0))
         requests = int(result.get("requests_count", 0))
         return f"Completed OCR extraction, extracted {extracted}, skipped {skipped}, Gemini requests {requests}."
+    if stage == STAGE_LAYOUT_BENCHMARK:
+        if bool(result.get("stopped")):
+            processed = int(result.get("processed_tasks", 0))
+            return f"Stopped layout benchmark after processing {processed} tasks."
+        pages = int(result.get("total_pages", 0))
+        processed = int(result.get("processed_tasks", 0))
+        skipped = int(result.get("skipped_tasks", 0))
+        return (
+            "Completed layout benchmark, "
+            f"pages {pages}, processed {processed}, skipped {skipped}."
+        )
     return f"Completed {stage_display_name(stage)}."
 
 
@@ -372,6 +387,27 @@ def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
                 page_row.status = "ocr_failed"
                 page_row.updated_at = _utc_now()
         raise
+
+
+def _layout_benchmark_handler(job: dict[str, Any]) -> dict[str, Any]:
+    payload = job.get("payload") or {}
+    force_full_rerun = bool(payload.get("force_full_rerun", False))
+
+    def progress_callback(progress_payload: dict[str, Any]) -> None:
+        emit_event(
+            stage=STAGE_LAYOUT_BENCHMARK,
+            event_type=EVENT_JOB_PROGRESS,
+            message=str(progress_payload.get("message") or "Layout benchmark progress."),
+            data={
+                "job_id": int(job["id"]),
+                "progress": progress_payload,
+            },
+        )
+
+    return run_layout_benchmark(
+        force_full_rerun=force_full_rerun,
+        progress_callback=progress_callback,
+    )
 
 
 def get_activity_snapshot(*, limit: int = 30) -> dict[str, Any]:

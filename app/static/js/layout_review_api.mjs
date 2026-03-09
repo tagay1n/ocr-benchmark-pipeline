@@ -12,6 +12,10 @@ export function fetchPageLayouts(pageId) {
   return fetchJson(`/api/pages/${pageId}/layouts`);
 }
 
+export function fetchLayoutDetectionDefaults() {
+  return fetchJson("/api/layout-detection/defaults");
+}
+
 export function fetchNextLayoutReviewPage(pageId) {
   return fetchJson(`/api/pages/${pageId}/layout-review-next`);
 }

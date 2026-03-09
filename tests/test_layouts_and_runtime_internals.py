@@ -291,7 +291,41 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
             pipeline_runtime.register_default_handlers()
 
         calls = [(str(call.args[0]), call.args[1].__name__) for call in register_mock.mock_calls]
-        self.assertEqual(calls, [("layout_detect", "_layout_detect_handler"), ("ocr_extract", "_ocr_extract_handler")])
+        self.assertEqual(
+            calls,
+            [
+                ("layout_detect", "_layout_detect_handler"),
+                ("layout_benchmark", "_layout_benchmark_handler"),
+                ("ocr_extract", "_ocr_extract_handler"),
+            ],
+        )
+
+    def test_detect_layouts_handles_missing_model_checkpoint_in_detector_params(self) -> None:
+        self._write_image("layout/detect-fallback-model.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        fake_rows = [
+            {
+                "class_name": "text",
+                "confidence": 0.99,
+                "x1": 0.1,
+                "y1": 0.1,
+                "x2": 0.8,
+                "y2": 0.8,
+            }
+        ]
+        legacy_params = {
+            "confidence_threshold": 0.25,
+            "iou_threshold": 0.45,
+            "image_size": 1024,
+            "max_detections": 300,
+            "agnostic_nms": False,
+        }
+        with patch.object(layouts, "_detect_doclaynet_layouts", return_value=(fake_rows, legacy_params)):
+            result = main.detect_page_layouts(page_id, main.DetectLayoutsRequest(replace_existing=True))
+
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["detector"], "hantian/yolo-doclaynet:yolo26m-doclaynet.pt")
 
     def test_completion_message_handles_skipped_and_default_paths(self) -> None:
         skipped = pipeline_runtime._completion_message("ocr_extract", {"skipped": True, "reason": "page is missing"})

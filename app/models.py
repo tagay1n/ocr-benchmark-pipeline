@@ -126,3 +126,69 @@ class PipelineEvent(Base):
     page_id: Mapped[int | None] = mapped_column(ForeignKey("pages.id", ondelete="SET NULL"), nullable=True)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     data_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class LayoutDetectionDefaults(Base):
+    __tablename__ = "layout_detection_defaults"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    model_checkpoint: Mapped[str] = mapped_column(String, nullable=False)
+    confidence_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    iou_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    image_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_by: Mapped[str] = mapped_column(String, nullable=False, default="system")
+
+
+class LayoutBenchmarkRun(Base):
+    __tablename__ = "layout_benchmark_runs"
+    __table_args__ = (
+        Index("idx_layout_benchmark_runs_status", "status"),
+        Index("idx_layout_benchmark_runs_updated_at", "updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    force_full_rerun: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    total_pages: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_configs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    skipped_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    current_page_id: Mapped[int | None] = mapped_column(ForeignKey("pages.id", ondelete="SET NULL"), nullable=True)
+    current_config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    best_config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    applied_defaults: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    finished_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class LayoutBenchmarkResult(Base):
+    __tablename__ = "layout_benchmark_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "page_id",
+            "page_fingerprint",
+            "model_checkpoint",
+            "image_size",
+            "confidence_threshold",
+            "iou_threshold",
+            name="uq_layout_benchmark_results_config",
+        ),
+        Index("idx_layout_benchmark_results_page", "page_id"),
+        Index("idx_layout_benchmark_results_fingerprint", "page_fingerprint"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), nullable=False)
+    page_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    model_checkpoint: Mapped[str] = mapped_column(String, nullable=False)
+    image_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    confidence_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    iou_threshold: Mapped[float] = mapped_column(Float, nullable=False)
+    score: Mapped[float] = mapped_column(Float, nullable=False)
+    metrics_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)

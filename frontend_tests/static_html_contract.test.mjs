@@ -19,6 +19,7 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
     'id="review-layouts-btn"',
     'id="review-ocr-btn"',
     'id="export-final-btn"',
+    'id="layout-benchmark-btn"',
     'id="wipe-btn"',
     'id="pages-body"',
     'id="pages-size-select"',
@@ -38,12 +39,48 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(html.includes('src="/static/js/dashboard_page.mjs"'), true);
   assert.equal(pageModule.includes('"/api/pipeline/activity/stream?limit=30"'), true);
   assert.equal(pageModule.includes('"/api/final/export"'), true);
+  assert.equal(pageModule.includes('"/static/layout_benchmark.html"'), true);
   assert.equal(pageModule.includes('"/api/runtime-options"'), true);
   assert.equal(pageModule.includes('"/api/pages/summary"'), true);
   assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);
   assert.equal(pageModule.includes('"./pipeline_event_constants.mjs"'), true);
   assert.equal(pageModule.includes('"./api_client.mjs"'), true);
   assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
+});
+
+test("layout benchmark page keeps run/stop/grid integration hooks", () => {
+  const html = readHtml("app/static/layout_benchmark.html");
+  const pageModule = readModule("app/static/js/layout_benchmark_page.mjs");
+  const requiredIds = [
+    'id="benchmark-toggle-btn"',
+    'id="benchmark-force-rerun-toggle"',
+    'id="benchmark-run-status"',
+    'id="benchmark-processed-tasks"',
+    'id="benchmark-skipped-tasks"',
+    'id="benchmark-current-config"',
+    'id="benchmark-best-config"',
+    'id="benchmark-view-leaderboard-btn"',
+    'id="benchmark-view-explorer-btn"',
+    'id="benchmark-leaderboard-panel"',
+    'id="benchmark-explorer-panel"',
+    'id="benchmark-grid-body"',
+    'id="benchmark-explorer-mode"',
+    'id="benchmark-explorer-model"',
+    'id="benchmark-explorer-imgsz"',
+    'id="benchmark-explorer-conf"',
+    'id="benchmark-explorer-iou"',
+    'id="benchmark-heatmap-head"',
+    'id="benchmark-heatmap-body"',
+  ];
+  for (const marker of requiredIds) {
+    assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
+  }
+  assert.equal(html.includes('src="/static/js/layout_benchmark_page.mjs"'), true);
+  assert.equal(pageModule.includes('"/api/layout-benchmark/status"'), true);
+  assert.equal(pageModule.includes('"/api/layout-benchmark/grid"'), true);
+  assert.equal(pageModule.includes('"/api/layout-benchmark/run"'), true);
+  assert.equal(pageModule.includes('"/api/layout-benchmark/stop"'), true);
+  assert.equal(pageModule.includes('"/api/pipeline/activity/stream?limit=60"'), true);
 });
 
 test("layout review HTML keeps detection+zoom integration hooks", () => {
@@ -55,6 +92,7 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(html.includes('id="zoom-menu"'), true);
   assert.equal(html.includes("layout-bbox-editor"), true);
   assert.equal(html.includes('id="magnifier-toggle-btn"'), true);
+  assert.equal(html.includes('id="detect-modal-model"'), true);
   assert.equal(html.includes('src="/static/js/layout_review_page.mjs"'), true);
   assert.equal(pageModule.includes('bindingLinesLayer.id = "bind-lines-layer"'), true);
   assert.equal(pageModule.includes("box-bind-btn"), true);
@@ -64,7 +102,9 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(pageModule.includes('"/static/js/layout_class_catalog.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/layout_review_api.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/state_event_utils.mjs"'), true);
+  assert.equal(pageModule.includes("fetchLayoutDetectionDefaults"), true);
   assert.equal(apiModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
+  assert.equal(apiModule.includes('"/api/layout-detection/defaults"'), true);
   assert.equal(apiModule.includes("`/api/layouts/${layoutId}`"), true);
 });
 

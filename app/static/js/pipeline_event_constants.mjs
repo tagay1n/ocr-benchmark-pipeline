@@ -1,6 +1,7 @@
 export const PIPELINE_STAGE = Object.freeze({
   DISCOVERY: "discovery",
   LAYOUT_DETECT: "layout_detect",
+  LAYOUT_BENCHMARK: "layout_benchmark",
   LAYOUT_REVIEW: "layout_review",
   OCR_EXTRACT: "ocr_extract",
   OCR_REVIEW: "ocr_review",
@@ -19,6 +20,7 @@ export const PIPELINE_EVENT = Object.freeze({
   JOB_ENQUEUED: "job_enqueued",
   JOB_ENQUEUE_SKIPPED: "job_enqueue_skipped",
   JOB_STARTED: "job_started",
+  JOB_PROGRESS: "job_progress",
   JOB_COMPLETED: "job_completed",
   JOB_FAILED: "job_failed",
   MANUAL_REVIEW_COMPLETE_STARTED: "manual_review_complete_started",
@@ -36,6 +38,7 @@ export const PIPELINE_EVENT = Object.freeze({
 export function stageDisplayName(stage, toSentenceCaseLabel) {
   if (!stage) return "Pipeline";
   if (stage === PIPELINE_STAGE.LAYOUT_DETECT) return "Layout detection";
+  if (stage === PIPELINE_STAGE.LAYOUT_BENCHMARK) return "Layout benchmark";
   if (stage === PIPELINE_STAGE.OCR_EXTRACT) return "OCR extraction";
   if (stage === PIPELINE_STAGE.OCR_REVIEW) return "OCR review";
   if (typeof toSentenceCaseLabel === "function") {
