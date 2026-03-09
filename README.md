@@ -23,7 +23,7 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Editable class, reading order, bbox.
   - Drag-and-drop reading order.
   - Bbox editing from table and by canvas handles.
-  - Caption binding to table/picture/formula.
+  - Caption binding mode from caption bbox (`Bind`), with visible arrows to table/picture/formula targets and explicit unbind controls.
   - `Detect again` modal with model params and in-flight busy state.
 - OCR review (`/static/ocr_review.html?page_id=<id>`):
   - Source + reconstructed + extracted-content panels.

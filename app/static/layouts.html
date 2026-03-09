@@ -36,7 +36,7 @@
       main {
         position: relative;
         width: 100%;
-        padding: 24px;
+        padding: 8px 6px;
         min-height: 100vh;
         display: flex;
         flex-direction: column;
@@ -44,8 +44,8 @@
 
       .nav-strip {
         position: absolute;
-        top: 24px;
-        left: 24px;
+        top: 8px;
+        left: 6px;
         display: inline-flex;
         align-items: center;
         gap: 8px;
@@ -305,11 +305,11 @@
       }
 
       .grid {
-        margin-top: 16px;
+        margin-top: 8px;
         display: grid;
         grid-template-columns: minmax(0, 1fr) fit-content(100%);
         grid-template-rows: minmax(0, 1fr);
-        gap: 16px;
+        gap: 6px;
         align-items: stretch;
         flex: 1 1 auto;
         min-height: 0;
@@ -348,6 +348,18 @@
 
       .layouts-header h2 {
         margin: 0;
+      }
+
+      .layouts-header-tools {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .bbox-toggle-btn {
+        min-width: 54px;
+        height: 36px;
+        padding: 0 10px;
       }
 
       .layouts-add-btn {
@@ -392,16 +404,15 @@
         min-width: var(--class-col-size);
       }
 
-      .layout-order-col {
-        width: 3ch;
-        min-width: 3ch;
-        text-align: right;
+      .layout-class-cell {
         vertical-align: top;
       }
 
-      .layout-bind-col {
-        width: 26ch;
-        min-width: 26ch;
+      .layout-order-col {
+        width: 2.4ch;
+        min-width: 2.4ch;
+        text-align: right;
+        vertical-align: top;
       }
 
       .layout-actions-col {
@@ -424,6 +435,11 @@
         gap: 6px;
       }
 
+      .layouts-panel table.hide-bbox-column .layout-bbox-col,
+      .layouts-panel table.hide-bbox-column .layout-bbox-cell {
+        display: none;
+      }
+
       .bbox-field {
         display: inline-flex;
         align-items: center;
@@ -440,17 +456,52 @@
         width: 76px;
       }
 
-      .caption-targets-select {
-        width: 100%;
-        min-width: 0;
-        min-height: 66px;
+      .caption-bind-summary {
+        margin-top: 4px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+      }
+
+      .caption-bind-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        max-width: 100%;
+        padding: 2px 6px;
+        border: 1px solid #cfcbc0;
+        border-radius: 999px;
+        background: #f3efe4;
+        color: #2e2f2c;
         font-size: 12px;
       }
 
-      .caption-targets-select.binding-missing {
-        border-color: #d29c34;
-        background: #fff7e6;
+      .caption-bind-chip-label {
+        max-width: 11ch;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
+
+      .caption-bind-chip-remove {
+        width: 18px;
+        height: 18px;
+        min-width: 18px;
+        padding: 0;
+        border-radius: 999px;
+        border: 1px solid #bb6a6a;
+        background: #f6e7e7;
+        color: #8a2727;
+        line-height: 1;
+        font-size: 12px;
+      }
+
+      .caption-bind-chip-remove:hover {
+        background: #f1dcdc;
+      }
+
 
       .image-viewport {
         position: relative;
@@ -479,6 +530,13 @@
       #overlay {
         position: absolute;
         inset: 0;
+      }
+
+      #bind-lines-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
       }
 
       .draw-layer {
@@ -512,6 +570,7 @@
         border-radius: 4px;
         cursor: default;
         touch-action: none;
+        z-index: 1;
       }
 
       .box-label {
@@ -593,6 +652,55 @@
         z-index: 2;
         border-width: 2px;
         box-shadow: 0 0 0 2px rgba(30, 31, 28, 0.38);
+      }
+
+      .box.binding-caption-active {
+        box-shadow: 0 0 0 2px rgba(73, 111, 152, 0.48);
+      }
+
+      .box.binding-target-candidate {
+        cursor: pointer;
+      }
+
+      .box.binding-target-candidate:hover {
+        box-shadow: 0 0 0 2px rgba(11, 122, 117, 0.28);
+      }
+
+      .box.binding-target-linked {
+        box-shadow: 0 0 0 2px rgba(11, 122, 117, 0.48);
+      }
+
+      .box-bind-btn {
+        position: absolute;
+        top: -20px;
+        right: -1px;
+        z-index: 4;
+        width: 24px;
+        height: 20px;
+        min-width: 24px;
+        padding: 0;
+        border-radius: 7px;
+        border: 1px solid #b4becc;
+        background: rgba(241, 244, 249, 0.86);
+        color: #3a4b66;
+        font-size: 13px;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.68;
+      }
+
+      .box-bind-btn:hover {
+        opacity: 1;
+        background: rgba(232, 238, 247, 0.94);
+      }
+
+      .box-bind-btn.active {
+        border-color: #496f98;
+        background: rgba(224, 234, 248, 0.96);
+        color: #294f77;
+        opacity: 1;
       }
 
       .box.layout-selected .box-label {
@@ -900,20 +1008,22 @@
         <article class="panel layouts-panel">
           <div class="layouts-header">
             <h2>Layouts</h2>
-            <button id="add-btn" class="secondary layouts-add-btn" type="button" aria-label="Add box" title="Add box">
-              <svg class="layouts-add-btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M12 5v14"></path>
-                <path d="M5 12h14"></path>
-              </svg>
-            </button>
+            <div class="layouts-header-tools">
+              <button id="bbox-toggle-btn" class="secondary bbox-toggle-btn" type="button" aria-pressed="false" title="Show bbox column">bbox</button>
+              <button id="add-btn" class="secondary layouts-add-btn" type="button" aria-label="Add box" title="Add box">
+                <svg class="layouts-add-btn-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M12 5v14"></path>
+                  <path d="M5 12h14"></path>
+                </svg>
+              </button>
+            </div>
           </div>
-          <table>
+          <table id="layouts-table" class="hide-bbox-column">
               <thead>
                 <tr>
-                  <th class="layout-order-col">Order</th>
+                  <th class="layout-order-col" aria-label="Order"></th>
                   <th class="layout-class-col">Class</th>
-                  <th>bbox</th>
-                  <th class="layout-bind-col">Bind</th>
+                  <th class="layout-bbox-col">bbox</th>
                   <th class="layout-actions-col">Actions</th>
                 </tr>
               </thead>
@@ -992,6 +1102,7 @@
         layoutDraftPrefix: "layout.draft.page",
         zoomMode: "layout.zoom.mode",
         zoomPercent: "layout.zoom.percent",
+        showBboxColumn: "layout.show_bbox_column",
         reviewNavHistory: "layout.review_nav.history",
         reviewNavIndex: "layout.review_nav.index",
       };
@@ -1028,7 +1139,9 @@
       const drawLayer = document.getElementById("draw-layer");
       const drawPreviewBox = document.getElementById("draw-preview-box");
       const statusLine = document.getElementById("status-line");
+      const layoutsTable = document.getElementById("layouts-table");
       const layoutsBody = document.getElementById("layouts-body");
+      const bboxToggleBtn = document.getElementById("bbox-toggle-btn");
       const reviewStateBadge = document.getElementById("review-state-badge");
       const zoomTrigger = document.getElementById("zoom-trigger");
       const zoomMenu = document.getElementById("zoom-menu");
@@ -1059,7 +1172,9 @@
         deletedLayoutIds: new Set(),
         captionBindingsByCaptionId: {},
         selectedLayoutId: null,
+        activeBindingCaptionId: null,
         activePointHighlight: null,
+        showBboxColumn: false,
         zoomMode: "automatic",
         zoomPercent: 100,
         zoomAppliedPercent: 100,
@@ -1086,6 +1201,21 @@
         state.zoomAppliedPercent = 100;
         setZoomInputFromApplied();
         updateZoomMenuSelection();
+      }
+
+      function updateBboxColumnVisibility() {
+        if (!layoutsTable || !bboxToggleBtn) {
+          return;
+        }
+        const show = Boolean(state.showBboxColumn);
+        layoutsTable.classList.toggle("hide-bbox-column", !show);
+        bboxToggleBtn.setAttribute("aria-pressed", show ? "true" : "false");
+        bboxToggleBtn.title = show ? "Hide bbox column" : "Show bbox column";
+      }
+
+      function applyStoredLayoutPanelSettings() {
+        state.showBboxColumn = readStorage(STORAGE_KEYS.showBboxColumn) === "1";
+        updateBboxColumnVisibility();
       }
 
       function closeZoomMenu() {
@@ -2052,21 +2182,82 @@
 
       function renderOverlay() {
         overlay.innerHTML = "";
+        const overlayWidth = Math.max(1, overlay.clientWidth || pageImage.clientWidth || imageWrap.offsetWidth || 1);
+        const overlayHeight = Math.max(1, overlay.clientHeight || pageImage.clientHeight || imageWrap.offsetHeight || 1);
+
+        const bindingLinesLayer = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        bindingLinesLayer.id = "bind-lines-layer";
+        bindingLinesLayer.setAttribute("viewBox", `0 0 ${overlayWidth} ${overlayHeight}`);
+        bindingLinesLayer.setAttribute("preserveAspectRatio", "none");
+        bindingLinesLayer.setAttribute("width", String(overlayWidth));
+        bindingLinesLayer.setAttribute("height", String(overlayHeight));
+
+        const defs = document.createElementNS("http://www.w3.org/2000/svg", "defs");
+        const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+        marker.setAttribute("id", "bind-arrowhead");
+        marker.setAttribute("viewBox", "0 0 10 10");
+        marker.setAttribute("refX", "9");
+        marker.setAttribute("refY", "5");
+        marker.setAttribute("markerWidth", "5");
+        marker.setAttribute("markerHeight", "5");
+        marker.setAttribute("orient", "auto-start-reverse");
+        const markerPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        markerPath.setAttribute("d", "M 0 0 L 10 5 L 0 10 z");
+        markerPath.setAttribute("fill", "#496f98");
+        marker.appendChild(markerPath);
+        defs.appendChild(marker);
+        bindingLinesLayer.appendChild(defs);
+        overlay.appendChild(bindingLinesLayer);
+
+        const activeBindingCaptionId = Number(state.activeBindingCaptionId);
+        const activeBindingTargetIds = Number.isInteger(activeBindingCaptionId) && activeBindingCaptionId > 0
+          ? new Set(captionTargetIds(activeBindingCaptionId))
+          : new Set();
+
         for (const layout of state.layouts) {
+          const layoutId = Number(layout.id);
           const color = colorForClass(layout.class_name);
           const box = document.createElement("div");
           box.className = "box";
-          box.dataset.layoutId = String(layout.id);
+          box.dataset.layoutId = String(layoutId);
           applyBoxElementStyle(box, layout.bbox, color);
+          if (layoutId === activeBindingCaptionId) {
+            box.classList.add("binding-caption-active");
+          } else if (Number.isInteger(activeBindingCaptionId) && activeBindingCaptionId > 0 && isCaptionTargetClass(layout.class_name)) {
+            box.classList.add("binding-target-candidate");
+            if (activeBindingTargetIds.has(layoutId)) {
+              box.classList.add("binding-target-linked");
+            }
+          }
           box.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) {
               return;
             }
             const target = event.target;
-            if (target instanceof Element && target.closest(".box-handle")) {
+            if (target instanceof Element && target.closest(".box-handle, .box-bind-btn")) {
               return;
             }
-            selectLayout(layout.id, { scrollRowIntoView: true });
+
+            if (Number.isInteger(activeBindingCaptionId) && activeBindingCaptionId > 0) {
+              if (layoutId === activeBindingCaptionId) {
+                selectLayout(layoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
+                return;
+              }
+              if (isCaptionTargetClass(layout.class_name)) {
+                const applied = toggleCaptionTargetBinding(activeBindingCaptionId, layoutId);
+                if (applied) {
+                  const nowLinked = captionTargetIds(activeBindingCaptionId).includes(layoutId);
+                  setStatus(
+                    nowLinked
+                      ? "Caption binding saved locally."
+                      : "Caption unbound locally.",
+                  );
+                  renderLayouts();
+                }
+                return;
+              }
+            }
+            selectLayout(layoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
           });
 
           const label = document.createElement("div");
@@ -2076,19 +2267,129 @@
           label.textContent = `${layout.reading_order}. ${formatClassLabel(layout.class_name)}`;
           box.appendChild(label);
 
+          if (isCaptionClass(layout.class_name)) {
+            const bindBtn = document.createElement("button");
+            bindBtn.className = "box-bind-btn";
+            bindBtn.type = "button";
+            bindBtn.textContent = "🔗";
+            const isActiveCaption = layoutId === activeBindingCaptionId;
+            bindBtn.classList.toggle("active", isActiveCaption);
+            bindBtn.title = isActiveCaption ? "Exit bind mode" : "Bind caption";
+            bindBtn.setAttribute("aria-label", isActiveCaption ? "Exit bind mode" : "Bind caption");
+            bindBtn.addEventListener("pointerdown", (event) => {
+              event.stopPropagation();
+            });
+            bindBtn.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (layoutId === Number(state.activeBindingCaptionId)) {
+                setActiveBindingCaption(null);
+                setStatus("Bind mode closed.");
+              } else {
+                setActiveBindingCaption(layoutId);
+                setStatus("Bind mode enabled. Click table, picture, or formula boxes to toggle binding.");
+              }
+            });
+            box.appendChild(bindBtn);
+          }
+
           for (const handle of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
             const handleEl = document.createElement("div");
             handleEl.className = "box-handle";
             handleEl.dataset.handle = handle;
-            handleEl.dataset.layoutId = String(layout.id);
+            handleEl.dataset.layoutId = String(layoutId);
             handleEl.addEventListener("pointerdown", (event) => {
-              beginOverlayDrag(event, layout.id, handle, box, color);
+              beginOverlayDrag(event, layoutId, handle, box, color);
             });
             box.appendChild(handleEl);
           }
 
           overlay.appendChild(box);
         }
+
+        const pixelRectFromBBox = (bbox) => {
+          const rawX1 = Number(bbox.x1) * overlayWidth;
+          const rawX2 = Number(bbox.x2) * overlayWidth;
+          const rawY1 = Number(bbox.y1) * overlayHeight;
+          const rawY2 = Number(bbox.y2) * overlayHeight;
+          return {
+            left: Math.min(rawX1, rawX2),
+            right: Math.max(rawX1, rawX2),
+            top: Math.min(rawY1, rawY2),
+            bottom: Math.max(rawY1, rawY2),
+          };
+        };
+
+        const shortestConnectorBetweenRects = (sourceRect, targetRect) => {
+          let sourceX;
+          let targetX;
+          if (sourceRect.right < targetRect.left) {
+            sourceX = sourceRect.right;
+            targetX = targetRect.left;
+          } else if (targetRect.right < sourceRect.left) {
+            sourceX = sourceRect.left;
+            targetX = targetRect.right;
+          } else {
+            const overlapLeft = Math.max(sourceRect.left, targetRect.left);
+            const overlapRight = Math.min(sourceRect.right, targetRect.right);
+            const overlapMidX = (overlapLeft + overlapRight) / 2;
+            sourceX = overlapMidX;
+            targetX = overlapMidX;
+          }
+
+          let sourceY;
+          let targetY;
+          if (sourceRect.bottom < targetRect.top) {
+            sourceY = sourceRect.bottom;
+            targetY = targetRect.top;
+          } else if (targetRect.bottom < sourceRect.top) {
+            sourceY = sourceRect.top;
+            targetY = targetRect.bottom;
+          } else {
+            const overlapTop = Math.max(sourceRect.top, targetRect.top);
+            const overlapBottom = Math.min(sourceRect.bottom, targetRect.bottom);
+            const overlapMidY = (overlapTop + overlapBottom) / 2;
+            sourceY = overlapMidY;
+            targetY = overlapMidY;
+          }
+
+          return {
+            source: { x: sourceX, y: sourceY },
+            target: { x: targetX, y: targetY },
+          };
+        };
+
+        for (const layout of state.layouts) {
+          if (!isCaptionClass(layout.class_name)) {
+            continue;
+          }
+          const captionId = Number(layout.id);
+          if (!Number.isInteger(captionId) || captionId <= 0) {
+            continue;
+          }
+          const captionRect = pixelRectFromBBox(layout.bbox);
+          const targets = captionTargetIds(captionId);
+          const isActiveCaption = captionId === activeBindingCaptionId;
+          for (const targetId of targets) {
+            const targetLayout = findLayoutById(targetId);
+            if (!targetLayout || !isCaptionTargetClass(targetLayout.class_name)) {
+              continue;
+            }
+            const targetRect = pixelRectFromBBox(targetLayout.bbox);
+            const connector = shortestConnectorBetweenRects(captionRect, targetRect);
+            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+            line.setAttribute("x1", connector.source.x.toFixed(2));
+            line.setAttribute("y1", connector.source.y.toFixed(2));
+            line.setAttribute("x2", connector.target.x.toFixed(2));
+            line.setAttribute("y2", connector.target.y.toFixed(2));
+            line.setAttribute("stroke", "#496f98");
+            line.setAttribute("stroke-opacity", isActiveCaption ? "0.92" : "0.56");
+            line.setAttribute("stroke-width", isActiveCaption ? "2.2" : "1.6");
+            line.setAttribute("marker-end", "url(#bind-arrowhead)");
+            bindingLinesLayer.appendChild(line);
+          }
+        }
+
         applySelectedLayoutStyles();
         applyActivePointHighlightStyles();
       }
@@ -2141,6 +2442,82 @@
         return CAPTION_TARGET_CLASSES.has(normalizeClassName(className));
       }
 
+      function captionTargetIds(captionLayoutId) {
+        return normalizeLayoutIdList(state.captionBindingsByCaptionId[String(captionLayoutId)]);
+      }
+
+      function setCaptionTargetIds(captionLayoutId, targetLayoutIds) {
+        const normalizedCaptionId = Number(captionLayoutId);
+        if (!Number.isInteger(normalizedCaptionId) || normalizedCaptionId <= 0) {
+          return false;
+        }
+        const captionLayout = findLayoutById(normalizedCaptionId);
+        if (!captionLayout || !isCaptionClass(captionLayout.class_name)) {
+          return false;
+        }
+        const normalizedTargets = normalizeLayoutIdList(targetLayoutIds).filter((targetId) => {
+          if (targetId === normalizedCaptionId) {
+            return false;
+          }
+          const targetLayout = findLayoutById(targetId);
+          return Boolean(targetLayout && isCaptionTargetClass(targetLayout.class_name));
+        });
+        state.captionBindingsByCaptionId[String(normalizedCaptionId)] = normalizedTargets;
+        persistLayoutDraftState();
+        return true;
+      }
+
+      function toggleCaptionTargetBinding(captionLayoutId, targetLayoutId) {
+        const normalizedCaptionId = Number(captionLayoutId);
+        const normalizedTargetId = Number(targetLayoutId);
+        if (!Number.isInteger(normalizedCaptionId) || normalizedCaptionId <= 0) {
+          return false;
+        }
+        if (!Number.isInteger(normalizedTargetId) || normalizedTargetId <= 0) {
+          return false;
+        }
+        const targetLayout = findLayoutById(normalizedTargetId);
+        if (!targetLayout || !isCaptionTargetClass(targetLayout.class_name)) {
+          return false;
+        }
+        const current = captionTargetIds(normalizedCaptionId);
+        const hasBinding = current.includes(normalizedTargetId);
+        const nextTargets = hasBinding
+          ? current.filter((value) => value !== normalizedTargetId)
+          : [...current, normalizedTargetId];
+        return setCaptionTargetIds(normalizedCaptionId, nextTargets);
+      }
+
+      function setActiveBindingCaption(captionLayoutId) {
+        if (captionLayoutId === null) {
+          state.activeBindingCaptionId = null;
+          renderOverlay();
+          return;
+        }
+        const normalizedId = Number(captionLayoutId);
+        if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+          return;
+        }
+        const captionLayout = findLayoutById(normalizedId);
+        if (!captionLayout || !isCaptionClass(captionLayout.class_name)) {
+          return;
+        }
+        state.activeBindingCaptionId = normalizedId;
+        selectLayout(normalizedId, { scrollRowIntoView: true, scrollImageToLayout: true });
+        renderOverlay();
+      }
+
+      function clearActiveBindingCaptionIfMissing() {
+        if (!Number.isInteger(Number(state.activeBindingCaptionId))) {
+          state.activeBindingCaptionId = null;
+          return;
+        }
+        const captionLayout = findLayoutById(state.activeBindingCaptionId);
+        if (!captionLayout || !isCaptionClass(captionLayout.class_name)) {
+          state.activeBindingCaptionId = null;
+        }
+      }
+
       function sanitizeCaptionBindingsInPlace() {
         if (!state.layoutsLoaded) {
           return;
@@ -2173,6 +2550,7 @@
           nextBindings[key] = sanitizedTargets;
         }
         state.captionBindingsByCaptionId = nextBindings;
+        clearActiveBindingCaptionIfMissing();
       }
 
       function hasPendingCaptionBindingDraftChanges() {
@@ -2238,17 +2616,6 @@
         select.style.color = color;
       }
 
-      function captionBindingOptions(captionLayoutId) {
-        const currentCaptionId = Number(captionLayoutId);
-        return state.layouts.filter((layout) => {
-          const layoutId = Number(layout.id);
-          if (!Number.isInteger(layoutId) || layoutId <= 0 || layoutId === currentCaptionId) {
-            return false;
-          }
-          return isCaptionTargetClass(layout.class_name);
-        });
-      }
-
       function layoutRow(layout) {
         const tr = document.createElement("tr");
         const layoutId = Number(layout.id);
@@ -2278,7 +2645,7 @@
         tr.appendChild(orderTd);
 
         const classTd = document.createElement("td");
-        classTd.className = "layout-class-col";
+        classTd.className = "layout-class-col layout-class-cell";
         const classInput = buildClassSelect(layout.class_name);
         classInput.classList.add("layout-class-select");
         applyClassColorToSelect(classInput, layout.class_name);
@@ -2289,6 +2656,61 @@
           selectLayout(layoutId, { scrollImageToLayout: true });
         });
         classTd.appendChild(classInput);
+
+        if (isCaptionClass(layout.class_name)) {
+          const targetIds = captionTargetIds(layoutId);
+          if (targetIds.length > 0) {
+            const summary = document.createElement("div");
+            summary.className = "caption-bind-summary";
+            for (const targetId of targetIds) {
+              const targetLayout = findLayoutById(targetId);
+              const chip = document.createElement("span");
+              chip.className = "caption-bind-chip";
+              chip.title = "Click to focus target layout";
+              chip.addEventListener("pointerdown", (event) => {
+                event.stopPropagation();
+              });
+              chip.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const normalizedTargetId = Number(targetId);
+                if (!Number.isInteger(normalizedTargetId) || normalizedTargetId <= 0) {
+                  return;
+                }
+                selectLayout(normalizedTargetId, { scrollRowIntoView: true, scrollImageToLayout: true });
+              });
+
+              const chipLabel = document.createElement("span");
+              chipLabel.className = "caption-bind-chip-label";
+              chipLabel.textContent = targetLayout
+                ? `${formatClassLabel(targetLayout.class_name)} #${targetId}`
+                : `Missing #${targetId}`;
+              chip.appendChild(chipLabel);
+
+              const removeBtn = document.createElement("button");
+              removeBtn.className = "caption-bind-chip-remove";
+              removeBtn.type = "button";
+              removeBtn.textContent = "×";
+              removeBtn.title = "Unbind target";
+              removeBtn.setAttribute("aria-label", "Unbind target");
+              removeBtn.addEventListener("pointerdown", (event) => {
+                event.stopPropagation();
+              });
+              removeBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const nextTargets = captionTargetIds(layoutId).filter((value) => value !== Number(targetId));
+                if (setCaptionTargetIds(layoutId, nextTargets)) {
+                  setStatus("Caption unbound locally.");
+                  renderLayouts();
+                }
+              });
+              chip.appendChild(removeBtn);
+              summary.appendChild(chip);
+            }
+            classTd.appendChild(summary);
+          }
+        }
         tr.appendChild(classTd);
 
         const bboxTd = document.createElement("td");
@@ -2320,61 +2742,6 @@
           bboxTd.appendChild(field);
         }
         tr.appendChild(bboxTd);
-
-        const bindTd = document.createElement("td");
-        bindTd.className = "layout-bind-col";
-        if (isCaptionClass(layout.class_name)) {
-          const targetsSelect = document.createElement("select");
-          targetsSelect.className = "caption-targets-select";
-          targetsSelect.multiple = true;
-
-          const bindingOptions = captionBindingOptions(layoutId);
-          const selectedTargetIds = new Set(
-            normalizeLayoutIdList(state.captionBindingsByCaptionId[String(layoutId)]),
-          );
-          for (const targetLayout of bindingOptions) {
-            const targetLayoutId = Number(targetLayout.id);
-            const option = document.createElement("option");
-            option.value = String(targetLayoutId);
-            option.textContent = `${formatClassLabel(targetLayout.class_name)} [id:${targetLayoutId}]`;
-            if (selectedTargetIds.has(targetLayoutId)) {
-              option.selected = true;
-            }
-            targetsSelect.appendChild(option);
-          }
-
-          targetsSelect.size = Math.min(6, Math.max(2, bindingOptions.length || 2));
-          targetsSelect.disabled = bindingOptions.length === 0;
-          targetsSelect.classList.toggle("binding-missing", selectedTargetIds.size === 0);
-          targetsSelect.title =
-            bindingOptions.length === 0
-              ? "No available table/picture/formula targets on this page."
-              : "Bind caption to one or more target layouts.";
-
-          targetsSelect.addEventListener("focus", () => {
-            selectLayout(layoutId, { scrollImageToLayout: true });
-          });
-          targetsSelect.addEventListener("pointerdown", () => {
-            selectLayout(layoutId, { scrollImageToLayout: true });
-          });
-          targetsSelect.addEventListener("change", () => {
-            const nextTargets = normalizeLayoutIdList(
-              Array.from(targetsSelect.selectedOptions).map((option) => Number(option.value)),
-            );
-            state.captionBindingsByCaptionId[String(layoutId)] = nextTargets;
-            targetsSelect.classList.toggle("binding-missing", nextTargets.length === 0);
-            persistLayoutDraftState();
-            setStatus("Caption bindings saved locally.");
-          });
-
-          bindTd.appendChild(targetsSelect);
-        } else {
-          const noBinding = document.createElement("span");
-          noBinding.className = "subline";
-          noBinding.textContent = "—";
-          bindTd.appendChild(noBinding);
-        }
-        tr.appendChild(bindTd);
 
         for (const [key, input] of bboxFields) {
           const pointHandle = pointHandleForCoordinateKey(key);
@@ -2969,10 +3336,21 @@
         if (state.drawModeActive) {
           exitDrawMode();
         }
+        if (state.activeBindingCaptionId !== null) {
+          setActiveBindingCaption(null);
+        }
         openDetectModal();
       });
       addBtn.addEventListener("click", () => {
+        if (state.activeBindingCaptionId !== null) {
+          setActiveBindingCaption(null);
+        }
         toggleDrawMode();
+      });
+      bboxToggleBtn.addEventListener("click", () => {
+        state.showBboxColumn = !state.showBboxColumn;
+        writeStorage(STORAGE_KEYS.showBboxColumn, state.showBboxColumn ? "1" : "0");
+        updateBboxColumnVisibility();
       });
       reviewBtn.addEventListener("click", markReviewed);
       historyBackBtn.addEventListener("click", () => {
@@ -3141,6 +3519,9 @@
           if (state.drawModeActive) {
             exitDrawMode();
           }
+          if (state.activeBindingCaptionId !== null) {
+            setActiveBindingCaption(null);
+          }
           clearSelectedLayout();
         }
       });
@@ -3171,6 +3552,7 @@
         try {
           setDrawModeActive(false);
           applyStoredZoomSettings();
+          applyStoredLayoutPanelSettings();
           loadReviewHistory();
           registerCurrentPageInHistory();
           loadLayoutDraftState();
