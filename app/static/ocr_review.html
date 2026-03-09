@@ -51,12 +51,13 @@
       }
 
       .nav-strip {
-        position: absolute;
+        position: fixed;
         top: 24px;
         left: 24px;
         display: inline-flex;
         align-items: center;
         gap: 8px;
+        z-index: 45;
       }
 
       .back-nav,
@@ -101,11 +102,18 @@
       }
 
       .header {
+        position: sticky;
+        top: 0;
+        z-index: 40;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
+        padding-top: 4px;
+        padding-bottom: 8px;
         padding-left: 172px;
+        background: rgba(243, 241, 235, 0.9);
+        backdrop-filter: blur(1px);
       }
 
       h1 {

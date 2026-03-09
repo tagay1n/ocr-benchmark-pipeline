@@ -45,12 +45,13 @@
       }
 
       .nav-strip {
-        position: absolute;
+        position: fixed;
         top: 8px;
         left: 6px;
         display: inline-flex;
         align-items: center;
         gap: 8px;
+        z-index: 45;
       }
 
       .back-nav,
@@ -95,11 +96,18 @@
       }
 
       .header {
+        position: sticky;
+        top: 0;
+        z-index: 40;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
+        padding-top: 4px;
+        padding-bottom: 8px;
         padding-left: 172px;
+        background: rgba(243, 241, 235, 0.9);
+        backdrop-filter: blur(1px);
       }
 
       h1 {
@@ -107,12 +115,18 @@
         font-size: 26px;
       }
 
+      .header-title-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
       .subline {
         color: var(--muted);
       }
 
       .meta-strip {
-        margin-top: 4px;
         display: inline-flex;
         align-items: center;
         gap: 8px;
@@ -954,7 +968,7 @@
         </button>
       </div>
       <section class="header">
-        <div>
+        <div class="header-title-row">
           <h1>Layout review</h1>
           <div class="meta-strip">
             <div id="page-meta" class="subline"></div>
