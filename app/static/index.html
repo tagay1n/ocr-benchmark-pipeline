@@ -176,6 +176,39 @@
         color: var(--muted);
       }
 
+      .table-sort-btn {
+        appearance: none;
+        border: 0;
+        padding: 0;
+        margin: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .table-sort-btn:hover {
+        color: var(--text);
+      }
+
+      .table-sort-btn.is-active {
+        color: var(--text);
+      }
+
+      .table-sort-indicator {
+        display: inline-block;
+        min-width: 1.25ch;
+        text-align: center;
+        opacity: 0.6;
+      }
+
+      .table-sort-btn.is-active .table-sort-indicator {
+        opacity: 1;
+      }
+
       .status {
         border-radius: 999px;
         display: inline-block;
@@ -460,11 +493,51 @@
         <table>
           <thead>
             <tr>
-              <th>Id</th>
+              <th aria-sort="none">
+                <button
+                  class="table-sort-btn"
+                  type="button"
+                  data-pages-sort-key="id"
+                  data-sort-label="Id"
+                >
+                  Id
+                  <span class="table-sort-indicator" data-pages-sort-indicator aria-hidden="true">↕</span>
+                </button>
+              </th>
               <th>Thumbnail</th>
-              <th>Relative path</th>
-              <th>Status</th>
-              <th>Last seen</th>
+              <th aria-sort="none">
+                <button
+                  class="table-sort-btn"
+                  type="button"
+                  data-pages-sort-key="rel_path"
+                  data-sort-label="Relative path"
+                >
+                  Relative path
+                  <span class="table-sort-indicator" data-pages-sort-indicator aria-hidden="true">↕</span>
+                </button>
+              </th>
+              <th aria-sort="none">
+                <button
+                  class="table-sort-btn"
+                  type="button"
+                  data-pages-sort-key="status"
+                  data-sort-label="Status"
+                >
+                  Status
+                  <span class="table-sort-indicator" data-pages-sort-indicator aria-hidden="true">↕</span>
+                </button>
+              </th>
+              <th aria-sort="none">
+                <button
+                  class="table-sort-btn"
+                  type="button"
+                  data-pages-sort-key="created_at"
+                  data-sort-label="Added time"
+                >
+                  Added time
+                  <span class="table-sort-indicator" data-pages-sort-indicator aria-hidden="true">↕</span>
+                </button>
+              </th>
               <th>Open</th>
             </tr>
           </thead>
@@ -508,8 +581,17 @@
     </div>
 
     <script type="module">
+      import {
+        DEFAULT_DASHBOARD_SORT,
+        nextDashboardSortState,
+        normalizeDashboardSortState,
+        sortDashboardPages,
+      } from "/static/js/dashboard_sorting_utils.mjs";
+
       const STORAGE_KEYS = {
         pipelinePanelExpanded: "dashboard.pipeline_panel_expanded",
+        pagesSortColumn: "dashboard.pages_sort.column",
+        pagesSortDirection: "dashboard.pages_sort.direction",
       };
 
       function readStorage(key) {
@@ -561,10 +643,14 @@
       const pipelineToggleIcon = document.getElementById("pipeline-toggle-icon");
       const pipelineQueue = document.getElementById("pipeline-queue");
       const pipelineEvents = document.getElementById("pipeline-events");
+      const pagesSortButtons = Array.from(
+        document.querySelectorAll("button[data-pages-sort-key]"),
+      );
 
       let nextReviewPageId = null;
       let nextOcrReviewPageId = null;
       let currentPages = [];
+      let pagesSortState = { ...DEFAULT_DASHBOARD_SORT };
       let pipelinePanelExpanded = false;
       let activityStream = null;
       let streamReconnectTimer = null;
@@ -626,6 +712,51 @@
           .replace(/_/g, " ")
           .trim()
           .toUpperCase();
+      }
+
+      function loadPagesSortState() {
+        pagesSortState = normalizeDashboardSortState({
+          columnKey: readStorage(STORAGE_KEYS.pagesSortColumn),
+          direction: readStorage(STORAGE_KEYS.pagesSortDirection),
+        });
+      }
+
+      function persistPagesSortState() {
+        writeStorage(STORAGE_KEYS.pagesSortColumn, pagesSortState.columnKey);
+        writeStorage(STORAGE_KEYS.pagesSortDirection, pagesSortState.direction);
+      }
+
+      function updatePagesSortControls() {
+        for (const button of pagesSortButtons) {
+          if (!(button instanceof HTMLButtonElement)) {
+            continue;
+          }
+          const columnKey = String(button.dataset.pagesSortKey || "");
+          const indicator = button.querySelector("[data-pages-sort-indicator]");
+          const headerCell = button.closest("th");
+          const isActive = columnKey === pagesSortState.columnKey;
+          button.classList.toggle("is-active", isActive);
+          button.setAttribute("aria-pressed", isActive ? "true" : "false");
+
+          if (headerCell instanceof HTMLTableCellElement) {
+            if (isActive) {
+              headerCell.setAttribute(
+                "aria-sort",
+                pagesSortState.direction === "asc" ? "ascending" : "descending",
+              );
+            } else {
+              headerCell.setAttribute("aria-sort", "none");
+            }
+          }
+
+          if (indicator instanceof HTMLElement) {
+            indicator.textContent = isActive
+              ? pagesSortState.direction === "asc"
+                ? "▲"
+                : "▼"
+              : "↕";
+          }
+        }
       }
 
       function applyRuntimeOptions(options) {
@@ -700,16 +831,17 @@
       }
 
       function renderPages(pages) {
-        currentPages = pages.map((page) => ({ ...page }));
+        const sortedPages = sortDashboardPages(pages, pagesSortState);
+        currentPages = sortedPages.map((page) => ({ ...page }));
         pagesBody.innerHTML = "";
-        if (pages.length === 0) {
+        if (sortedPages.length === 0) {
           const tr = document.createElement("tr");
           tr.innerHTML = '<td class="empty-row" colspan="6">No indexed documents found yet.</td>';
           pagesBody.appendChild(tr);
           return;
         }
 
-        for (const page of pages) {
+        for (const page of sortedPages) {
           const tr = document.createElement("tr");
           tr.dataset.pageId = String(page.id);
           tr.innerHTML = `
@@ -736,7 +868,7 @@
                 ${page.is_missing ? "missing" : page.status}
               </span>
             </td>
-            <td>${formatDateTime(page.last_seen_at)}</td>
+            <td>${formatDateTime(page.created_at)}</td>
             <td>
               <div class="row-open-actions">
                 <button class="secondary row-open-btn" type="button" data-target="layout"${
@@ -1015,6 +1147,9 @@
           }
         }
         if (changed) {
+          if (pagesSortState.columnKey === "status") {
+            renderPages(currentPages);
+          }
           syncNextReviewFromPages();
           syncNextOcrReviewFromPages();
           syncExportFromPages();
@@ -1210,6 +1345,22 @@
           window.location.href = `/static/ocr_review.html?page_id=${nextOcrReviewPageId}`;
         }
       });
+      for (const sortBtn of pagesSortButtons) {
+        sortBtn.addEventListener("click", () => {
+          const columnKey = String(sortBtn.dataset.pagesSortKey || "");
+          const nextState = nextDashboardSortState(pagesSortState, columnKey);
+          if (
+            nextState.columnKey === pagesSortState.columnKey &&
+            nextState.direction === pagesSortState.direction
+          ) {
+            return;
+          }
+          pagesSortState = nextState;
+          persistPagesSortState();
+          updatePagesSortControls();
+          renderPages(currentPages);
+        });
+      }
       pagesBody.addEventListener("click", (event) => {
         const target = event.target;
         if (!(target instanceof HTMLElement)) {
@@ -1311,6 +1462,8 @@
         }
       });
 
+      loadPagesSortState();
+      updatePagesSortControls();
       setPipelinePanelExpanded(readStorageBool(STORAGE_KEYS.pipelinePanelExpanded, false));
       reloadDashboard().catch((error) => {
         console.error(`Failed to load dashboard: ${error.message}`);

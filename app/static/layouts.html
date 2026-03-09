@@ -174,6 +174,36 @@
         position: relative;
       }
 
+      .magnifier-toggle-btn {
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        border: 1px solid var(--border);
+        background: #ece8df;
+        color: var(--ink);
+      }
+
+      .magnifier-toggle-btn:hover {
+        background: #e3ddd1;
+      }
+
+      .magnifier-toggle-btn.active {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .magnifier-icon {
+        width: 16px;
+        height: 16px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
       .zoom-combo {
         display: inline-flex;
         position: relative;
@@ -991,6 +1021,12 @@
               <div class="zoom-separator"></div>
             </div>
           </div>
+          <button id="magnifier-toggle-btn" class="magnifier-toggle-btn" type="button" aria-label="Toggle magnifier" aria-pressed="false" title="Magnifier (M, hold Alt)">
+            <svg class="magnifier-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="11" cy="11" r="6"></circle>
+              <path d="m20 20-4.2-4.2"></path>
+            </svg>
+          </button>
           <button id="detect-btn" type="button">Detect again</button>
           <button id="review-btn" type="button">Mark reviewed</button>
         </div>
@@ -1101,6 +1137,9 @@
         ZOOM_PRESET_PERCENTS,
         updateReviewHistoryOnVisit,
       } from "/static/js/layout_review_utils.mjs";
+      import {
+        createImageMagnifier,
+      } from "/static/js/magnifier.mjs";
 
       const params = new URLSearchParams(window.location.search);
       const pageId = Number(params.get("page_id"));
@@ -1154,6 +1193,7 @@
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
       const reviewBtn = document.getElementById("review-btn");
+      const magnifierToggleBtn = document.getElementById("magnifier-toggle-btn");
       const historyBackBtn = document.getElementById("history-back-btn");
       const historyForthBtn = document.getElementById("history-forth-btn");
       const detectModal = document.getElementById("detect-modal");
@@ -1193,7 +1233,60 @@
         reviewSubmitInProgress: false,
         detectInProgress: false,
         layoutsLoaded: false,
+        magnifierEnabled: false,
       };
+
+      function updateMagnifierToggleUi() {
+        if (!(magnifierToggleBtn instanceof HTMLButtonElement)) {
+          return;
+        }
+        const enabled = Boolean(state.magnifierEnabled);
+        magnifierToggleBtn.classList.toggle("active", enabled);
+        magnifierToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+      }
+
+      function isInteractiveShortcutTarget(target) {
+        if (!(target instanceof Element)) {
+          return false;
+        }
+        if (target.closest("input, textarea, select, button, [contenteditable='true']")) {
+          return true;
+        }
+        return target instanceof HTMLElement && target.isContentEditable;
+      }
+
+      const imageMagnifier = createImageMagnifier({
+        viewport: imageViewport,
+        image: pageImage,
+        getOverlayItems: () =>
+          state.layouts.map((layout) => {
+            const layoutId = Number(layout.id);
+            const color = colorForClass(layout.class_name);
+            const selected = layoutId === Number(state.selectedLayoutId);
+            return {
+              bbox: layout.bbox,
+              stroke: color,
+              fill: selected ? hexToRgba(color, 0.2) : "",
+              lineWidth: selected ? 2 : 1.3,
+            };
+          }),
+      });
+
+      function setMagnifierEnabled(enabled) {
+        const normalized = Boolean(enabled);
+        if (state.magnifierEnabled === normalized) {
+          return;
+        }
+        state.magnifierEnabled = normalized;
+        imageMagnifier.setEnabled(normalized);
+        updateMagnifierToggleUi();
+      }
+
+      function toggleMagnifier() {
+        setMagnifierEnabled(!state.magnifierEnabled);
+      }
+
+      updateMagnifierToggleUi();
 
       function rebuildZoomPresetOptions() {
         const separator = zoomMenu.querySelector(".zoom-separator");
@@ -1873,6 +1966,7 @@
         state.activePointHighlight = null;
         applySelectedLayoutStyles();
         applyActivePointHighlightStyles();
+        imageMagnifier.refresh();
       }
 
       function clearActivePointHighlightIfMissing() {
@@ -3642,6 +3736,23 @@
         closeZoomMenu();
       });
       document.addEventListener("keydown", (event) => {
+        const key = String(event.key || "").toLowerCase();
+        if (key === "alt") {
+          imageMagnifier.setTemporary(true);
+          return;
+        }
+        if (
+          key === "m" &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          !isInteractiveShortcutTarget(event.target)
+        ) {
+          event.preventDefault();
+          toggleMagnifier();
+          return;
+        }
         if (event.key === "Escape") {
           closeZoomMenu();
           if (!state.detectInProgress) {
@@ -3656,8 +3767,20 @@
           clearSelectedLayout();
         }
       });
+      document.addEventListener("keyup", (event) => {
+        if (String(event.key || "").toLowerCase() === "alt") {
+          imageMagnifier.setTemporary(false);
+        }
+      });
+      window.addEventListener("blur", () => {
+        imageMagnifier.setTemporary(false);
+      });
+      magnifierToggleBtn.addEventListener("click", () => {
+        toggleMagnifier();
+      });
       pageImage.addEventListener("load", () => {
         applyZoom();
+        imageMagnifier.refresh();
       });
 
       if (typeof ResizeObserver !== "undefined") {

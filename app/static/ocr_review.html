@@ -175,6 +175,36 @@
         position: relative;
       }
 
+      .magnifier-toggle-btn {
+        width: 38px;
+        height: 38px;
+        padding: 0;
+        border: 1px solid var(--border);
+        background: #ece8df;
+        color: var(--ink);
+      }
+
+      .magnifier-toggle-btn:hover {
+        background: #e3ddd1;
+      }
+
+      .magnifier-toggle-btn.active {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .magnifier-icon {
+        width: 16px;
+        height: 16px;
+        display: block;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
       .zoom-combo {
         display: inline-flex;
         position: relative;
@@ -1124,6 +1154,12 @@
               <div class="zoom-separator"></div>
             </div>
           </div>
+          <button id="magnifier-toggle-btn" class="magnifier-toggle-btn" type="button" aria-label="Toggle magnifier" aria-pressed="false" title="Magnifier (M, hold Alt)">
+            <svg class="magnifier-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="11" cy="11" r="6"></circle>
+              <path d="m20 20-4.2-4.2"></path>
+            </svg>
+          </button>
           <div class="panel-toggles" role="group" aria-label="Panel visibility">
             <button id="toggle-source-btn" class="toggle-btn active" type="button" aria-pressed="true">Source</button>
             <button id="toggle-reconstructed-btn" class="toggle-btn active" type="button" aria-pressed="true">Reconstructed</button>
@@ -1302,6 +1338,9 @@
         tokenBoundsAtOffset,
         textOffsetForLineIndex,
       } from "./js/ocr_review_utils.mjs";
+      import {
+        createImageMagnifier,
+      } from "./js/magnifier.mjs";
 
       const STORAGE_KEYS = {
         draftPrefix: "ocrReview.drafts",
@@ -1344,6 +1383,7 @@
       const zoomMenu = document.getElementById("zoom-menu");
       let zoomOptions = [];
       const zoomPercentInput = document.getElementById("zoom-percent-input");
+      const magnifierToggleBtn = document.getElementById("magnifier-toggle-btn");
       const toggleSourceBtn = document.getElementById("toggle-source-btn");
       const toggleReconstructedBtn = document.getElementById("toggle-reconstructed-btn");
       const grid = document.querySelector(".grid");
@@ -1409,6 +1449,7 @@
         history: [],
         historyIndex: -1,
         nextReviewPageId: null,
+        magnifierEnabled: false,
         panelVisibility: {
           source: true,
           reconstructed: true,
@@ -1425,6 +1466,46 @@
       let suppressCodeMirrorChange = false;
       let editorWrapEnabled = true;
       let editorResizeSession = null;
+      let altMagnifierPressed = false;
+
+      function updateMagnifierToggleUi() {
+        if (!(magnifierToggleBtn instanceof HTMLButtonElement)) {
+          return;
+        }
+        const enabled = Boolean(state.magnifierEnabled);
+        magnifierToggleBtn.classList.toggle("active", enabled);
+        magnifierToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+      }
+
+      const sourceImageMagnifier = createImageMagnifier({
+        viewport: sourceViewport,
+        image: pageImage,
+        getOverlayItems: () =>
+          state.outputs.map((output) => {
+            const color = colorForClass(output.class_name);
+            const selected = Number(output.layout_id) === Number(state.selectedLayoutId);
+            return {
+              bbox: output.bbox,
+              stroke: color,
+              fill: selected ? hexToRgba(color, 0.2) : "",
+              lineWidth: selected ? 2 : 1.3,
+            };
+          }),
+      });
+
+      function setMagnifierEnabled(enabled) {
+        const normalized = Boolean(enabled);
+        if (state.magnifierEnabled === normalized) {
+          return;
+        }
+        state.magnifierEnabled = normalized;
+        sourceImageMagnifier.setEnabled(normalized);
+        updateMagnifierToggleUi();
+      }
+
+      function toggleMagnifier() {
+        setMagnifierEnabled(!state.magnifierEnabled);
+      }
 
       function readStorage(key) {
         try {
@@ -3938,6 +4019,7 @@
         renderReconstruction();
         applySelectedStyles();
         syncExpandedEditorFromState();
+        sourceImageMagnifier.refresh();
       }
 
       function updateOutputContent(layoutId, nextContent, { source = null } = {}) {
@@ -4387,6 +4469,24 @@
         closeZoomMenu();
       });
       document.addEventListener("keydown", (event) => {
+        const key = String(event.key || "").toLowerCase();
+        if (key === "alt") {
+          altMagnifierPressed = true;
+          sourceImageMagnifier.setTemporary(true);
+          return;
+        }
+        if (
+          key === "m" &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          !isInteractiveTextTarget(event.target)
+        ) {
+          event.preventDefault();
+          toggleMagnifier();
+          return;
+        }
         if (state.panelVisibility.reconstructed) {
           notifyReconstructedControlsActivity();
         }
@@ -4411,6 +4511,23 @@
           closeZoomMenu();
           closeReextractModal();
         }
+      });
+      document.addEventListener("keyup", (event) => {
+        if (String(event.key || "").toLowerCase() !== "alt") {
+          return;
+        }
+        altMagnifierPressed = false;
+        sourceImageMagnifier.setTemporary(false);
+      });
+      window.addEventListener("blur", () => {
+        if (!altMagnifierPressed) {
+          return;
+        }
+        altMagnifierPressed = false;
+        sourceImageMagnifier.setTemporary(false);
+      });
+      magnifierToggleBtn.addEventListener("click", () => {
+        toggleMagnifier();
       });
 
       reextractBtn.addEventListener("click", () => {
@@ -4532,6 +4649,7 @@
         renderReconstruction();
         notifyReconstructedControlsActivity();
         updateReconstructedFloatingControlsPosition();
+        sourceImageMagnifier.refresh();
         if (state.selectedLayoutId !== null) {
           ensureLayoutVisible(state.selectedLayoutId);
         }
@@ -4562,6 +4680,7 @@
         document.body.classList.remove("editor-resizing");
       });
 
+      updateMagnifierToggleUi();
       init().catch((error) => {
         setStatus(`Initialization failed: ${error.message}`, { isError: true });
       });

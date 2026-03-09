@@ -17,6 +17,10 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
     'id="pages-body"',
     'id="auto-detect-layouts-toggle"',
     'id="auto-extract-text-toggle"',
+    'data-pages-sort-key="id"',
+    'data-pages-sort-key="rel_path"',
+    'data-pages-sort-key="status"',
+    'data-pages-sort-key="created_at"',
   ];
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
@@ -24,6 +28,7 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(html.includes('"/api/pipeline/activity/stream?limit=30"'), true);
   assert.equal(html.includes('"/api/final/export"'), true);
   assert.equal(html.includes('"/api/runtime-options"'), true);
+  assert.equal(html.includes('"/static/js/dashboard_sorting_utils.mjs"'), true);
 });
 
 test("layout review HTML keeps detection+zoom integration hooks", () => {
@@ -37,6 +42,8 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(html.includes("box-bind-btn"), true);
   assert.equal(html.includes("caption-bind-chip-remove"), true);
   assert.equal(html.includes("layout-show-bbox-btn"), true);
+  assert.equal(html.includes('id="magnifier-toggle-btn"'), true);
+  assert.equal(html.includes('"/static/js/magnifier.mjs"'), true);
 });
 
 test("ocr review HTML keeps extraction/editor integration hooks", () => {
@@ -51,9 +58,11 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
     'id="editor-action-inline-formula"',
     'id="editor-action-list-item"',
     'id="editor-action-ordered-list-item"',
+    'id="magnifier-toggle-btn"',
   ];
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
   }
   assert.equal(html.includes("`/api/pages/${state.pageId}/ocr/reextract`"), true);
+  assert.equal(html.includes('"./js/magnifier.mjs"'), true);
 });
