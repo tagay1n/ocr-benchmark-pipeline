@@ -46,6 +46,46 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(html.includes('"/static/js/magnifier.mjs"'), true);
 });
 
+test("layout review HTML class catalog excludes title class", () => {
+  const html = readHtml("app/static/layouts.html");
+
+  const knownClassesMatch = html.match(/const KNOWN_LAYOUT_CLASSES = \[([\s\S]*?)\];/);
+  assert.ok(knownClassesMatch, "KNOWN_LAYOUT_CLASSES block is missing");
+  assert.equal(knownClassesMatch[1].includes('"title"'), false);
+  assert.equal(knownClassesMatch[1].includes('"list_item"'), true);
+
+  const classColorsMatch = html.match(/const CLASS_COLORS = \{([\s\S]*?)\};/);
+  assert.ok(classColorsMatch, "CLASS_COLORS block is missing");
+  assert.equal(/\btitle\s*:/.test(classColorsMatch[1]), false);
+});
+
+test("layout review class dropdown contract maps to known classes without title", () => {
+  const html = readHtml("app/static/layouts.html");
+  const knownClassesMatch = html.match(/const KNOWN_LAYOUT_CLASSES = \[([\s\S]*?)\];/);
+  assert.ok(knownClassesMatch, "KNOWN_LAYOUT_CLASSES block is missing");
+  const classNames = Array.from(
+    knownClassesMatch[1].matchAll(/"([^"]+)"/g),
+    (match) => String(match[1]),
+  );
+  assert.equal(classNames.includes("title"), false);
+  assert.equal(classNames.includes("list_item"), true);
+  assert.deepEqual(
+    classNames,
+    [
+      "section_header",
+      "text",
+      "list_item",
+      "table",
+      "picture",
+      "caption",
+      "footnote",
+      "formula",
+      "page_header",
+      "page_footer",
+    ],
+  );
+});
+
 test("ocr review HTML keeps extraction/editor integration hooks", () => {
   const html = readHtml("app/static/ocr_review.html");
   const requiredIds = [
@@ -67,4 +107,11 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
   assert.equal(html.includes("`/api/pages/${state.pageId}/ocr/reextract`"), true);
   assert.equal(html.includes("renderSourceCaptionBindingLines"), true);
   assert.equal(html.includes('"./js/magnifier.mjs"'), true);
+});
+
+test("ocr review HTML class colors exclude title class", () => {
+  const html = readHtml("app/static/ocr_review.html");
+  const classColorsMatch = html.match(/const CLASS_COLORS = \{([\s\S]*?)\};/);
+  assert.ok(classColorsMatch, "CLASS_COLORS block is missing");
+  assert.equal(/\btitle\s*:/.test(classColorsMatch[1]), false);
 });
