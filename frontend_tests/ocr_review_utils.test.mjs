@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyInlineMarkdownWrapper,
   applyLinePrefixMarkdown,
+  computeReconstructedImageCropStyle,
   computeEditorToolbarState,
   countTextLines,
   computeFloatingControlPlacement,
@@ -12,6 +13,7 @@ import {
   hasLocalDraftForLayout,
   isRectOnscreen,
   isReconstructedRestoreDisabled,
+  isLineSyncEnabledOutputFormat,
   lineBandFromLineIndex,
   lineIndexFromTextOffset,
   normalizeReconstructedRenderMode,
@@ -19,6 +21,49 @@ import {
   tokenBoundsAtOffset,
   textOffsetForLineIndex,
 } from "../app/static/js/ocr_review_utils.mjs";
+
+test("computeReconstructedImageCropStyle converts bbox to scalable crop percentages", () => {
+  assert.deepEqual(
+    computeReconstructedImageCropStyle({
+      x1: 0.1,
+      y1: 0.2,
+      x2: 0.6,
+      y2: 0.7,
+    }),
+    {
+      widthPercent: 200,
+      heightPercent: 200,
+      leftPercent: -20,
+      topPercent: -40,
+    },
+  );
+});
+
+test("computeReconstructedImageCropStyle clamps malformed inputs and rejects empty boxes", () => {
+  assert.deepEqual(
+    computeReconstructedImageCropStyle({
+      x1: -0.5,
+      y1: "0.25",
+      x2: 2,
+      y2: 0.75,
+    }),
+    {
+      widthPercent: 100,
+      heightPercent: 200,
+      leftPercent: 0,
+      topPercent: -50,
+    },
+  );
+  assert.equal(
+    computeReconstructedImageCropStyle({
+      x1: 0.3,
+      y1: 0.4,
+      x2: 0.3,
+      y2: 0.9,
+    }),
+    null,
+  );
+});
 
 test("normalizeReconstructedRenderMode defaults to markdown and accepts raw", () => {
   assert.equal(normalizeReconstructedRenderMode(undefined), "markdown");
@@ -28,6 +73,15 @@ test("normalizeReconstructedRenderMode defaults to markdown and accepts raw", ()
   assert.equal(normalizeReconstructedRenderMode(" RAW "), "raw");
   assert.equal(normalizeReconstructedRenderMode("markdown"), "markdown");
   assert.equal(normalizeReconstructedRenderMode("something-else"), "markdown");
+});
+
+test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs", () => {
+  assert.equal(isLineSyncEnabledOutputFormat("markdown"), true);
+  assert.equal(isLineSyncEnabledOutputFormat(" MARKDOWN "), true);
+  assert.equal(isLineSyncEnabledOutputFormat("html"), false);
+  assert.equal(isLineSyncEnabledOutputFormat("latex"), false);
+  assert.equal(isLineSyncEnabledOutputFormat("skip"), false);
+  assert.equal(isLineSyncEnabledOutputFormat(""), false);
 });
 
 test("hasLocalDraftForLayout checks layout id normalization and map presence", () => {

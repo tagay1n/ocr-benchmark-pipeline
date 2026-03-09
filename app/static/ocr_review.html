@@ -179,6 +179,10 @@
         width: 38px;
         height: 38px;
         padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
         border: 1px solid var(--border);
         background: #ece8df;
         color: var(--ink);
@@ -711,6 +715,20 @@
       .recon-item-content.skip {
         color: #8a8578;
         font-style: italic;
+      }
+
+      .recon-item-content.picture-crop {
+        position: relative;
+        background: #f6f3ea;
+      }
+
+      .recon-item-crop-image {
+        position: absolute;
+        max-width: none;
+        max-height: none;
+        user-select: none;
+        pointer-events: none;
+        -webkit-user-drag: none;
       }
 
       .recon-item-content table {
@@ -1324,6 +1342,7 @@
         applyInlineMarkdownWrapper,
         applyLinePrefixMarkdown,
         computeEditorToolbarState,
+        computeReconstructedImageCropStyle,
         computeFloatingControlPlacement,
         countTextLines,
         detectEditorValidationIssues,
@@ -1331,6 +1350,7 @@
         hasLocalDraftForLayout,
         isRectOnscreen,
         isReconstructedRestoreDisabled,
+        isLineSyncEnabledOutputFormat,
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
         normalizeReconstructedRenderMode,
@@ -2080,7 +2100,7 @@
         if (!output) {
           return false;
         }
-        return String(output.output_format || "").toLowerCase() === "markdown";
+        return isLineSyncEnabledOutputFormat(output.output_format);
       }
 
       function refreshExpandedEditorToolbar() {
@@ -3518,6 +3538,33 @@
         return block;
       }
 
+      function isPictureOutput(output) {
+        const className = String(output?.class_name || "").trim().toLowerCase();
+        return className === "picture";
+      }
+
+      function appendPictureCropContent(container, output) {
+        const cropStyle = computeReconstructedImageCropStyle(output?.bbox);
+        const sourceUrl = String(pageImage.currentSrc || pageImage.src || "");
+        if (!cropStyle || !sourceUrl) {
+          return appendPlainContent(container, "Picture region.", "skip");
+        }
+        const block = document.createElement("div");
+        block.className = "recon-item-content picture-crop";
+        const image = document.createElement("img");
+        image.className = "recon-item-crop-image";
+        image.src = sourceUrl;
+        image.alt = "";
+        image.draggable = false;
+        image.style.width = `${cropStyle.widthPercent}%`;
+        image.style.height = `${cropStyle.heightPercent}%`;
+        image.style.left = `${cropStyle.leftPercent}%`;
+        image.style.top = `${cropStyle.topPercent}%`;
+        block.appendChild(image);
+        container.appendChild(block);
+        return block;
+      }
+
       function scheduleReconstructionRefit() {
         if (reconstructionRefitScheduled) {
           return;
@@ -3560,6 +3607,9 @@
       function appendStructuredContent(container, output) {
         const format = String(output.output_format || "").toLowerCase();
         const content = String(output.content ?? "");
+        if (isPictureOutput(output)) {
+          return appendPictureCropContent(container, output);
+        }
         if (format === "skip") {
           return appendPlainContent(container, "Skipped region (no text extraction).", "skip");
         }
@@ -3701,7 +3751,7 @@
           return false;
         }
         const output = outputByLayoutId(candidateLayoutId);
-        if (!output || String(output.output_format || "").toLowerCase() !== "markdown") {
+        if (!output || !isLineSyncEnabledOutputFormat(output.output_format)) {
           return false;
         }
         const contentNode = reconstructedContentNodeByLayout(candidateLayoutId);
@@ -3930,12 +3980,21 @@
               "recon-line-warning",
             );
           }
-          contentNode.addEventListener("pointermove", (event) => {
-            updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
-          });
-          contentNode.addEventListener("pointerleave", () => {
-            setHoveredLine(null, null, { source: "reconstructed" });
-          });
+          if (isLineSyncEnabledOutputFormat(output.output_format)) {
+            contentNode.addEventListener("pointermove", (event) => {
+              updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
+            });
+            contentNode.addEventListener("pointerleave", () => {
+              setHoveredLine(null, null, { source: "reconstructed" });
+            });
+          } else {
+            contentNode.addEventListener("pointermove", () => {
+              setHoveredLine(null, null, { source: "reconstructed" });
+            });
+            contentNode.addEventListener("pointerleave", () => {
+              setHoveredLine(null, null, { source: "reconstructed" });
+            });
+          }
           contentNode.addEventListener("dblclick", (event) => {
             const token = extractReconstructedTokenAtPoint(contentNode, event.clientX, event.clientY);
             if (!token) {
@@ -3982,6 +4041,10 @@
             openExpandedEditor(output.layout_id);
           });
           box.addEventListener("pointermove", (event) => {
+            if (!isLineSyncEnabledOutputFormat(output.output_format)) {
+              setHoveredLine(null, null, { source: "source" });
+              return;
+            }
             const rect = box.getBoundingClientRect();
             if (!rect || rect.height <= 0) {
               return;

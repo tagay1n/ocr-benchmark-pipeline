@@ -6,6 +6,10 @@ export function normalizeReconstructedRenderMode(rawValue) {
   return "markdown";
 }
 
+export function isLineSyncEnabledOutputFormat(outputFormat) {
+  return String(outputFormat || "").trim().toLowerCase() === "markdown";
+}
+
 export function computeEditorToolbarState({ editorHidden, outputFormat } = {}) {
   const editorVisible = !Boolean(editorHidden);
   const markdownEnabled = editorVisible && String(outputFormat || "").trim().toLowerCase() === "markdown";
@@ -450,6 +454,49 @@ export function isReconstructedRestoreDisabled({
     return true;
   }
   return String(outputFormat || "").trim().toLowerCase() === "skip";
+}
+
+function clampUnit(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, numeric));
+}
+
+function normalizePercent(value) {
+  const rounded = Math.round(Number(value) * 1_000_000) / 1_000_000;
+  if (Object.is(rounded, -0)) {
+    return 0;
+  }
+  return rounded;
+}
+
+export function computeReconstructedImageCropStyle(bbox) {
+  if (!bbox || typeof bbox !== "object") {
+    return null;
+  }
+  const x1 = clampUnit(bbox.x1);
+  const y1 = clampUnit(bbox.y1);
+  const x2 = clampUnit(bbox.x2);
+  const y2 = clampUnit(bbox.y2);
+  if (x2 <= x1 || y2 <= y1) {
+    return null;
+  }
+
+  const widthRatio = x2 - x1;
+  const heightRatio = y2 - y1;
+  const widthPercent = 100 / widthRatio;
+  const heightPercent = 100 / heightRatio;
+  const leftPercent = -(x1 / widthRatio) * 100;
+  const topPercent = -(y1 / heightRatio) * 100;
+
+  return {
+    widthPercent: normalizePercent(widthPercent),
+    heightPercent: normalizePercent(heightPercent),
+    leftPercent: normalizePercent(leftPercent),
+    topPercent: normalizePercent(topPercent),
+  };
 }
 
 function toFiniteNumber(value, fallback = 0) {
