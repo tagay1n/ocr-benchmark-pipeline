@@ -9,36 +9,17 @@ import {
   stageDisplayName,
 } from "./pipeline_event_constants.mjs";
 import { fetchJson } from "./api_client.mjs";
+import {
+  readStorage,
+  readStorageBool,
+  writeStorage,
+} from "./state_event_utils.mjs";
 
 const STORAGE_KEYS = {
   pipelinePanelExpanded: "dashboard.pipeline_panel_expanded",
   pagesSortColumn: "dashboard.pages_sort.column",
   pagesSortDirection: "dashboard.pages_sort.direction",
 };
-
-function readStorage(key) {
-  try {
-    return window.localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStorage(key, value) {
-  try {
-    window.localStorage.setItem(key, value);
-  } catch {
-    // Ignore storage errors (private mode / quota / disabled storage).
-  }
-}
-
-function readStorageBool(key, defaultValue) {
-  const raw = readStorage(key);
-  if (raw === null) {
-    return defaultValue;
-  }
-  return raw === "1";
-}
 
 const scanBtn = document.getElementById("scan-btn");
 const reviewLayoutsBtn = document.getElementById("review-layouts-btn");

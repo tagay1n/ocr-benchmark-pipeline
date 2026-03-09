@@ -38,25 +38,29 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);
   assert.equal(pageModule.includes('"./pipeline_event_constants.mjs"'), true);
   assert.equal(pageModule.includes('"./api_client.mjs"'), true);
+  assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
 });
 
 test("layout review HTML keeps detection+zoom integration hooks", () => {
   const html = readHtml("app/static/layouts.html");
   const pageModule = readModule("app/static/js/layout_review_page.mjs");
+  const apiModule = readModule("app/static/js/layout_review_api.mjs");
   assert.equal(html.includes('id="zoom-percent-input"'), true);
   assert.equal(html.includes('id="zoom-trigger"'), true);
   assert.equal(html.includes('id="zoom-menu"'), true);
   assert.equal(html.includes("layout-bbox-editor"), true);
   assert.equal(html.includes('id="magnifier-toggle-btn"'), true);
   assert.equal(html.includes('src="/static/js/layout_review_page.mjs"'), true);
-  assert.equal(pageModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
   assert.equal(pageModule.includes('bindingLinesLayer.id = "bind-lines-layer"'), true);
   assert.equal(pageModule.includes("box-bind-btn"), true);
   assert.equal(pageModule.includes("caption-bind-chip-remove"), true);
   assert.equal(pageModule.includes("layout-show-bbox-btn"), true);
   assert.equal(pageModule.includes('"/static/js/magnifier.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/layout_class_catalog.mjs"'), true);
-  assert.equal(pageModule.includes('"/static/js/api_client.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/layout_review_api.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/state_event_utils.mjs"'), true);
+  assert.equal(apiModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
+  assert.equal(apiModule.includes("`/api/layouts/${layoutId}`"), true);
 });
 
 test("layout class catalog module exports stable class policy", async () => {
@@ -91,6 +95,7 @@ test("layout class catalog module exports stable class policy", async () => {
 test("ocr review HTML keeps extraction/editor integration hooks", () => {
   const html = readHtml("app/static/ocr_review.html");
   const pageModule = readModule("app/static/js/ocr_review_page.mjs");
+  const apiModule = readModule("app/static/js/ocr_review_api.mjs");
   const requiredIds = [
     'id="zoom-percent-input"',
     'id="zoom-trigger"',
@@ -108,16 +113,27 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
   }
   assert.equal(html.includes('src="/static/js/ocr_review_page.mjs"'), true);
-  assert.equal(pageModule.includes("`/api/pages/${state.pageId}/ocr/reextract`"), true);
   assert.equal(pageModule.includes("renderSourceCaptionBindingLines"), true);
   assert.equal(pageModule.includes('"./magnifier.mjs"'), true);
   assert.equal(pageModule.includes('"./layout_class_catalog.mjs"'), true);
-  assert.equal(pageModule.includes('"./api_client.mjs"'), true);
+  assert.equal(pageModule.includes('"./ocr_review_api.mjs"'), true);
+  assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
+  assert.equal(apiModule.includes("`/api/pages/${pageId}/ocr/reextract`"), true);
+  assert.equal(apiModule.includes("`/api/ocr-outputs/${layoutId}`"), true);
 });
 
 test("ocr review HTML no longer hardcodes class color map", () => {
   const moduleCode = readModule("app/static/js/ocr_review_page.mjs");
   assert.equal(moduleCode.includes("const CLASS_COLORS = {"), false);
+});
+
+test("state/event utils expose storage helpers", async () => {
+  const moduleUrl = pathToFileURL(`${process.cwd()}/app/static/js/state_event_utils.mjs`).href;
+  const utils = await import(moduleUrl);
+  assert.equal(typeof utils.readStorage, "function");
+  assert.equal(typeof utils.writeStorage, "function");
+  assert.equal(typeof utils.removeStorage, "function");
+  assert.equal(typeof utils.readStorageBool, "function");
 });
 
 test("pipeline event constants module exposes stable stage/event keys", async () => {

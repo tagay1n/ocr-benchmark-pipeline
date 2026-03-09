@@ -29,7 +29,23 @@
         isCaptionClassName,
         isCaptionTargetClassName,
       } from "/static/js/layout_class_catalog.mjs";
-      import { fetchJson } from "/static/js/api_client.mjs";
+      import {
+        completeLayoutReview,
+        createPageLayout,
+        deleteLayout,
+        detectPageLayouts,
+        fetchNextLayoutReviewPage,
+        fetchPageDetails,
+        fetchPageLayouts,
+        fetchPages,
+        patchLayout,
+        putCaptionBindings,
+      } from "/static/js/layout_review_api.mjs";
+      import {
+        readStorage,
+        removeStorage,
+        writeStorage,
+      } from "/static/js/state_event_utils.mjs";
 
       const params = new URLSearchParams(window.location.search);
       const pageId = Number(params.get("page_id"));
@@ -40,30 +56,6 @@
         reviewNavHistory: "layout.review_nav.history",
         reviewNavIndex: "layout.review_nav.index",
       };
-
-      function readStorage(key) {
-        try {
-          return window.localStorage.getItem(key);
-        } catch {
-          return null;
-        }
-      }
-
-      function writeStorage(key, value) {
-        try {
-          window.localStorage.setItem(key, value);
-        } catch {
-          // Ignore storage errors (private mode / quota / disabled storage).
-        }
-      }
-
-      function removeStorage(key) {
-        try {
-          window.localStorage.removeItem(key);
-        } catch {
-          // Ignore storage errors (private mode / quota / disabled storage).
-        }
-      }
 
       const pageMeta = document.getElementById("page-meta");
       const imageViewport = document.getElementById("image-viewport");
@@ -390,7 +382,7 @@
 
       async function sanitizeReviewHistoryAgainstServer() {
         try {
-          const payload = await fetchJson("/api/pages");
+          const payload = await fetchPages();
           const validPageIds = new Set(
             (Array.isArray(payload?.pages) ? payload.pages : [])
               .filter((page) => !Boolean(page?.is_missing))
@@ -2027,7 +2019,7 @@
       }
 
       async function loadPage() {
-        const payload = await fetchJson(`/api/pages/${pageId}`);
+        const payload = await fetchPageDetails(pageId);
         state.page = payload.page;
         pageMeta.textContent = `Page #${state.page.id} | ${state.page.rel_path}`;
         updateReviewUiState();
@@ -2035,7 +2027,7 @@
       }
 
       async function loadLayouts() {
-        const payload = await fetchJson(`/api/pages/${pageId}/layouts`);
+        const payload = await fetchPageLayouts(pageId);
         const merged = mergeLayoutsForReview({
           layouts: payload.layouts,
           localEditsById: state.localEditsById,
@@ -2070,7 +2062,7 @@
 
       async function refreshNextReviewButton() {
         try {
-          const payload = await fetchJson(`/api/pages/${pageId}/layout-review-next`);
+          const payload = await fetchNextLayoutReviewPage(pageId);
           const nextUrl = nextLayoutReviewUrl(payload);
           const candidate = nextUrl ? Number(payload.next_page_id) : null;
           state.nextReviewPageId =
@@ -2144,11 +2136,7 @@
         setDetectModalBusy(true);
         let shouldCloseModal = false;
         try {
-          const payload = await fetchJson(`/api/pages/${pageId}/layouts/detect`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payloadBody),
-          });
+          const payload = await detectPageLayouts(pageId, payloadBody);
           clearLayoutDraftState();
           shouldCloseModal = true;
           const params = payload.inference_params || {};
@@ -2236,14 +2224,10 @@
       async function createLayoutFromBBox(bbox) {
         addBtn.disabled = true;
         try {
-          const payload = await fetchJson(`/api/pages/${pageId}/layouts`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              class_name: "text",
-              reading_order: null,
-              bbox,
-            }),
+          const payload = await createPageLayout(pageId, {
+            class_name: "text",
+            reading_order: null,
+            bbox,
           });
           setStatus("Manual layout added.");
           await loadPage();
@@ -2293,33 +2277,23 @@
           );
 
           for (const layoutId of deletedIds) {
-            await fetchJson(`/api/layouts/${layoutId}`, { method: "DELETE" });
+            await deleteLayout(layoutId);
           }
 
           for (const [layoutId, draft] of editedEntries) {
             if (state.deletedLayoutIds.has(Number(layoutId))) {
               continue;
             }
-            await fetchJson(`/api/layouts/${layoutId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(draft),
-            });
+            await patchLayout(layoutId, draft);
           }
 
           const captionBindingsPayload = buildCaptionBindingsRequestPayload();
-          await fetchJson(`/api/pages/${pageId}/caption-bindings`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(captionBindingsPayload),
-          });
+          await putCaptionBindings(pageId, captionBindingsPayload);
 
-          const payload = await fetchJson(`/api/pages/${pageId}/layouts/review-complete`, {
-            method: "POST",
-          });
+          const payload = await completeLayoutReview(pageId);
           clearLayoutDraftState();
 
-          const nextPayload = await fetchJson(`/api/pages/${pageId}/layout-review-next`);
+          const nextPayload = await fetchNextLayoutReviewPage(pageId);
           const nextUrl = nextLayoutReviewUrl(nextPayload);
           if (nextUrl) {
             window.location.href = nextUrl;

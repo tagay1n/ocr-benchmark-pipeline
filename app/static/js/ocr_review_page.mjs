@@ -54,7 +54,21 @@
         formatClassLabel,
         normalizeClassName,
       } from "./layout_class_catalog.mjs";
-      import { fetchJson } from "./api_client.mjs";
+      import {
+        completeOcrReview,
+        fetchNextOcrReviewPage,
+        fetchPageDetails,
+        fetchPageLayouts,
+        fetchPageOcrOutputs,
+        fetchPages,
+        patchOcrOutput,
+        reextractPageOcr,
+      } from "./ocr_review_api.mjs";
+      import {
+        readStorage,
+        removeStorage,
+        writeStorage,
+      } from "./state_event_utils.mjs";
 
       const STORAGE_KEYS = {
         draftPrefix: "ocrReview.drafts",
@@ -207,30 +221,6 @@
 
       function toggleMagnifier() {
         setMagnifierEnabled(!state.magnifierEnabled);
-      }
-
-      function readStorage(key) {
-        try {
-          return window.localStorage.getItem(key);
-        } catch {
-          return null;
-        }
-      }
-
-      function writeStorage(key, value) {
-        try {
-          window.localStorage.setItem(key, value);
-        } catch {
-          // Ignore storage failures.
-        }
-      }
-
-      function removeStorage(key) {
-        try {
-          window.localStorage.removeItem(key);
-        } catch {
-          // Ignore storage failures.
-        }
       }
 
       function normalizePanelVisibility(rawValue) {
@@ -3044,7 +3034,7 @@
 
       async function sanitizeHistoryAgainstServer() {
         try {
-          const payload = await fetchJson("/api/pages");
+          const payload = await fetchPages();
           const validPageIds = new Set(
             (Array.isArray(payload?.pages) ? payload.pages : [])
               .filter((page) => !Boolean(page?.is_missing))
@@ -3072,9 +3062,9 @@
 
       async function loadPageData() {
         const [pagePayload, outputsPayload, layoutsPayload] = await Promise.all([
-          fetchJson(`/api/pages/${state.pageId}`),
-          fetchJson(`/api/pages/${state.pageId}/ocr-outputs`),
-          fetchJson(`/api/pages/${state.pageId}/layouts`),
+          fetchPageDetails(state.pageId),
+          fetchPageOcrOutputs(state.pageId),
+          fetchPageLayouts(state.pageId),
         ]);
         state.page = pagePayload.page;
         pageImage.src = pagePayload.image_url;
@@ -3089,7 +3079,7 @@
 
       async function loadForthAvailability() {
         try {
-          const payload = await fetchJson(`/api/pages/${state.pageId}/ocr-review-next`);
+          const payload = await fetchNextOcrReviewPage(state.pageId);
           state.nextReviewPageId =
             Boolean(payload?.has_next) && Number.isInteger(payload?.next_page_id)
               ? Number(payload.next_page_id)
@@ -3111,16 +3101,10 @@
             .filter((value) => Number.isInteger(value) && value > 0);
           for (const layoutId of changedLayoutIds) {
             const draft = state.localEditsByLayoutId[String(layoutId)];
-            await fetchJson(`/api/ocr-outputs/${layoutId}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ content: String(draft.content ?? "") }),
-            });
+            await patchOcrOutput(layoutId, { content: String(draft.content ?? "") });
           }
 
-          const result = await fetchJson(`/api/pages/${state.pageId}/ocr/review-complete`, {
-            method: "POST",
-          });
+          const result = await completeOcrReview(state.pageId);
           clearDraftState();
           if (state.page) {
             state.page.status = result.status;
@@ -3128,7 +3112,7 @@
           updateReviewUiState();
           setStatus("OCR review saved.");
 
-          const nextPayload = await fetchJson(`/api/pages/${state.pageId}/ocr-review-next`);
+          const nextPayload = await fetchNextOcrReviewPage(state.pageId);
           if (nextPayload && nextPayload.has_next && Number.isInteger(nextPayload.next_page_id)) {
             window.location.href = `/static/ocr_review.html?page_id=${nextPayload.next_page_id}`;
             return;
@@ -3154,11 +3138,7 @@
         const selectedLayoutId = Number(state.selectedLayoutId);
         let shouldCloseModal = false;
         try {
-          const result = await fetchJson(`/api/pages/${state.pageId}/ocr/reextract`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payloadBody),
-          });
+          const result = await reextractPageOcr(state.pageId, payloadBody);
           shouldCloseModal = true;
 
           clearDraftState();
