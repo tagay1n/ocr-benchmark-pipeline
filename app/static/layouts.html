@@ -673,6 +673,18 @@
         cursor: ns-resize;
       }
 
+      .box-handle[data-handle="n-edge-left"] {
+        top: -6px;
+        left: calc(25% - 5px);
+        cursor: ns-resize;
+      }
+
+      .box-handle[data-handle="n-edge-right"] {
+        top: -6px;
+        left: calc(75% - 5px);
+        cursor: ns-resize;
+      }
+
       .box-handle[data-handle="ne"] {
         top: -6px;
         right: -6px;
@@ -694,6 +706,18 @@
       .box-handle[data-handle="s"] {
         bottom: -6px;
         left: calc(50% - 5px);
+        cursor: ns-resize;
+      }
+
+      .box-handle[data-handle="s-edge-left"] {
+        bottom: -6px;
+        left: calc(25% - 5px);
+        cursor: ns-resize;
+      }
+
+      .box-handle[data-handle="s-edge-right"] {
+        bottom: -6px;
+        left: calc(75% - 5px);
         cursor: ns-resize;
       }
 
@@ -2494,7 +2518,7 @@
             box.appendChild(bindBtn);
           }
 
-          for (const handle of ["nw", "n", "ne", "e", "se", "s", "sw", "w"]) {
+          for (const handle of ["nw", "n-edge-left", "n", "n-edge-right", "ne", "e", "se", "s-edge-right", "s", "s-edge-left", "sw", "w"]) {
             const handleEl = document.createElement("div");
             handleEl.className = "box-handle";
             handleEl.dataset.handle = handle;
@@ -2512,7 +2536,6 @@
           layouts: state.layouts,
           contentWidth: overlayWidth,
           contentHeight: overlayHeight,
-          tolerancePx: 1,
           minOverlapPx: 1,
         });
         const overlapThickness = 3;
