@@ -217,6 +217,65 @@ def _layout_to_dict(layout: Layout, *, bound_target_ids: list[int] | None = None
     }
 
 
+def _normalize_page_reading_orders(session, page_id: int) -> None:
+    rows = session.execute(
+        select(Layout)
+        .where(Layout.page_id == page_id)
+        .order_by(Layout.reading_order.asc(), Layout.id.asc())
+    ).scalars().all()
+    if not rows:
+        return
+    desired = [index + 1 for index in range(len(rows))]
+    current = [int(row.reading_order) for row in rows]
+    if current == desired:
+        return
+
+    offset = len(rows) + 1
+    for index, row in enumerate(rows, start=1):
+        row.reading_order = offset + index
+    session.flush()
+    for index, row in enumerate(rows, start=1):
+        row.reading_order = index
+    session.flush()
+
+
+def _move_layout_to_reading_order(session, layout: Layout, requested_order: int) -> int:
+    page_id = int(layout.page_id)
+    _normalize_page_reading_orders(session, page_id)
+
+    rows = session.execute(
+        select(Layout)
+        .where(Layout.page_id == page_id)
+        .order_by(Layout.reading_order.asc(), Layout.id.asc())
+    ).scalars().all()
+    if not rows:
+        return 1
+
+    if requested_order < 1:
+        raise ValueError("reading_order must be >= 1.")
+
+    total = len(rows)
+    target_order = min(int(requested_order), total)
+    current_order = int(layout.reading_order)
+    if target_order == current_order:
+        return current_order
+
+    ordered_ids = [int(row.id) for row in rows]
+    layout_id = int(layout.id)
+    ordered_ids = [row_id for row_id in ordered_ids if row_id != layout_id]
+    ordered_ids.insert(target_order - 1, layout_id)
+
+    final_order_by_id = {row_id: index + 1 for index, row_id in enumerate(ordered_ids)}
+    offset = total + 1
+    for row in rows:
+        row.reading_order = int(final_order_by_id[int(row.id)]) + offset
+    session.flush()
+    for row in rows:
+        row.reading_order = int(final_order_by_id[int(row.id)])
+    session.flush()
+    return target_order
+
+
 def get_page(page_id: int) -> dict[str, Any] | None:
     with get_session() as session:
         page_row = session.get(Page, page_id)
@@ -400,11 +459,13 @@ def create_layout(
         if bool(page_row.is_missing):
             raise ValueError("Page is marked as missing and cannot be edited.")
 
-        if reading_order is None:
-            current_max = session.execute(
-                select(func.coalesce(func.max(Layout.reading_order), 0)).where(Layout.page_id == page_id)
-            ).scalar_one()
-            reading_order = int(current_max or 0) + 1
+        current_max = session.execute(
+            select(func.coalesce(func.max(Layout.reading_order), 0)).where(Layout.page_id == page_id)
+        ).scalar_one()
+        append_order = int(current_max or 0) + 1
+        resolved_order = append_order if reading_order is None else int(reading_order)
+        if resolved_order < 1:
+            raise ValueError("reading_order must be >= 1.")
 
         layout = Layout(
             page_id=page_id,
@@ -413,7 +474,7 @@ def create_layout(
             y1=y1,
             x2=x2,
             y2=y2,
-            reading_order=reading_order,
+            reading_order=append_order,
             confidence=None,
             source="manual",
             created_at=now,
@@ -421,6 +482,8 @@ def create_layout(
         )
         session.add(layout)
         session.flush()
+        if resolved_order != append_order:
+            _move_layout_to_reading_order(session, layout, resolved_order)
 
         page_row.status = "layout_detected"
         page_row.updated_at = now
@@ -445,15 +508,19 @@ def update_layout(
             raise ValueError("Layout not found.")
 
         next_class_name = layout.class_name if next_class_name_input is None else next_class_name_input
-        next_reading_order = int(layout.reading_order) if reading_order is None else reading_order
+        next_reading_order = int(layout.reading_order) if reading_order is None else int(reading_order)
         next_x1 = float(layout.x1) if x1 is None else x1
         next_y1 = float(layout.y1) if y1 is None else y1
         next_x2 = float(layout.x2) if x2 is None else x2
         next_y2 = float(layout.y2) if y2 is None else y2
 
         validate_bbox(next_x1, next_y1, next_x2, next_y2)
+        if next_reading_order < 1:
+            raise ValueError("reading_order must be >= 1.")
 
         layout.class_name = next_class_name
+        if next_reading_order != int(layout.reading_order):
+            next_reading_order = _move_layout_to_reading_order(session, layout, next_reading_order)
         layout.reading_order = next_reading_order
         layout.x1 = next_x1
         layout.y1 = next_y1

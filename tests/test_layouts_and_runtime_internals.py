@@ -255,6 +255,43 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3])
         self.assertEqual([row["class_name"] for row in page_layouts], ["text", "text", "section_header"])
 
+    def test_patch_layout_reorders_without_unique_constraint_collision(self) -> None:
+        self._write_image("layout/reorder-patch.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        first = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.4, y2=0.2),
+            ),
+        )["layout"]
+        second = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.3, x2=0.4, y2=0.4),
+            ),
+        )["layout"]
+        third = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.5, x2=0.4, y2=0.6),
+            ),
+        )["layout"]
+
+        patched = main.patch_layout(int(third["id"]), main.UpdateLayoutRequest(reading_order=1))["layout"]
+        self.assertEqual(int(patched["reading_order"]), 1)
+
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3])
+        self.assertEqual([int(row["id"]) for row in page_layouts], [int(third["id"]), int(first["id"]), int(second["id"])])
+
     def test_get_activity_snapshot_starts_worker_when_jobs_queued(self) -> None:
         now = main._utc_now()
         with db.get_session() as session:

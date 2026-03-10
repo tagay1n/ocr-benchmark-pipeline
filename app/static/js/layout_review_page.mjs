@@ -610,6 +610,7 @@
         if (!statusLine) {
           if (isError) {
             console.error(message);
+            window.alert(message);
           }
           return;
         }
@@ -2347,6 +2348,10 @@
           await putCaptionBindings(pageId, captionBindingsPayload);
 
           const payload = await completeLayoutReview(pageId);
+          if (state.page && payload && typeof payload.status === "string") {
+            state.page.status = payload.status;
+            updateReviewUiState();
+          }
           clearLayoutDraftState();
 
           const nextPayload = await fetchNextLayoutReviewPage(pageId);
