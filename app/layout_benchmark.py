@@ -16,7 +16,7 @@ from .config import settings
 from .db import get_session
 from .layout_classes import normalize_class_name
 from .layout_detection_defaults import get_layout_detection_defaults, update_layout_detection_defaults
-from .layouts import _detect_doclaynet_layouts
+from .layouts import DOC_LAYOUTNET_DEFAULT_IOU, _detect_doclaynet_layouts
 from .models import Layout, LayoutBenchmarkResult, LayoutBenchmarkRun, Page, PipelineJob
 from .pipeline_constants import STAGE_LAYOUT_BENCHMARK
 from .statuses import normalize_db_status
@@ -31,9 +31,9 @@ BENCHMARK_MODEL_CHECKPOINTS: tuple[str, ...] = (
     "yolo26m-doclaynet.pt",
     "yolo26l-doclaynet.pt",
 )
-BENCHMARK_IMAGE_SIZES: tuple[int, ...] = (256, 512, 768, 1024, 1280, 1536, 2048)
-BENCHMARK_CONFIDENCE_THRESHOLDS: tuple[float, ...] = (0.15, 0.20, 0.25)
-BENCHMARK_IOU_THRESHOLDS: tuple[float, ...] = (0.35, 0.50, 0.65)
+BENCHMARK_IMAGE_SIZES: tuple[int, ...] = (512, 768, 1024, 1280, 1536)
+BENCHMARK_CONFIDENCE_THRESHOLDS: tuple[float, ...] = (0.20,)
+BENCHMARK_IOU_THRESHOLDS: tuple[float, ...] = (DOC_LAYOUTNET_DEFAULT_IOU,)
 
 AUTO_APPLY_MIN_SAMPLE_SIZE = 10
 AUTO_APPLY_MIN_RELATIVE_IMPROVEMENT = 0.025
@@ -237,9 +237,8 @@ def _map50_95_score(
 
     class_names = sorted(set(gt_by_class.keys()) | set(pred_by_class.keys()))
     if not class_names:
-        return 1.0, {"per_class": {}, "map50_95": 1.0, "map50": 1.0}
+        return 1.0, {"map50_95": 1.0, "map50": 1.0}
 
-    per_class: dict[str, dict[str, float]] = {}
     class_map_values: list[float] = []
     class_ap50_values: list[float] = []
     for class_name in class_names:
@@ -257,17 +256,10 @@ def _map50_95_score(
 
         ap50 = next((ap for threshold, ap in ap_by_threshold if math.isclose(threshold, 0.5, abs_tol=1e-9)), 0.0)
         class_ap50_values.append(ap50)
-        per_class[class_name] = {
-            "ap50_95": float(ap50_95),
-            "ap50": ap50,
-            "support": float(len(gt_boxes)),
-            "predictions": float(len(pred_boxes)),
-        }
 
     mean_map50_95 = sum(class_map_values) / len(class_map_values) if class_map_values else 1.0
     mean_map50 = sum(class_ap50_values) / len(class_ap50_values) if class_ap50_values else 1.0
     return mean_map50_95, {
-        "per_class": per_class,
         "map50_95": mean_map50_95,
         "map50": mean_map50,
     }
@@ -384,14 +376,6 @@ def _load_eligible_pages() -> list[BenchmarkPage]:
 
 
 def _benchmark_configs() -> list[dict[str, Any]]:
-    defaults = get_layout_detection_defaults()
-    baseline = {
-        "model_checkpoint": str(defaults["model_checkpoint"]),
-        "image_size": int(defaults["image_size"]),
-        "confidence_threshold": float(defaults["confidence_threshold"]),
-        "iou_threshold": float(defaults["iou_threshold"]),
-    }
-
     seen: set[tuple[str, int, str, str]] = set()
     configs: list[dict[str, Any]] = []
     for model_checkpoint in BENCHMARK_MODEL_CHECKPOINTS:
@@ -409,10 +393,6 @@ def _benchmark_configs() -> list[dict[str, Any]]:
                         continue
                     seen.add(key)
                     configs.append(config)
-
-    baseline_key = _config_key(baseline)
-    if baseline_key not in seen:
-        configs.append(baseline)
     return configs
 
 
@@ -649,16 +629,6 @@ def _aggregate_scores(
             "per_page": per_page,
         }
     return aggregate
-
-
-def _safe_load_metrics(metrics_json: str | None) -> dict[str, Any]:
-    if not metrics_json:
-        return {}
-    try:
-        payload = json.loads(metrics_json)
-    except json.JSONDecodeError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
 
 
 def _load_hard_case_page_ids(page_ids: set[int]) -> set[int]:
@@ -1113,7 +1083,6 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
                 "max_score": None,
                 "hard_case_score_sum": 0.0,
                 "hard_case_page_count": 0,
-                "class_totals": {},
             },
         )
         score = float(row.score)
@@ -1127,50 +1096,6 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
         if int(row.page_id) in hard_case_page_ids:
             bucket["hard_case_score_sum"] += score
             bucket["hard_case_page_count"] += 1
-
-        metrics = _safe_load_metrics(row.metrics_json)
-        per_class = metrics.get("per_class")
-        if isinstance(per_class, dict):
-            class_totals = bucket["class_totals"]
-            for class_name_raw, class_metrics_raw in per_class.items():
-                if not isinstance(class_metrics_raw, dict):
-                    continue
-                class_name = _normalize_layout_class_for_benchmark(str(class_name_raw))
-                ap50_95 = class_metrics_raw.get("ap50_95")
-                if ap50_95 is None:
-                    # Backward compatibility for legacy rows that used F1 as class score.
-                    ap50_95_value = float(class_metrics_raw.get("f1", 0.0) or 0.0)
-                else:
-                    ap50_95_value = float(ap50_95 or 0.0)
-                ap50 = class_metrics_raw.get("ap50")
-                if ap50 is None:
-                    # Legacy rows do not carry AP50 separately.
-                    ap50_value = ap50_95_value
-                else:
-                    ap50_value = float(ap50 or 0.0)
-                support_value = float(class_metrics_raw.get("support", 0.0) or 0.0)
-                predictions_value = class_metrics_raw.get("predictions")
-                if predictions_value is None:
-                    # Legacy fallback: derive predictions from tp+fp when available.
-                    predictions_value = float(class_metrics_raw.get("tp", 0.0) or 0.0) + float(
-                        class_metrics_raw.get("fp", 0.0) or 0.0
-                    )
-                predictions_value = float(predictions_value or 0.0)
-                class_bucket = class_totals.setdefault(
-                    class_name,
-                    {
-                        "ap50_95_sum": 0.0,
-                        "ap50_sum": 0.0,
-                        "count": 0.0,
-                        "support_sum": 0.0,
-                        "predictions_sum": 0.0,
-                    },
-                )
-                class_bucket["ap50_95_sum"] += ap50_95_value
-                class_bucket["ap50_sum"] += ap50_value
-                class_bucket["count"] += 1.0
-                class_bucket["support_sum"] += support_value
-                class_bucket["predictions_sum"] += predictions_value
 
     grid_rows: list[dict[str, Any]] = []
     for bucket in aggregate.values():
@@ -1189,23 +1114,6 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
             else None
         )
 
-        per_class: dict[str, dict[str, float]] = {}
-        class_totals = bucket["class_totals"]
-        for class_name in sorted(class_totals.keys()):
-            totals = class_totals[class_name]
-            count = float(totals.get("count", 0.0))
-            if count <= 0:
-                continue
-            ap50_95 = float(totals.get("ap50_95_sum", 0.0)) / count
-            ap50 = float(totals.get("ap50_sum", 0.0)) / count
-            per_class[class_name] = {
-                "ap50_95": ap50_95,
-                "ap50": ap50,
-                "support": float(totals.get("support_sum", 0.0)),
-                "predictions": float(totals.get("predictions_sum", 0.0)),
-                "count": count,
-            }
-
         grid_rows.append(
             {
                 "model_checkpoint": str(bucket["model_checkpoint"]),
@@ -1219,7 +1127,6 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
                 "std_dev": std_dev,
                 "hard_case_score": hard_case_score,
                 "hard_case_page_count": hard_case_page_count,
-                "per_class": per_class,
             }
         )
 
@@ -1235,16 +1142,8 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
         )
     )
     best_row = grid_rows[0] if grid_rows else None
-    class_names = sorted(
-        {
-            str(class_name)
-            for row in grid_rows
-            for class_name in row.get("per_class", {}).keys()
-        }
-    )
     return {
         "rows": grid_rows,
-        "class_names": class_names,
         "best_config": (
             None
             if best_row is None

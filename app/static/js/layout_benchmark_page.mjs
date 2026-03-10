@@ -17,16 +17,9 @@ const explorerPanel = document.getElementById("benchmark-explorer-panel");
 
 const gridBody = document.getElementById("benchmark-grid-body");
 
-const explorerModeSelect = document.getElementById("benchmark-explorer-mode");
-const explorerModelSelect = document.getElementById("benchmark-explorer-model");
-const explorerImgszSelect = document.getElementById("benchmark-explorer-imgsz");
-const explorerConfSelect = document.getElementById("benchmark-explorer-conf");
-const explorerIouSelect = document.getElementById("benchmark-explorer-iou");
 const explorerCaption = document.getElementById("benchmark-explorer-caption");
 const heatmapHead = document.getElementById("benchmark-heatmap-head");
 const heatmapBody = document.getElementById("benchmark-heatmap-body");
-const classConfigSelect = document.getElementById("benchmark-class-config");
-const classBody = document.getElementById("benchmark-class-body");
 
 const state = {
   status: null,
@@ -41,13 +34,6 @@ const state = {
   refreshTimer: null,
   stream: null,
   activeView: "leaderboard",
-  explorerMode: "conf_iou",
-  selectedModel: "",
-  selectedImgsz: "",
-  selectedConf: "",
-  selectedIou: "",
-  classNames: [],
-  selectedClassConfigKey: "",
 };
 
 function toFiniteNumber(value) {
@@ -86,16 +72,6 @@ function configLabel(config) {
   const conf = Number(config.confidence_threshold || 0);
   const iou = Number(config.iou_threshold || 0);
   return `${model} imgsz=${imageSize} conf=${conf.toFixed(2)} iou=${iou.toFixed(2)}`;
-}
-
-function formatClassLabel(value) {
-  const normalized = String(value || "")
-    .replace(/_/g, " ")
-    .trim();
-  if (!normalized) {
-    return "-";
-  }
-  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
 function setActionBusy(busy) {
@@ -308,95 +284,6 @@ function renderLeaderboard() {
   }
 }
 
-function renderClassMetrics() {
-  classBody.innerHTML = "";
-  const rows = Array.isArray(state.gridRows) ? state.gridRows : [];
-  if (rows.length === 0) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = '<td class="empty" colspan="5">No per-class metrics yet.</td>';
-    classBody.appendChild(tr);
-    classConfigSelect.innerHTML = "";
-    classConfigSelect.disabled = true;
-    return;
-  }
-
-  const options = rows.map((row) => ({
-    key: configKey(row),
-    label: configLabel(row),
-  }));
-  const optionKeys = options.map((entry) => entry.key).filter(Boolean);
-  const bestKey = configKey(state.bestConfig);
-  const currentKey = configKey(state.currentConfig);
-  const fallbackKey =
-    optionKeys.includes(state.selectedClassConfigKey)
-      ? state.selectedClassConfigKey
-      : optionKeys.includes(bestKey)
-        ? bestKey
-        : optionKeys.includes(currentKey)
-          ? currentKey
-          : optionKeys[0] || "";
-  state.selectedClassConfigKey = fallbackKey;
-
-  classConfigSelect.innerHTML = "";
-  for (const option of options) {
-    if (!option.key) {
-      continue;
-    }
-    const optionEl = document.createElement("option");
-    optionEl.value = option.key;
-    optionEl.textContent = option.label;
-    classConfigSelect.appendChild(optionEl);
-  }
-  classConfigSelect.disabled = !fallbackKey;
-  if (fallbackKey) {
-    classConfigSelect.value = fallbackKey;
-  }
-
-  const selectedRow = rows.find((row) => configKey(row) === fallbackKey) || rows[0];
-  const perClass = selectedRow?.per_class && typeof selectedRow.per_class === "object"
-    ? selectedRow.per_class
-    : {};
-  const classNames = Array.isArray(state.classNames) && state.classNames.length > 0
-    ? state.classNames
-    : Object.keys(perClass);
-
-  if (classNames.length === 0) {
-    const tr = document.createElement("tr");
-    tr.innerHTML = '<td class="empty" colspan="5">No class-level metrics available.</td>';
-    classBody.appendChild(tr);
-    return;
-  }
-
-  for (const className of classNames) {
-    const metrics = perClass[className];
-    const ap50_95 =
-      typeof metrics?.ap50_95 === "number" && Number.isFinite(metrics.ap50_95)
-        ? metrics.ap50_95.toFixed(4)
-        : "-";
-    const ap50 =
-      typeof metrics?.ap50 === "number" && Number.isFinite(metrics.ap50)
-        ? metrics.ap50.toFixed(4)
-        : "-";
-    const support =
-      typeof metrics?.support === "number" && Number.isFinite(metrics.support)
-        ? String(Math.round(metrics.support))
-        : "-";
-    const predictions =
-      typeof metrics?.predictions === "number" && Number.isFinite(metrics.predictions)
-        ? String(Math.round(metrics.predictions))
-        : "-";
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${formatClassLabel(className)}</td>
-      <td>${ap50_95}</td>
-      <td>${ap50}</td>
-      <td>${support}</td>
-      <td>${predictions}</td>
-    `;
-    classBody.appendChild(tr);
-  }
-}
-
 function setActiveView(view) {
   state.activeView = view === "explorer" ? "explorer" : "leaderboard";
   const leaderboardActive = state.activeView === "leaderboard";
@@ -406,94 +293,6 @@ function setActiveView(view) {
   explorerTabBtn.setAttribute("aria-selected", leaderboardActive ? "false" : "true");
   leaderboardPanel.hidden = !leaderboardActive;
   explorerPanel.hidden = leaderboardActive;
-}
-
-function setSelectOptions(selectEl, options, selectedValue) {
-  const normalizedOptions = Array.isArray(options) ? options : [];
-  const values = normalizedOptions.map((option) => String(option.value));
-  const targetValue = values.includes(String(selectedValue))
-    ? String(selectedValue)
-    : values.length > 0
-      ? values[0]
-      : "";
-
-  selectEl.innerHTML = "";
-  for (const option of normalizedOptions) {
-    const optionEl = document.createElement("option");
-    optionEl.value = String(option.value);
-    optionEl.textContent = String(option.label);
-    selectEl.appendChild(optionEl);
-  }
-  selectEl.disabled = values.length === 0;
-  if (targetValue) {
-    selectEl.value = targetValue;
-  }
-  return targetValue;
-}
-
-function collectDimensionValues(rows) {
-  const models = new Set();
-  const imgsz = new Set();
-  const conf = new Set();
-  const iou = new Set();
-  for (const row of rows) {
-    if (row.model_checkpoint) {
-      models.add(String(row.model_checkpoint));
-    }
-    const imageSize = Number(row.image_size);
-    if (Number.isFinite(imageSize)) {
-      imgsz.add(String(Math.round(imageSize)));
-    }
-    const confKey = toNumberKey(row.confidence_threshold);
-    if (confKey) {
-      conf.add(confKey);
-    }
-    const iouKey = toNumberKey(row.iou_threshold);
-    if (iouKey) {
-      iou.add(iouKey);
-    }
-  }
-
-  return {
-    models: Array.from(models).sort((a, b) => a.localeCompare(b)),
-    imgsz: Array.from(imgsz).sort((a, b) => Number(a) - Number(b)),
-    conf: Array.from(conf).sort((a, b) => Number(a) - Number(b)),
-    iou: Array.from(iou).sort((a, b) => Number(a) - Number(b)),
-  };
-}
-
-function ensureExplorerControls(rows) {
-  const dimensions = collectDimensionValues(rows);
-
-  state.selectedModel = setSelectOptions(
-    explorerModelSelect,
-    dimensions.models.map((value) => ({ value, label: value })),
-    state.selectedModel || state.currentConfig?.model_checkpoint || "",
-  );
-
-  state.selectedImgsz = setSelectOptions(
-    explorerImgszSelect,
-    dimensions.imgsz.map((value) => ({ value, label: value })),
-    state.selectedImgsz || String(state.currentConfig?.image_size || ""),
-  );
-
-  state.selectedConf = setSelectOptions(
-    explorerConfSelect,
-    dimensions.conf.map((value) => ({
-      value,
-      label: Number(value).toFixed(2),
-    })),
-    state.selectedConf || toNumberKey(state.currentConfig?.confidence_threshold || ""),
-  );
-
-  state.selectedIou = setSelectOptions(
-    explorerIouSelect,
-    dimensions.iou.map((value) => ({
-      value,
-      label: Number(value).toFixed(2),
-    })),
-    state.selectedIou || toNumberKey(state.currentConfig?.iou_threshold || ""),
-  );
 }
 
 function scoreColor(score, minScore, maxScore) {
@@ -507,65 +306,73 @@ function scoreColor(score, minScore, maxScore) {
   return `hsl(166, 45%, ${lightness}%)`;
 }
 
-function renderHeatmap(mode, rows) {
+function pickBestCellRow(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
+  }
+  const ranked = [...rows].sort((left, right) => {
+    const leftScore = toFiniteNumber(left.mean_score);
+    const rightScore = toFiniteNumber(right.mean_score);
+    if (leftScore !== null && rightScore !== null && leftScore !== rightScore) {
+      return rightScore - leftScore;
+    }
+    if (leftScore === null && rightScore !== null) {
+      return 1;
+    }
+    if (leftScore !== null && rightScore === null) {
+      return -1;
+    }
+    const leftPages = Number(left.page_count || 0);
+    const rightPages = Number(right.page_count || 0);
+    if (leftPages !== rightPages) {
+      return rightPages - leftPages;
+    }
+    const leftConf = Number(left.confidence_threshold || 0);
+    const rightConf = Number(right.confidence_threshold || 0);
+    if (leftConf !== rightConf) {
+      return leftConf - rightConf;
+    }
+    const leftIou = Number(left.iou_threshold || 0);
+    const rightIou = Number(right.iou_threshold || 0);
+    if (leftIou !== rightIou) {
+      return leftIou - rightIou;
+    }
+    return configLabel(left).localeCompare(configLabel(right));
+  });
+  return ranked[0] || null;
+}
+
+function renderHeatmap(rows) {
   const currentKey = configKey(state.currentConfig);
   const bestKey = configKey(state.bestConfig);
+  const models = Array.from(new Set(rows.map((row) => String(row.model_checkpoint || "")).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b));
+  const imageSizes = Array.from(
+    new Set(rows.map((row) => String(Math.round(Number(row.image_size || 0)))).filter(Boolean)),
+  ).sort((a, b) => Number(a) - Number(b));
+  const yValues = models.map((value) => ({ key: value, label: value }));
+  const xValues = imageSizes.map((value) => ({ key: value, label: value }));
+  const cornerLabel = "Model \\ Img size";
+  explorerCaption.textContent = "Cells show the best mean mAP50-95 available for each model and image size.";
 
-  let xValues = [];
-  let yValues = [];
-  let cornerLabel = "";
-  let matcher = () => null;
-
-  if (mode === "conf_iou") {
-    const conf = Array.from(new Set(rows.map((row) => toNumberKey(row.confidence_threshold)).filter(Boolean)))
-      .sort((a, b) => Number(a) - Number(b));
-    const iou = Array.from(new Set(rows.map((row) => toNumberKey(row.iou_threshold)).filter(Boolean)))
-      .sort((a, b) => Number(a) - Number(b));
-    yValues = conf.map((value) => ({ key: value, label: Number(value).toFixed(2) }));
-    xValues = iou.map((value) => ({ key: value, label: Number(value).toFixed(2) }));
-    cornerLabel = "Conf \\ IoU";
-    matcher = (rowKey, colKey) =>
-      rows.find(
-        (row) =>
-          String(row.model_checkpoint) === state.selectedModel &&
-          String(Math.round(Number(row.image_size || 0))) === state.selectedImgsz &&
-          toNumberKey(row.confidence_threshold) === rowKey &&
-          toNumberKey(row.iou_threshold) === colKey,
-      ) || null;
-
-    explorerCaption.textContent = `Axes: Conf (rows) x IoU (columns). Fixed model=${state.selectedModel || "-"}, imgsz=${state.selectedImgsz || "-"}.`;
-    explorerModelSelect.disabled = false;
-    explorerImgszSelect.disabled = false;
-    explorerConfSelect.disabled = true;
-    explorerIouSelect.disabled = true;
-  } else {
-    const models = Array.from(new Set(rows.map((row) => String(row.model_checkpoint || "")).filter(Boolean)))
-      .sort((a, b) => a.localeCompare(b));
-    const imgsz = Array.from(new Set(rows.map((row) => String(Math.round(Number(row.image_size || 0)))).filter(Boolean)))
-      .sort((a, b) => Number(a) - Number(b));
-    yValues = models.map((value) => ({ key: value, label: value }));
-    xValues = imgsz.map((value) => ({ key: value, label: value }));
-    cornerLabel = "Model \\ Img size";
-    matcher = (rowKey, colKey) =>
-      rows.find(
-        (row) =>
-          toNumberKey(row.confidence_threshold) === state.selectedConf &&
-          toNumberKey(row.iou_threshold) === state.selectedIou &&
-          String(row.model_checkpoint) === rowKey &&
-          String(Math.round(Number(row.image_size || 0))) === colKey,
-      ) || null;
-
-    explorerCaption.textContent = `Axes: Model (rows) x image size (columns). Fixed conf=${Number(state.selectedConf || 0).toFixed(2)}, iou=${Number(state.selectedIou || 0).toFixed(2)}.`;
-    explorerModelSelect.disabled = true;
-    explorerImgszSelect.disabled = true;
-    explorerConfSelect.disabled = false;
-    explorerIouSelect.disabled = false;
+  const rowsByCell = new Map();
+  for (const row of rows) {
+    const model = String(row.model_checkpoint || "");
+    const imageSize = String(Math.round(Number(row.image_size || 0)));
+    if (!model || !imageSize) {
+      continue;
+    }
+    const cellKey = `${model}|${imageSize}`;
+    const currentRows = rowsByCell.get(cellKey) || [];
+    currentRows.push(row);
+    rowsByCell.set(cellKey, currentRows);
   }
 
   const cellScores = [];
   for (const rowValue of yValues) {
     for (const colValue of xValues) {
-      const item = matcher(rowValue.key, colValue.key);
+      const cellKey = `${rowValue.key}|${colValue.key}`;
+      const item = pickBestCellRow(rowsByCell.get(cellKey) || []);
       const score = toFiniteNumber(item?.mean_score);
       if (score !== null) {
         cellScores.push(score);
@@ -602,7 +409,9 @@ function renderHeatmap(mode, rows) {
     tr.appendChild(yLabel);
 
     for (const colValue of xValues) {
-      const item = matcher(rowValue.key, colValue.key);
+      const cellKey = `${rowValue.key}|${colValue.key}`;
+      const cellRows = rowsByCell.get(cellKey) || [];
+      const item = pickBestCellRow(cellRows);
       const td = document.createElement("td");
       td.className = "heatmap-cell";
       if (!item) {
@@ -612,7 +421,6 @@ function renderHeatmap(mode, rows) {
         continue;
       }
 
-      const rowConfigKey = configKey(item);
       const score = toFiniteNumber(item.mean_score);
       if (score !== null) {
         td.style.backgroundColor = scoreColor(score, minScore, maxScore);
@@ -633,13 +441,13 @@ function renderHeatmap(mode, rows) {
 
       const markers = document.createElement("span");
       markers.className = "heatmap-markers";
-      if (state.isRunning && rowConfigKey === currentKey) {
+      if (state.isRunning && cellRows.some((row) => configKey(row) === currentKey)) {
         const marker = document.createElement("span");
         marker.className = "heatmap-marker running";
         marker.textContent = "RUNNING";
         markers.appendChild(marker);
       }
-      if (rowConfigKey === bestKey) {
+      if (cellRows.some((row) => configKey(row) === bestKey)) {
         const marker = document.createElement("span");
         marker.className = "heatmap-marker best";
         marker.textContent = "BEST";
@@ -656,10 +464,7 @@ function renderHeatmap(mode, rows) {
 
 function renderExplorer() {
   const rows = rowsWithCurrentPlaceholder();
-  ensureExplorerControls(rows);
-  const mode = explorerModeSelect.value === "model_imgsz" ? "model_imgsz" : "conf_iou";
-  state.explorerMode = mode;
-  renderHeatmap(mode, rows);
+  renderHeatmap(rows);
 }
 
 function applyPayloads(statusPayload, gridPayload) {
@@ -668,14 +473,12 @@ function applyPayloads(statusPayload, gridPayload) {
   state.isRunning = Boolean(statusPayload?.is_running);
   state.currentConfig = statusPayload?.run?.current_config || null;
   state.bestConfig = gridPayload?.best_config || statusPayload?.run?.best_config || null;
-  state.classNames = Array.isArray(gridPayload?.class_names) ? gridPayload.class_names : [];
 
   renderActionButton();
   renderRescoreButton();
   renderSummary();
   renderLeaderboard();
   renderExplorer();
-  renderClassMetrics();
 }
 
 async function refreshAll() {
@@ -788,19 +591,6 @@ async function onRescoreClick() {
   }
 }
 
-function onExplorerModeChange() {
-  state.explorerMode = explorerModeSelect.value === "model_imgsz" ? "model_imgsz" : "conf_iou";
-  renderExplorer();
-}
-
-function onExplorerFilterChange() {
-  state.selectedModel = explorerModelSelect.value;
-  state.selectedImgsz = explorerImgszSelect.value;
-  state.selectedConf = explorerConfSelect.value;
-  state.selectedIou = explorerIouSelect.value;
-  renderExplorer();
-}
-
 benchmarkToggleBtn.addEventListener("click", onToggleBenchmarkClick);
 benchmarkRescoreBtn.addEventListener("click", onRescoreClick);
 leaderboardTabBtn.addEventListener("click", () => {
@@ -808,15 +598,6 @@ leaderboardTabBtn.addEventListener("click", () => {
 });
 explorerTabBtn.addEventListener("click", () => {
   setActiveView("explorer");
-});
-explorerModeSelect.addEventListener("change", onExplorerModeChange);
-explorerModelSelect.addEventListener("change", onExplorerFilterChange);
-explorerImgszSelect.addEventListener("change", onExplorerFilterChange);
-explorerConfSelect.addEventListener("change", onExplorerFilterChange);
-explorerIouSelect.addEventListener("change", onExplorerFilterChange);
-classConfigSelect.addEventListener("change", () => {
-  state.selectedClassConfigKey = classConfigSelect.value;
-  renderClassMetrics();
 });
 
 window.addEventListener("beforeunload", () => {

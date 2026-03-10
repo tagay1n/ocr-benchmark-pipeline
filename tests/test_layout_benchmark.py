@@ -249,14 +249,13 @@ class LayoutBenchmarkTests(unittest.TestCase):
         self.assertIn("std_dev", first_row)
         self.assertIn("hard_case_score", first_row)
         self.assertIn("hard_case_page_count", first_row)
-        self.assertIn("per_class", first_row)
+        self.assertNotIn("per_class", first_row)
         self.assertGreaterEqual(float(first_row["min_score"]), 0.0)
         self.assertGreaterEqual(float(first_row["max_score"]), float(first_row["min_score"]))
         self.assertGreaterEqual(float(first_row["std_dev"]), 0.0)
-        self.assertIn("class_names", payload)
-        self.assertIn("text", payload["class_names"])
+        self.assertNotIn("class_names", payload)
 
-    def test_layout_benchmark_grid_reports_hard_case_and_per_class_metrics(self) -> None:
+    def test_layout_benchmark_grid_reports_hard_case_metrics(self) -> None:
         self._seed_reviewed_page_with_layouts(
             "bench/text_only.png",
             [
@@ -337,9 +336,7 @@ class LayoutBenchmarkTests(unittest.TestCase):
         self.assertEqual(int(row["page_count"]), 2)
         self.assertEqual(int(row["hard_case_page_count"]), 1)
         self.assertEqual(float(row["hard_case_score"]), 0.0)
-        self.assertIn("text", row["per_class"])
-        self.assertIn("table", row["per_class"])
-        self.assertGreater(float(row["per_class"]["text"]["ap50_95"]), float(row["per_class"]["table"]["ap50_95"]))
+        self.assertNotIn("per_class", row)
 
     def test_layout_benchmark_stop_endpoint_cancels_queued_jobs(self) -> None:
         now = main._utc_now()
@@ -562,8 +559,8 @@ class LayoutBenchmarkTests(unittest.TestCase):
         shifted_score, shifted_metrics = layout_benchmark._map50_95_score(gt, shifted_pred)
         self.assertGreater(perfect_score, shifted_score)
         self.assertGreater(shifted_score, 0.0)
-        self.assertEqual(float(perfect_metrics["per_class"]["text"]["ap50"]), 1.0)
-        self.assertLess(float(shifted_metrics["per_class"]["text"]["ap50_95"]), 1.0)
+        self.assertEqual(float(perfect_metrics["map50"]), 1.0)
+        self.assertLess(float(shifted_metrics["map50_95"]), 1.0)
 
     def test_benchmark_class_normalization_maps_title_but_keeps_list_item(self) -> None:
         gt_header = (

@@ -65,15 +65,9 @@ test("layout benchmark page keeps run/stop/grid integration hooks", () => {
     'id="benchmark-leaderboard-panel"',
     'id="benchmark-explorer-panel"',
     'id="benchmark-grid-body"',
-    'id="benchmark-explorer-mode"',
-    'id="benchmark-explorer-model"',
-    'id="benchmark-explorer-imgsz"',
-    'id="benchmark-explorer-conf"',
-    'id="benchmark-explorer-iou"',
+    'id="benchmark-explorer-caption"',
     'id="benchmark-heatmap-head"',
     'id="benchmark-heatmap-body"',
-    'id="benchmark-class-config"',
-    'id="benchmark-class-body"',
   ];
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);

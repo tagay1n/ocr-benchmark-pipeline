@@ -550,31 +550,6 @@
           </div>
 
           <div id="benchmark-explorer-panel" class="tab-panel" role="tabpanel" hidden>
-            <div class="explorer-controls">
-              <div class="explorer-control">
-                <label for="benchmark-explorer-mode">Matrix</label>
-                <select id="benchmark-explorer-mode">
-                  <option value="conf_iou">Conf x IoU</option>
-                  <option value="model_imgsz">Model x image size</option>
-                </select>
-              </div>
-              <div class="explorer-control">
-                <label for="benchmark-explorer-model">Model</label>
-                <select id="benchmark-explorer-model"></select>
-              </div>
-              <div class="explorer-control">
-                <label for="benchmark-explorer-imgsz">Image size</label>
-                <select id="benchmark-explorer-imgsz"></select>
-              </div>
-              <div class="explorer-control">
-                <label for="benchmark-explorer-conf">Conf</label>
-                <select id="benchmark-explorer-conf"></select>
-              </div>
-              <div class="explorer-control">
-                <label for="benchmark-explorer-iou">IoU</label>
-                <select id="benchmark-explorer-iou"></select>
-              </div>
-            </div>
             <div id="benchmark-explorer-caption" class="explorer-caption">—</div>
             <div class="heatmap-wrap">
               <table class="heatmap-table">
@@ -582,25 +557,6 @@
                 <tbody id="benchmark-heatmap-body"></tbody>
               </table>
             </div>
-          </div>
-
-          <div class="class-metrics-section">
-            <div class="class-metrics-controls">
-              <label for="benchmark-class-config">Per-class metrics</label>
-              <select id="benchmark-class-config"></select>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Class</th>
-                  <th>AP50-95</th>
-                  <th>AP50</th>
-                  <th>Support</th>
-                  <th>Predictions</th>
-                </tr>
-              </thead>
-              <tbody id="benchmark-class-body"></tbody>
-            </table>
           </div>
         </section>
 
