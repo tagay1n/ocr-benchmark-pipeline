@@ -2661,8 +2661,16 @@
         sanitizeCaptionBindingsInPlace();
         const unboundCaptionIds = findUnboundCaptionIds();
         if (unboundCaptionIds.length > 0) {
+          const unboundCaptionOrderLabels = state.layouts
+            .filter((layout) => unboundCaptionIds.includes(Number(layout.id)))
+            .map((layout) => `#${Number(layout.reading_order || 0) || "?"}`)
+            .join(", ");
+          const focusCaptionId = Number(unboundCaptionIds[0]);
+          if (Number.isInteger(focusCaptionId) && focusCaptionId > 0) {
+            selectLayout(focusCaptionId, { scrollRowIntoView: true, scrollImageToLayout: true });
+          }
           throw new Error(
-            "Each caption must be bound to at least one table, picture, or formula before review.",
+            `Bind required for caption ${unboundCaptionOrderLabels || "(unknown)"} before review.`,
           );
         }
         const bindings = state.layouts
