@@ -85,20 +85,26 @@ export function computeZoomScale({
 export function computeOverlayBadgeScale(
   zoomScale,
   {
-    minScale = 0.1,
-    maxScale = 18,
-    multiplier = 0.8,
+    minScale = 0.85,
+    maxScale = 1.35,
+    multiplier = 0.95,
+    curve = 0.5,
+    fallbackScale = 0.95,
   } = {},
 ) {
   const scale = Number(zoomScale);
-  const min = Math.max(0.01, Number(minScale) || 0.1);
+  const min = Math.max(0.01, Number(minScale) || 0.85);
   const max = Math.max(min, Number(maxScale) || min);
-  const factor = Math.max(0.1, Number(multiplier) || 0.8);
+  const factor = Math.max(0.1, Number(multiplier) || 0.95);
+  const exponent = Math.max(0.1, Number(curve) || 0.5);
+  const fallback = Math.min(max, Math.max(min, Number(fallbackScale) || 0.95));
   if (!Number.isFinite(scale) || scale <= 0) {
-    return factor;
+    return fallback;
   }
-  // Keep overlay badges directly proportional to image zoom.
-  return Math.min(max, Math.max(min, scale * factor));
+  // Adaptive screen-space scaling: keep badges readable at low zoom and
+  // prevent oversized labels at high zoom.
+  const adaptive = Math.pow(scale, exponent) * factor;
+  return Math.min(max, Math.max(min, adaptive));
 }
 
 export function reconstructionLineHeight(outputFormat) {
