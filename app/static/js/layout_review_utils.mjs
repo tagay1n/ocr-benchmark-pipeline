@@ -304,6 +304,21 @@ export function compactReadingOrdersAfterDeletion(layouts, deletedOrder) {
   return { layouts: compactedLayouts, shiftedIds };
 }
 
+export function nextManualReadingOrder(layouts) {
+  if (!Array.isArray(layouts) || layouts.length === 0) {
+    return 1;
+  }
+  let visibleCount = 0;
+  for (const layout of layouts) {
+    const layoutId = Number(layout?.id);
+    if (!Number.isInteger(layoutId) || layoutId <= 0) {
+      continue;
+    }
+    visibleCount += 1;
+  }
+  return Math.max(1, visibleCount + 1);
+}
+
 export function reorderReadingOrderIds({
   orderedIds,
   draggedId,

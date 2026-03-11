@@ -23,6 +23,7 @@ import {
   normalizeReviewHistory,
   normalizeZoomMode,
   nextHistoryPageId,
+  nextManualReadingOrder,
   nextLayoutReviewUrl,
   pointHandleForCoordinateKey,
   previousHistoryPageId,
@@ -310,6 +311,19 @@ test("compactReadingOrdersAfterDeletion is no-op when deleted order is invalid",
   const { layouts: compacted, shiftedIds } = compactReadingOrdersAfterDeletion(layouts, null);
   assert.deepEqual(compacted, layouts);
   assert.deepEqual(shiftedIds, []);
+});
+
+test("nextManualReadingOrder appends after visible draft rows", () => {
+  assert.equal(nextManualReadingOrder([]), 1);
+  assert.equal(nextManualReadingOrder(null), 1);
+  assert.equal(
+    nextManualReadingOrder([
+      { id: 101, reading_order: 4 },
+      { id: 102, reading_order: 9 },
+      { id: null, reading_order: 10 },
+    ]),
+    3,
+  );
 });
 
 test("reorderReadingOrderIds reorders ids before and after target", () => {

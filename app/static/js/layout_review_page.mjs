@@ -10,6 +10,7 @@
         isLayoutNotFoundErrorMessage,
         mergeLayoutsForReview,
         nextHistoryPageId,
+        nextManualReadingOrder,
         normalizeReviewHistory,
         nextLayoutReviewUrl,
         normalizeZoomMode,
@@ -2538,9 +2539,10 @@
       async function createLayoutFromBBox(bbox) {
         addBtn.disabled = true;
         try {
+          const nextReadingOrder = nextManualReadingOrder(state.layouts);
           const payload = await createPageLayout(pageId, {
             class_name: "text",
-            reading_order: null,
+            reading_order: nextReadingOrder,
             bbox,
           });
           setStatus("Manual layout added.");
