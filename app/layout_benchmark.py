@@ -44,6 +44,7 @@ BENCHMARK_CLASS_REMAP: dict[str, str] = {
     # Keep benchmark aligned with detection postprocessing, but preserve list_item as a distinct class.
     "title": "section_header",
 }
+BENCHMARK_EXCLUDED_CLASSES = frozenset({"picture_text"})
 
 AP_IOU_THRESHOLDS: tuple[float, ...] = tuple(round(0.5 + 0.05 * index, 2) for index in range(10))
 
@@ -110,13 +111,17 @@ def _config_key(config: dict[str, Any]) -> tuple[str, int, str, str]:
 def _config_label(config: dict[str, Any]) -> str:
     return (
         f"{config['model_checkpoint']} | imgsz={config['image_size']} "
-        f"conf={float(config['confidence_threshold']):.2f} iou={float(config['iou_threshold']):.2f}"
+        f"conf={float(config['confidence_threshold']):.2f}"
     )
 
 
 def _normalize_layout_class_for_benchmark(class_name: str) -> str:
     normalized = normalize_class_name(class_name)
     return BENCHMARK_CLASS_REMAP.get(normalized, normalized)
+
+
+def _is_excluded_benchmark_class(class_name: str) -> bool:
+    return _normalize_layout_class_for_benchmark(class_name) in BENCHMARK_EXCLUDED_CLASSES
 
 
 def _bbox_iou(box_a: dict[str, float], box_b: dict[str, float]) -> float:
@@ -230,9 +235,13 @@ def _map50_95_score(
 
     for row in gt_layouts:
         class_name = _normalize_layout_class_for_benchmark(str(row["class_name"]))
+        if class_name in BENCHMARK_EXCLUDED_CLASSES:
+            continue
         gt_by_class.setdefault(class_name, []).append(row)
     for row in pred_layouts:
         class_name = _normalize_layout_class_for_benchmark(str(row["class_name"]))
+        if class_name in BENCHMARK_EXCLUDED_CLASSES:
+            continue
         pred_by_class.setdefault(class_name, []).append(row)
 
     class_names = sorted(set(gt_by_class.keys()) | set(pred_by_class.keys()))
@@ -274,6 +283,8 @@ def _normalize_prediction_rows(pred_layouts: list[dict[str, Any]]) -> list[dict[
         if not class_name:
             continue
         class_name = _normalize_layout_class_for_benchmark(class_name)
+        if class_name in BENCHMARK_EXCLUDED_CLASSES:
+            continue
         try:
             x1 = float(row["x1"])
             y1 = float(row["y1"])
@@ -314,6 +325,8 @@ def _safe_load_predictions(predictions_json: str | None) -> tuple[bool, list[dic
 def _serialize_fingerprint_layouts(layout_rows: list[Layout]) -> str:
     normalized_rows = []
     for layout in sorted(layout_rows, key=lambda row: (int(row.reading_order), int(row.id))):
+        if _is_excluded_benchmark_class(str(layout.class_name)):
+            continue
         normalized_rows.append(
             {
                 "order": int(layout.reading_order),
@@ -362,7 +375,10 @@ def _load_eligible_pages() -> list[BenchmarkPage]:
                     },
                 }
                 for layout in layout_rows
+                if not _is_excluded_benchmark_class(str(layout.class_name))
             )
+            if not gt_layouts:
+                continue
             pages.append(
                 BenchmarkPage(
                     page_id=int(page.id),
@@ -1037,6 +1053,7 @@ def get_latest_benchmark_status() -> dict[str, Any]:
 
 
 def get_layout_benchmark_grid() -> dict[str, Any]:
+    eligible_pages_count = len(_load_eligible_pages())
     with get_session() as session:
         rows = session.execute(
             select(LayoutBenchmarkResult).order_by(
@@ -1141,9 +1158,15 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
             int(row["image_size"]),
         )
     )
+    if eligible_pages_count > 0:
+        grid_rows = [
+            row for row in grid_rows
+            if int(row.get("page_count") or 0) >= eligible_pages_count
+        ]
     best_row = grid_rows[0] if grid_rows else None
     return {
         "rows": grid_rows,
+        "total_eligible_pages": eligible_pages_count,
         "best_config": (
             None
             if best_row is None

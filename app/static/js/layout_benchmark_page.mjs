@@ -59,7 +59,6 @@ function configKey(config) {
     String(config.model_checkpoint || ""),
     String(Number(config.image_size || 0)),
     toNumberKey(config.confidence_threshold || 0),
-    toNumberKey(config.iou_threshold || 0),
   ].join("|");
 }
 
@@ -70,8 +69,7 @@ function configLabel(config) {
   const model = String(config.model_checkpoint || "-");
   const imageSize = Number(config.image_size || 0);
   const conf = Number(config.confidence_threshold || 0);
-  const iou = Number(config.iou_threshold || 0);
-  return `${model} imgsz=${imageSize} conf=${conf.toFixed(2)} iou=${iou.toFixed(2)}`;
+  return `${model} imgsz=${imageSize} conf=${conf.toFixed(2)}`;
 }
 
 function setActionBusy(busy) {
@@ -156,7 +154,7 @@ function renderLeaderboard() {
 
   if (rows.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = '<td class="empty" colspan="10">No benchmark results yet.</td>';
+    tr.innerHTML = '<td class="empty" colspan="8">No benchmark results yet.</td>';
     gridBody.appendChild(tr);
     return;
   }
@@ -263,22 +261,15 @@ function renderLeaderboard() {
         ? row.hard_case_page_count
         : null;
     const hardCaseCell = hardCasePages === null ? hardCaseScore : `${hardCaseScore} (p:${hardCasePages})`;
-    const pageCount =
-      Number.isInteger(row.page_count) && row.page_count >= 0
-        ? String(row.page_count)
-        : "-";
-
     tr.appendChild(stateCell);
     tr.innerHTML += `
       <td>${String(row.model_checkpoint || "-")}</td>
       <td>${Number(row.image_size || 0) || "-"}</td>
       <td>${Number(row.confidence_threshold || 0).toFixed(2)}</td>
-      <td>${Number(row.iou_threshold || 0).toFixed(2)}</td>
       <td>${meanScore}</td>
       <td>${minScore}</td>
       <td>${stdDev}</td>
       <td>${hardCaseCell}</td>
-      <td>${pageCount}</td>
     `;
     gridBody.appendChild(tr);
   }
@@ -331,11 +322,6 @@ function pickBestCellRow(rows) {
     const rightConf = Number(right.confidence_threshold || 0);
     if (leftConf !== rightConf) {
       return leftConf - rightConf;
-    }
-    const leftIou = Number(left.iou_threshold || 0);
-    const rightIou = Number(right.iou_threshold || 0);
-    if (leftIou !== rightIou) {
-      return leftIou - rightIou;
     }
     return configLabel(left).localeCompare(configLabel(right));
   });
