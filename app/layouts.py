@@ -392,6 +392,8 @@ def detect_layouts_for_page(
     with get_session() as session:
         if replace_existing:
             session.execute(delete(Layout).where(Layout.page_id == page_id))
+        else:
+            _normalize_page_reading_orders(session, page_id)
 
         existing_count = int(
             session.execute(
@@ -464,6 +466,9 @@ def create_layout(
             raise ValueError("Page not found.")
         if bool(page_row.is_missing):
             raise ValueError("Page is marked as missing and cannot be edited.")
+
+        # Heal legacy sparse orders before appending/positioning a new layout.
+        _normalize_page_reading_orders(session, page_id)
 
         current_max = session.execute(
             select(func.coalesce(func.max(Layout.reading_order), 0)).where(Layout.page_id == page_id)
@@ -549,6 +554,8 @@ def delete_layout(layout_id: int) -> None:
             raise ValueError("Layout not found.")
         page_id = int(layout.page_id)
         session.delete(layout)
+        session.flush()
+        _normalize_page_reading_orders(session, page_id)
         page_row = session.get(Page, page_id)
         if page_row is not None:
             page_row.updated_at = now

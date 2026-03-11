@@ -102,6 +102,100 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         self.assertEqual(int(third["reading_order"]), 3)
         self.assertEqual(int(fourth["reading_order"]), 4)
 
+    def test_create_layout_appends_after_normalizing_sparse_legacy_orders(self) -> None:
+        self._write_image("layout/append-after-sparse.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        created = []
+        for order in (1, 2, 3):
+            layout = main.create_page_layout(
+                page_id,
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=order,
+                    bbox=main.BBoxPayload(
+                        x1=0.1,
+                        y1=0.1 * order,
+                        x2=0.4,
+                        y2=min(0.99, 0.1 * order + 0.05),
+                    ),
+                ),
+            )["layout"]
+            created.append(layout)
+
+        # Simulate legacy sparse orders from pre-fix data.
+        with db.get_session() as session:
+            row1 = session.get(main.Layout, int(created[0]["id"]))
+            row2 = session.get(main.Layout, int(created[1]["id"]))
+            row3 = session.get(main.Layout, int(created[2]["id"]))
+            self.assertIsNotNone(row1)
+            self.assertIsNotNone(row2)
+            self.assertIsNotNone(row3)
+            row1.reading_order = 5
+            row2.reading_order = 7
+            row3.reading_order = 9
+
+        appended = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.5, y1=0.5, x2=0.9, y2=0.6),
+            ),
+        )["layout"]
+        self.assertEqual(int(appended["reading_order"]), 4)
+
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3, 4])
+
+    def test_delete_layout_compacts_remaining_reading_orders(self) -> None:
+        self._write_image("layout/delete-compacts-orders.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        first = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.4, y2=0.2),
+            ),
+        )["layout"]
+        second = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.3, x2=0.4, y2=0.4),
+            ),
+        )["layout"]
+        third = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.5, x2=0.4, y2=0.6),
+            ),
+        )["layout"]
+        fourth = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=4,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.7, x2=0.4, y2=0.8),
+            ),
+        )["layout"]
+
+        main.remove_layout(int(second["id"]))
+        page_layouts = main.page_layouts(page_id)["layouts"]
+
+        self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3])
+        self.assertEqual(
+            [int(row["id"]) for row in page_layouts],
+            [int(first["id"]), int(third["id"]), int(fourth["id"])],
+        )
+
     def test_replace_caption_bindings_deduplicates_and_sorts_target_ids(self) -> None:
         self._write_image("layout/caption-binding.png")
         main.scan_images()
