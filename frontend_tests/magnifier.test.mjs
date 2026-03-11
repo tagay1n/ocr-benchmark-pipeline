@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   clampMagnifierZoom,
+  computeDockedMagnifierPosition,
   computeMagnifierLensPosition,
   computeMagnifierSampleRect,
 } from "../app/static/js/magnifier.mjs";
@@ -66,4 +67,56 @@ test("computeMagnifierLensPosition keeps lens inside viewport", () => {
     viewportHeight: 600,
   });
   assert.deepEqual(nearTopLeft, { left: 8, top: 8 });
+});
+
+test("computeDockedMagnifierPosition prefers placing lens outside viewport on the left", () => {
+  const position = computeDockedMagnifierPosition({
+    lensSize: 180,
+    viewportRect: { left: 320, top: 16, right: 840, bottom: 700 },
+    viewportGap: 10,
+    edgeInset: 8,
+    windowWidth: 1280,
+    windowHeight: 800,
+  });
+  assert.deepEqual(position, { left: 130, top: 510 });
+});
+
+test("computeDockedMagnifierPosition falls back to bottom-left viewport corner when no outside space exists", () => {
+  const position = computeDockedMagnifierPosition({
+    lensSize: 180,
+    viewportRect: { left: 20, top: 12, right: 780, bottom: 580 },
+    viewportGap: 10,
+    edgeInset: 8,
+    windowWidth: 800,
+    windowHeight: 600,
+  });
+  assert.deepEqual(position, { left: 8, top: 412 });
+});
+
+test("computeDockedMagnifierPosition can anchor inside viewport bottom-left corner", () => {
+  const position = computeDockedMagnifierPosition({
+    lensSize: 180,
+    viewportRect: { left: 200, top: 40, right: 920, bottom: 700 },
+    viewportGap: 10,
+    edgeInset: 8,
+    windowWidth: 1280,
+    windowHeight: 800,
+    dockInsideViewport: true,
+    dockCorner: "bottom-left",
+  });
+  assert.deepEqual(position, { left: 210, top: 510 });
+});
+
+test("computeDockedMagnifierPosition can anchor inside viewport top-left corner", () => {
+  const position = computeDockedMagnifierPosition({
+    lensSize: 180,
+    viewportRect: { left: 200, top: 40, right: 920, bottom: 700 },
+    viewportGap: 10,
+    edgeInset: 8,
+    windowWidth: 1280,
+    windowHeight: 800,
+    dockInsideViewport: true,
+    dockCorner: "top-left",
+  });
+  assert.deepEqual(position, { left: 210, top: 50 });
 });

@@ -896,6 +896,7 @@
 
       .modal-card {
         width: min(520px, 100%);
+        position: relative;
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 14px;
@@ -932,10 +933,34 @@
         gap: 10px;
       }
 
+      .modal-presets-field {
+        margin-bottom: 10px;
+      }
+
+      .modal-divider {
+        height: 1px;
+        background: var(--border);
+        margin: 0 0 12px;
+      }
+
       .modal-field {
         display: flex;
         flex-direction: column;
         gap: 6px;
+      }
+
+      .modal-field-label-row {
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .modal-field-checkbox-row {
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
 
       .modal-field label {
@@ -945,6 +970,67 @@
 
       .modal-field input[type="checkbox"] {
         width: auto;
+      }
+
+      .field-help-btn {
+        width: 20px;
+        height: 20px;
+        min-width: 20px;
+        padding: 0;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: #ece8df;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .field-help-btn:hover {
+        background: #e2ddd0;
+      }
+
+      .field-help-btn.active {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: #dff0ec;
+      }
+
+      .field-help-cloud {
+        position: absolute;
+        min-width: 220px;
+        max-width: min(300px, calc(100% - 16px));
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #fffef9;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+        box-shadow: 0 8px 18px rgba(31, 35, 41, 0.14);
+        z-index: 3;
+      }
+
+      .field-help-cloud::before {
+        content: "";
+        position: absolute;
+        left: 18px;
+        top: -6px;
+        width: 10px;
+        height: 10px;
+        background: #fffef9;
+        border-left: 1px solid var(--border);
+        border-top: 1px solid var(--border);
+        transform: rotate(45deg);
+      }
+
+      .field-help-cloud.up::before {
+        top: auto;
+        bottom: -6px;
+        border-left: 0;
+        border-top: 0;
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
       }
 
       .modal-actions {
@@ -1068,7 +1154,7 @@
               <div class="zoom-separator"></div>
             </div>
           </div>
-          <button id="magnifier-toggle-btn" class="magnifier-toggle-btn" type="button" aria-label="Toggle magnifier" aria-pressed="false" title="Magnifier (M, hold Alt)">
+          <button id="magnifier-toggle-btn" class="magnifier-toggle-btn" type="button" aria-label="Toggle magnifier" aria-pressed="false" title="Magnifier (M)">
             <svg class="magnifier-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <circle cx="11" cy="11" r="6"></circle>
               <path d="m20 20-4.2-4.2"></path>
@@ -1128,28 +1214,50 @@
           |
           <a href="https://docs.ultralytics.com/usage/cfg/#predict-settings" target="_blank" rel="noreferrer noopener">Predict settings reference</a>
         </p>
+        <div class="modal-field modal-presets-field">
+          <label for="detect-modal-top-config">Presets</label>
+          <select id="detect-modal-top-config">
+            <option value="">No benchmark configs yet</option>
+          </select>
+        </div>
+        <div class="modal-divider" aria-hidden="true"></div>
         <div class="modal-grid">
           <div class="modal-field">
-            <label for="detect-modal-model">Model checkpoint</label>
+            <div class="modal-field-label-row">
+              <label for="detect-modal-model">Model checkpoint</label>
+              <button class="field-help-btn" type="button" data-help-key="model" aria-label="Explain model checkpoint">i</button>
+            </div>
             <select id="detect-modal-model">
               <option value="yolo26m-doclaynet.pt">yolo26m-doclaynet.pt</option>
             </select>
           </div>
           <div class="modal-field">
-            <label for="detect-modal-conf">Confidence (`conf` 0..1)</label>
+            <div class="modal-field-label-row">
+              <label for="detect-modal-conf">Confidence min:0 max:1 default:0.2</label>
+              <button class="field-help-btn" type="button" data-help-key="conf" aria-label="Explain confidence threshold">i</button>
+            </div>
             <input id="detect-modal-conf" type="number" min="0" max="1" step="0.01" value="0.25" />
           </div>
           <div class="modal-field">
-            <label for="detect-modal-iou">IoU (`iou` 0..1)</label>
+            <div class="modal-field-label-row">
+              <label for="detect-modal-iou">IoU min:0 max:1 default:0.45</label>
+              <button class="field-help-btn" type="button" data-help-key="iou" aria-label="Explain IoU threshold">i</button>
+            </div>
             <input id="detect-modal-iou" type="number" min="0" max="1" step="0.01" value="0.45" />
           </div>
           <div class="modal-field">
-            <label for="detect-modal-imgsz">Image Size (`imgsz`)</label>
-            <input id="detect-modal-imgsz" type="number" min="32" step="32" value="1024" />
+            <div class="modal-field-label-row">
+              <label for="detect-modal-imgsz">Image size min:32 max:4096 default:1024</label>
+              <button class="field-help-btn" type="button" data-help-key="imgsz" aria-label="Explain image size">i</button>
+            </div>
+            <input id="detect-modal-imgsz" type="number" min="32" max="4096" step="32" value="1024" />
           </div>
           <div class="modal-field">
-            <label for="detect-modal-max-det">Max detections (`max_det`)</label>
-            <input id="detect-modal-max-det" type="number" min="1" step="1" value="300" />
+            <div class="modal-field-label-row">
+              <label for="detect-modal-max-det">Max detections min:1 max:3000 default:300</label>
+              <button class="field-help-btn" type="button" data-help-key="max_det" aria-label="Explain max detections">i</button>
+            </div>
+            <input id="detect-modal-max-det" type="number" min="1" max="3000" step="1" value="300" />
           </div>
           <div class="modal-field">
             <label for="detect-modal-replace-existing">
@@ -1158,12 +1266,16 @@
             </label>
           </div>
           <div class="modal-field">
-            <label for="detect-modal-agnostic-nms">
-              <input id="detect-modal-agnostic-nms" type="checkbox" />
-              Agnostic NMS (`agnostic_nms`)
-            </label>
+            <div class="modal-field-checkbox-row">
+              <label for="detect-modal-agnostic-nms">
+                <input id="detect-modal-agnostic-nms" type="checkbox" />
+                Agnostic NMS
+              </label>
+              <button class="field-help-btn" type="button" data-help-key="agnostic_nms" aria-label="Explain agnostic NMS">i</button>
+            </div>
           </div>
         </div>
+        <div id="detect-modal-help-cloud" class="field-help-cloud" role="tooltip" hidden></div>
         <div class="modal-actions">
           <button id="detect-modal-cancel-btn" class="secondary" type="button">Cancel</button>
           <button id="detect-modal-run-btn" type="button">Run detection</button>

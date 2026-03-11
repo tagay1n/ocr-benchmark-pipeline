@@ -26,8 +26,6 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
     'id="pages-prev-btn"',
     'id="pages-next-btn"',
     'id="pages-meta"',
-    'id="auto-detect-layouts-toggle"',
-    'id="auto-extract-text-toggle"',
     'data-pages-sort-key="id"',
     'data-pages-sort-key="rel_path"',
     'data-pages-sort-key="status"',
@@ -40,7 +38,6 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(pageModule.includes('"/api/pipeline/activity/stream?limit=30"'), true);
   assert.equal(pageModule.includes('"/api/final/export"'), true);
   assert.equal(pageModule.includes('"/static/layout_benchmark.html"'), true);
-  assert.equal(pageModule.includes('"/api/runtime-options"'), true);
   assert.equal(pageModule.includes('"/api/pages/summary"'), true);
   assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);
   assert.equal(pageModule.includes('"./pipeline_event_constants.mjs"'), true);
@@ -91,6 +88,7 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(html.includes("layout-bbox-editor"), true);
   assert.equal(html.includes('id="magnifier-toggle-btn"'), true);
   assert.equal(html.includes('id="detect-modal-model"'), true);
+  assert.equal(html.includes('id="detect-modal-top-config"'), true);
   assert.equal(html.includes('src="/static/js/layout_review_page.mjs"'), true);
   assert.equal(pageModule.includes('bindingLinesLayer.id = "bind-lines-layer"'), true);
   assert.equal(pageModule.includes("box-bind-btn"), true);
@@ -103,6 +101,7 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(pageModule.includes("fetchLayoutDetectionDefaults"), true);
   assert.equal(apiModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
   assert.equal(apiModule.includes('"/api/layout-detection/defaults"'), true);
+  assert.equal(apiModule.includes('"/api/layout-benchmark/grid"'), true);
   assert.equal(apiModule.includes("`/api/layouts/${layoutId}`"), true);
 });
 
@@ -120,6 +119,7 @@ test("layout class catalog module exports stable class policy", async () => {
       "list_item",
       "table",
       "picture",
+      "picture_text",
       "caption",
       "footnote",
       "formula",

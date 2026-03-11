@@ -47,6 +47,7 @@
         textOffsetForLineIndex,
       } from "./ocr_review_utils.mjs";
       import {
+        clampMagnifierZoom,
         createImageMagnifier,
       } from "./magnifier.mjs";
       import {
@@ -77,10 +78,16 @@
         panelVisibility: "ocrReview.panelVisibility",
         zoomMode: "ocrReview.zoom.mode",
         zoomPercent: "ocrReview.zoom.percent",
+        magnifierZoom: "ocrReview.magnifier.zoom",
         reconstructedRenderMode: "ocrReview.reconstructed.render_mode",
         editorFontSize: "ocrReview.editor.font_size",
         editorDrawerWidth: "ocrReview.editor.drawer_width",
       };
+      const MAGNIFIER_ZOOM_MIN = 1.5;
+      const MAGNIFIER_ZOOM_MAX = 6;
+      const MAGNIFIER_ZOOM_STEP = 0.5;
+      const MAGNIFIER_ZOOM_DEFAULT = 3;
+      const MAGNIFIER_NEAR_BOTTOM_THRESHOLD = 36;
       const EDITOR_FONT_SIZE_MIN = 10;
       const EDITOR_FONT_SIZE_MAX = 24;
       const EDITOR_FONT_SIZE_DEFAULT = 13;
@@ -164,7 +171,12 @@
         history: [],
         historyIndex: -1,
         nextReviewPageId: null,
-        magnifierEnabled: false,
+        magnifierEnabled: true,
+        magnifierZoom: clampMagnifierZoom(readStorage(STORAGE_KEYS.magnifierZoom), {
+          min: MAGNIFIER_ZOOM_MIN,
+          max: MAGNIFIER_ZOOM_MAX,
+          fallback: MAGNIFIER_ZOOM_DEFAULT,
+        }),
         panelVisibility: {
           source: true,
           reconstructed: true,
@@ -193,9 +205,30 @@
         magnifierToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
       }
 
+      function resolveMagnifierDockCorner() {
+        const maxScrollTop = Math.max(0, sourceViewport.scrollHeight - sourceViewport.clientHeight);
+        if (maxScrollTop <= 0) {
+          return "bottom-left";
+        }
+        const distanceToBottom = Math.max(0, maxScrollTop - sourceViewport.scrollTop);
+        return distanceToBottom <= MAGNIFIER_NEAR_BOTTOM_THRESHOLD ? "top-left" : "bottom-left";
+      }
+
       const sourceImageMagnifier = createImageMagnifier({
         viewport: sourceViewport,
         image: pageImage,
+        defaultZoom: state.magnifierZoom,
+        minZoom: MAGNIFIER_ZOOM_MIN,
+        maxZoom: MAGNIFIER_ZOOM_MAX,
+        dockInsideViewport: true,
+        dockCorner: "bottom-left",
+        getDockCorner: resolveMagnifierDockCorner,
+        showZoomControls: true,
+        zoomStep: MAGNIFIER_ZOOM_STEP,
+        onZoomChange: (zoom) => {
+          state.magnifierZoom = Number(zoom);
+          writeStorage(STORAGE_KEYS.magnifierZoom, zoom);
+        },
         getOverlayItems: () =>
           state.outputs.map((output) => {
             const color = colorForClass(output.class_name);
@@ -221,6 +254,21 @@
 
       function toggleMagnifier() {
         setMagnifierEnabled(!state.magnifierEnabled);
+      }
+
+      function setMagnifierZoom(value, { persist = true } = {}) {
+        const zoom = Number(
+          clampMagnifierZoom(value, {
+            min: MAGNIFIER_ZOOM_MIN,
+            max: MAGNIFIER_ZOOM_MAX,
+            fallback: MAGNIFIER_ZOOM_DEFAULT,
+          }),
+        );
+        state.magnifierZoom = zoom;
+        if (persist) {
+          writeStorage(STORAGE_KEYS.magnifierZoom, zoom);
+        }
+        sourceImageMagnifier.setZoom(zoom);
       }
 
       function normalizePanelVisibility(rawValue) {
@@ -3575,6 +3623,8 @@
         document.body.classList.remove("editor-resizing");
       });
 
+      sourceImageMagnifier.setEnabled(state.magnifierEnabled);
+      setMagnifierZoom(state.magnifierZoom, { persist: false });
       updateMagnifierToggleUi();
       init().catch((error) => {
         setStatus(`Initialization failed: ${error.message}`, { isError: true });

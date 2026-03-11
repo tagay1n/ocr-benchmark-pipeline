@@ -20,6 +20,7 @@
         updateReviewHistoryOnVisit,
       } from "/static/js/layout_review_utils.mjs";
       import {
+        clampMagnifierZoom,
         createImageMagnifier,
       } from "/static/js/magnifier.mjs";
       import {
@@ -58,10 +59,16 @@
       const DETECT_MAX_IMGSZ = 4096;
       const DETECT_MIN_MAX_DET = 1;
       const DETECT_MAX_MAX_DET = 3000;
+      const MAGNIFIER_ZOOM_MIN = 1.5;
+      const MAGNIFIER_ZOOM_MAX = 6;
+      const MAGNIFIER_ZOOM_STEP = 0.5;
+      const MAGNIFIER_ZOOM_DEFAULT = 3;
+      const MAGNIFIER_NEAR_BOTTOM_THRESHOLD = 36;
       const STORAGE_KEYS = {
         layoutDraftPrefix: "layout.draft.page",
         zoomMode: "layout.zoom.mode",
         zoomPercent: "layout.zoom.percent",
+        magnifierZoom: "layout.magnifier.zoom",
         reviewNavHistory: "layout.review_nav.history",
         reviewNavIndex: "layout.review_nav.index",
       };
@@ -140,7 +147,12 @@
         detectTopConfigs: [],
         activeDetectHelpKey: null,
         layoutsLoaded: false,
-        magnifierEnabled: false,
+        magnifierEnabled: true,
+        magnifierZoom: clampMagnifierZoom(readStorage(STORAGE_KEYS.magnifierZoom), {
+          min: MAGNIFIER_ZOOM_MIN,
+          max: MAGNIFIER_ZOOM_MAX,
+          fallback: MAGNIFIER_ZOOM_DEFAULT,
+        }),
       };
 
       function updateMagnifierToggleUi() {
@@ -162,9 +174,30 @@
         return target instanceof HTMLElement && target.isContentEditable;
       }
 
+      function resolveMagnifierDockCorner() {
+        const maxScrollTop = Math.max(0, imageViewport.scrollHeight - imageViewport.clientHeight);
+        if (maxScrollTop <= 0) {
+          return "bottom-left";
+        }
+        const distanceToBottom = Math.max(0, maxScrollTop - imageViewport.scrollTop);
+        return distanceToBottom <= MAGNIFIER_NEAR_BOTTOM_THRESHOLD ? "top-left" : "bottom-left";
+      }
+
       const imageMagnifier = createImageMagnifier({
         viewport: imageViewport,
         image: pageImage,
+        defaultZoom: state.magnifierZoom,
+        minZoom: MAGNIFIER_ZOOM_MIN,
+        maxZoom: MAGNIFIER_ZOOM_MAX,
+        dockInsideViewport: true,
+        dockCorner: "bottom-left",
+        getDockCorner: resolveMagnifierDockCorner,
+        showZoomControls: true,
+        zoomStep: MAGNIFIER_ZOOM_STEP,
+        onZoomChange: (zoom) => {
+          state.magnifierZoom = Number(zoom);
+          writeStorage(STORAGE_KEYS.magnifierZoom, zoom);
+        },
         getOverlayItems: () =>
           state.layouts.map((layout) => {
             const layoutId = Number(layout.id);
@@ -193,6 +226,23 @@
         setMagnifierEnabled(!state.magnifierEnabled);
       }
 
+      function setMagnifierZoom(value, { persist = true } = {}) {
+        const zoom = Number(
+          clampMagnifierZoom(value, {
+            min: MAGNIFIER_ZOOM_MIN,
+            max: MAGNIFIER_ZOOM_MAX,
+            fallback: MAGNIFIER_ZOOM_DEFAULT,
+          }),
+        );
+        state.magnifierZoom = zoom;
+        if (persist) {
+          writeStorage(STORAGE_KEYS.magnifierZoom, zoom);
+        }
+        imageMagnifier.setZoom(zoom);
+      }
+
+      imageMagnifier.setEnabled(state.magnifierEnabled);
+      setMagnifierZoom(state.magnifierZoom, { persist: false });
       updateMagnifierToggleUi();
 
       function rebuildZoomPresetOptions() {
