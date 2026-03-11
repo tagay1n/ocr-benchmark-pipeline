@@ -13,23 +13,16 @@ from ..models import DuplicateFile, Layout, OcrOutput, Page, PipelineEvent, Pipe
 from ..ocr_review import list_ocr_outputs
 from ..pipeline_constants import (
     EVENT_PAGE_REMOVED,
-    EVENT_RUNTIME_OPTIONS_UPDATED,
     EVENT_WIPE_FINISHED,
     EVENT_WIPE_STARTED,
     STAGE_DISCOVERY,
     STAGE_PIPELINE,
 )
 from ..pipeline_runtime import emit_event, register_default_handlers
-from ..runtime_options import (
-    get_runtime_options,
-    should_auto_detect_layouts_after_discovery,
-    update_runtime_options,
-)
-from .schemas import RuntimeOptionsUpdateRequest, WipeStateRequest
+from .schemas import WipeStateRequest
 from .shared import (
     _settings,
     _pipeline_stats_snapshot,
-    emit_auto_layout_enqueue_event,
     run_discovery_scan_with_events,
 )
 
@@ -127,15 +120,11 @@ def scan_images() -> dict[str, object]:
         started_message="Discovery scan started",
         finished_prefix="Discovery scan finished.",
     )
-    response["auto_layout_detection"] = (
-        emit_auto_layout_enqueue_event(trigger="api", context_label="discovery scan")
-        if should_auto_detect_layouts_after_discovery()
-        else {
-            "considered": 0,
-            "queued": 0,
-            "already_queued_or_running": 0,
-        }
-    )
+    response["auto_layout_detection"] = {
+        "considered": 0,
+        "queued": 0,
+        "already_queued_or_running": 0,
+    }
     return response
 
 
@@ -171,12 +160,11 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
             started_message="Discovery scan started after wipe",
             finished_prefix="Discovery scan finished after wipe.",
         )
-        if should_auto_detect_layouts_after_discovery():
-            register_default_handlers()
-            auto_layout_detection = emit_auto_layout_enqueue_event(
-                trigger="wipe",
-                context_label="wipe scan",
-            )
+        auto_layout_detection = {
+            "considered": 0,
+            "queued": 0,
+            "already_queued_or_running": 0,
+        }
 
     emit_event(
         stage=STAGE_PIPELINE,
@@ -191,44 +179,6 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
         "rescan_summary": rescan_summary,
         "auto_layout_detection": auto_layout_detection,
     }
-
-
-@router.get("/api/runtime-options")
-def runtime_options() -> dict[str, object]:
-    snapshot = get_runtime_options()
-    return {
-        "enable_background_jobs": snapshot.enable_background_jobs,
-        "auto_detect_layouts_after_discovery": snapshot.auto_detect_layouts_after_discovery,
-        "auto_extract_text_after_layout_review": snapshot.auto_extract_text_after_layout_review,
-    }
-
-
-@router.put("/api/runtime-options")
-def put_runtime_options(payload: RuntimeOptionsUpdateRequest) -> dict[str, object]:
-    snapshot = update_runtime_options(
-        auto_detect_layouts_after_discovery=payload.auto_detect_layouts_after_discovery,
-        auto_extract_text_after_layout_review=payload.auto_extract_text_after_layout_review,
-    )
-    emit_event(
-        stage=STAGE_PIPELINE,
-        event_type=EVENT_RUNTIME_OPTIONS_UPDATED,
-        message=(
-            "Runtime pipeline options updated: "
-            f"auto detect after discovery={snapshot.auto_detect_layouts_after_discovery}, "
-            f"auto extract after layout review={snapshot.auto_extract_text_after_layout_review}."
-        ),
-        data={
-            "auto_detect_layouts_after_discovery": snapshot.auto_detect_layouts_after_discovery,
-            "auto_extract_text_after_layout_review": snapshot.auto_extract_text_after_layout_review,
-        },
-    )
-    return {
-        "enable_background_jobs": snapshot.enable_background_jobs,
-        "auto_detect_layouts_after_discovery": snapshot.auto_detect_layouts_after_discovery,
-        "auto_extract_text_after_layout_review": snapshot.auto_extract_text_after_layout_review,
-    }
-
-
 @router.get("/api/pages")
 def list_pages(
     limit: int | None = None,

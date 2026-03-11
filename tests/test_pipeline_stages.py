@@ -174,8 +174,6 @@ class PipelineStagesTests(unittest.TestCase):
 
         self.assertEqual(loaded.gemini_keys, ("key-1", "key-2", "key-3"))
         self.assertEqual(loaded.gemini_usage_path, self.project_root / "_artifacts" / "gemini_usage.json")
-        self.assertFalse(loaded.auto_detect_layouts_after_discovery)
-        self.assertFalse(loaded.auto_extract_text_after_layout_review)
 
     def test_layout_detection_stage_creates_layouts(self) -> None:
         self._write_image("page.png", b"fake-image")
@@ -231,13 +229,10 @@ class PipelineStagesTests(unittest.TestCase):
         page_payload = main.page_details(page_id)
         self.assertEqual(page_payload["page"]["status"], "layout_detected")
 
-    def test_manual_layout_detect_works_when_auto_detect_disabled(self) -> None:
+    def test_manual_layout_detect_works(self) -> None:
         self._write_image("manual-detect.png", b"manual-detect-image")
         main.scan_images()
         page_id = self._first_page_id()
-
-        runtime_payload = main.runtime_options()
-        self.assertFalse(runtime_payload["auto_detect_layouts_after_discovery"])
 
         fake_rows = [
             {
@@ -285,7 +280,7 @@ class PipelineStagesTests(unittest.TestCase):
         page_payload = main.page_details(page_id)
         self.assertEqual(page_payload["page"]["status"], "layout_reviewed")
 
-    def test_layout_review_enqueues_ocr_when_background_jobs_enabled(self) -> None:
+    def test_layout_review_never_auto_enqueues_ocr_when_background_jobs_enabled(self) -> None:
         self.test_settings = Settings(
             project_root=self.project_root,
             source_dir=self.project_root / "input",
@@ -293,7 +288,6 @@ class PipelineStagesTests(unittest.TestCase):
             result_dir=self.project_root / "result",
             allowed_extensions=DEFAULT_EXTENSIONS,
             enable_background_jobs=True,
-            auto_extract_text_after_layout_review=True,
         )
         self.stack.close()
         self.stack = ExitStack()
@@ -322,39 +316,9 @@ class PipelineStagesTests(unittest.TestCase):
         with patch.object(main, "enqueue_job", return_value=True) as enqueue_mock:
             main.complete_layout_review(page_id)
 
-        enqueue_mock.assert_called_once_with(
-            "ocr_extract",
-            page_id=page_id,
-            payload={"trigger": "layout_review_complete"},
-        )
+        enqueue_mock.assert_not_called()
 
-    def test_runtime_options_api_updates_runtime_only_values(self) -> None:
-        payload = main.runtime_options()
-        self.assertEqual(
-            payload,
-            {
-                "enable_background_jobs": False,
-                "auto_detect_layouts_after_discovery": False,
-                "auto_extract_text_after_layout_review": False,
-            },
-        )
-
-        updated = main.put_runtime_options(
-            main.RuntimeOptionsUpdateRequest(
-                auto_detect_layouts_after_discovery=True,
-                auto_extract_text_after_layout_review=True,
-            )
-        )
-        self.assertEqual(
-            updated,
-            {
-                "enable_background_jobs": False,
-                "auto_detect_layouts_after_discovery": True,
-                "auto_extract_text_after_layout_review": True,
-            },
-        )
-
-    def test_scan_uses_runtime_toggle_for_auto_layout_detection(self) -> None:
+    def test_scan_never_auto_enqueues_layout_detection(self) -> None:
         self.test_settings = Settings(
             project_root=self.project_root,
             source_dir=self.project_root / "input",
@@ -385,18 +349,7 @@ class PipelineStagesTests(unittest.TestCase):
             {"considered": 0, "queued": 0, "already_queued_or_running": 0},
         )
 
-        main.put_runtime_options(
-            main.RuntimeOptionsUpdateRequest(auto_detect_layouts_after_discovery=True)
-        )
-        with patch.object(main, "enqueue_layout_detection_for_new_pages", return_value={"considered": 1, "queued": 1, "already_queued_or_running": 0}) as enqueue_mock:
-            second = main.scan_images()
-        enqueue_mock.assert_called_once()
-        self.assertEqual(
-            second["auto_layout_detection"],
-            {"considered": 1, "queued": 1, "already_queued_or_running": 0},
-        )
-
-    def test_layout_review_uses_runtime_toggle_for_auto_ocr(self) -> None:
+    def test_layout_review_never_auto_enqueues_ocr(self) -> None:
         self.test_settings = Settings(
             project_root=self.project_root,
             source_dir=self.project_root / "input",
@@ -437,17 +390,9 @@ class PipelineStagesTests(unittest.TestCase):
         with patch.object(main, "enqueue_job", return_value=True) as enqueue_mock:
             main.complete_layout_review(first_page_id)
         enqueue_mock.assert_not_called()
-
-        main.put_runtime_options(
-            main.RuntimeOptionsUpdateRequest(auto_extract_text_after_layout_review=True)
-        )
         with patch.object(main, "enqueue_job", return_value=True) as enqueue_mock:
             main.complete_layout_review(second_page_id)
-        enqueue_mock.assert_called_once_with(
-            "ocr_extract",
-            page_id=second_page_id,
-            payload={"trigger": "layout_review_complete"},
-        )
+        enqueue_mock.assert_not_called()
 
     def test_layout_review_requires_caption_bindings(self) -> None:
         self._write_image("caption.png", b"caption-image")
@@ -828,7 +773,7 @@ class PipelineStagesTests(unittest.TestCase):
             max_retries_per_layout=5,
         )
 
-    def test_manual_ocr_reextract_works_when_auto_extract_disabled(self) -> None:
+    def test_manual_ocr_reextract_works(self) -> None:
         self._write_image("ocr-reextract-auto-disabled.png", b"fake-image")
         main.scan_images()
         page_id = self._first_page_id()
@@ -841,9 +786,6 @@ class PipelineStagesTests(unittest.TestCase):
             ),
         )
         main.complete_layout_review(page_id)
-
-        runtime_payload = main.runtime_options()
-        self.assertFalse(runtime_payload["auto_extract_text_after_layout_review"])
 
         fake_result = {
             "page_id": page_id,
@@ -1463,8 +1405,6 @@ class PipelineStagesTests(unittest.TestCase):
                     "  - png",
                     "  - .JPG",
                     "enable_background_jobs: \"off\"",
-                    "auto_detect_layouts_after_discovery: \"yes\"",
-                    "auto_extract_text_after_layout_review: \"no\"",
                     "gemini_keys:",
                     "  batch_a:",
                     "    - key-a",
@@ -1484,8 +1424,6 @@ class PipelineStagesTests(unittest.TestCase):
 
         self.assertEqual(loaded.allowed_extensions, (".png", ".jpg"))
         self.assertFalse(loaded.enable_background_jobs)
-        self.assertTrue(loaded.auto_detect_layouts_after_discovery)
-        self.assertFalse(loaded.auto_extract_text_after_layout_review)
         self.assertEqual(loaded.gemini_keys, ("key-a", "key-b"))
 
         with patch.dict(
@@ -1511,15 +1449,11 @@ class PipelineStagesTests(unittest.TestCase):
             result_dir=self.project_root / "result",
             allowed_extensions=DEFAULT_EXTENSIONS,
             enable_background_jobs=True,
-            auto_detect_layouts_after_discovery=True,
-            auto_extract_text_after_layout_review=True,
         )
         with patch.object(runtime_options, "settings", custom_settings):
             snapshot = runtime_options.reset_runtime_options_from_settings()
 
         self.assertTrue(snapshot.enable_background_jobs)
-        self.assertTrue(snapshot.auto_detect_layouts_after_discovery)
-        self.assertTrue(snapshot.auto_extract_text_after_layout_review)
         runtime_options.reset_runtime_options_from_settings()
 
     def test_final_export_contract_and_page_filtering(self) -> None:

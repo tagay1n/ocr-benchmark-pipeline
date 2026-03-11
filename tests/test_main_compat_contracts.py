@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 from app import config, db, discovery, final_export, layouts, main, ocr_extract, runtime_options
 from app.config import DEFAULT_EXTENSIONS, Settings
-from app.pipeline_constants import STAGE_OCR_EXTRACT
 
 
 class MainCompatibilityContractsTests(unittest.TestCase):
@@ -51,18 +50,20 @@ class MainCompatibilityContractsTests(unittest.TestCase):
         self.assertGreaterEqual(len(pages), 1)
         return int(pages[0]["id"])
 
-    def test_scan_images_uses_main_enqueue_layout_detection_patch(self) -> None:
+    def test_scan_images_never_auto_enqueues_layout_detection(self) -> None:
         self._write_image("auto/a.png")
-        main.put_runtime_options(main.RuntimeOptionsUpdateRequest(auto_detect_layouts_after_discovery=True))
 
         fake_auto = {"considered": 1, "queued": 1, "already_queued_or_running": 0}
         with patch.object(main, "enqueue_layout_detection_for_new_pages", return_value=fake_auto) as enqueue_mock:
             payload = main.scan_images()
 
-        enqueue_mock.assert_called_once_with()
-        self.assertEqual(payload["auto_layout_detection"], fake_auto)
+        enqueue_mock.assert_not_called()
+        self.assertEqual(
+            payload["auto_layout_detection"],
+            {"considered": 0, "queued": 0, "already_queued_or_running": 0},
+        )
 
-    def test_layout_review_uses_main_enqueue_job_patch(self) -> None:
+    def test_layout_review_never_auto_enqueues_ocr_job(self) -> None:
         self._write_image("review/a.png")
         main.scan_images()
         page_id = self._first_page_id()
@@ -74,17 +75,12 @@ class MainCompatibilityContractsTests(unittest.TestCase):
                 bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.3),
             ),
         )
-        main.put_runtime_options(main.RuntimeOptionsUpdateRequest(auto_extract_text_after_layout_review=True))
 
         with patch.object(main, "enqueue_job", return_value=True) as enqueue_mock:
             result = main.complete_layout_review(page_id)
 
         self.assertEqual(result["status"], "layout_reviewed")
-        enqueue_mock.assert_called_once_with(
-            STAGE_OCR_EXTRACT,
-            page_id=page_id,
-            payload={"trigger": "layout_review_complete"},
-        )
+        enqueue_mock.assert_not_called()
 
     def test_manual_reextract_uses_main_extract_ocr_for_page_patch(self) -> None:
         self._write_image("ocr/a.png")

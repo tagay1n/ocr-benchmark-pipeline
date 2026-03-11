@@ -25,7 +25,7 @@ Use only these living docs:
 
 ## Pipeline Invariants
 
-- Auto toggles affect only automatic pipeline triggers.
+- Pipeline progression is manual by default; no auto stage triggers from discovery or layout review.
 - Manual actions (`Detect`, reextract, review submit) must remain available unless a local in-flight operation is active.
 - Reviewer edits are draft-first and applied explicitly on review confirmation.
 

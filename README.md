@@ -34,13 +34,13 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Overlapping bbox borders are highlighted with striped warning segments.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with layout overlays.
   - Caption binding mode from caption bbox (`Bind`), with visible arrows to table/picture/formula targets and explicit unbind controls.
-  - `Detect` modal with model params and in-flight busy state.
+  - `Detect` modal with model params, top-3 benchmark suggestions for `model+imgsz`, and in-flight busy state.
 - OCR review (`/static/ocr_review.html?page_id=<id>`):
   - Source + reconstructed + extracted-content panels.
   - Draft editing and restore per OCR item.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with OCR bbox overlays.
   - `Detect` modal with editable prompt template + generation params.
-  - Manual detect is always allowed regardless of auto-mode toggles.
+  - All pipeline steps are manual by reviewer action.
 
 ## Configuration
 
@@ -58,8 +58,6 @@ allowed_image_extensions:
   - .tiff
   - .webp
 enable_background_jobs: true
-auto_detect_layouts_after_discovery: false
-auto_extract_text_after_layout_review: false
 gemini_keys: []
 ```
 
@@ -73,13 +71,6 @@ Environment overrides:
 - `ENABLE_BACKGROUND_JOBS`
 - `GEMINI_KEYS` (comma-separated)
 - `GEMINI_USAGE_PATH`
-
-Runtime toggles in dashboard are process-local:
-
-- `Auto-detect layouts after discovery`
-- `Auto-extract text after layout review`
-
-They do not rewrite `config.yaml`.
 
 ## Run
 

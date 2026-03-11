@@ -57,11 +57,6 @@ class ReextractOcrRequest(BaseModel):
     max_retries_per_layout: int | None = Field(default=None, ge=1, le=10)
 
 
-class RuntimeOptionsUpdateRequest(BaseModel):
-    auto_detect_layouts_after_discovery: bool | None = None
-    auto_extract_text_after_layout_review: bool | None = None
-
-
 class FinalExportRequest(BaseModel):
     confirm: bool = False
 

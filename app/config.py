@@ -17,8 +17,6 @@ class Settings:
     result_dir: Path
     allowed_extensions: tuple[str, ...]
     enable_background_jobs: bool
-    auto_detect_layouts_after_discovery: bool = False
-    auto_extract_text_after_layout_review: bool = False
     gemini_keys: tuple[str, ...] = ()
     gemini_usage_path: Path | None = None
 
@@ -130,8 +128,6 @@ def load_settings() -> Settings:
     ext_value = ext_env if ext_env is not None else _coerce_extensions(config.get("allowed_image_extensions"))
     jobs_env = os.getenv("ENABLE_BACKGROUND_JOBS")
     jobs_value = jobs_env if jobs_env is not None else config.get("enable_background_jobs")
-    auto_detect_layouts_value = config.get("auto_detect_layouts_after_discovery")
-    auto_extract_text_value = config.get("auto_extract_text_after_layout_review")
     gemini_keys_env = os.getenv("GEMINI_KEYS")
     gemini_keys_value = (
         _coerce_gemini_keys(gemini_keys_env.split(",")) if gemini_keys_env is not None else _coerce_gemini_keys(config.get("gemini_keys"))
@@ -143,8 +139,6 @@ def load_settings() -> Settings:
     result_dir = _resolve_path(project_root, result_dir_value)
     allowed_extensions = _parse_extensions(ext_value)
     enable_background_jobs = _parse_bool(jobs_value, default=True)
-    auto_detect_layouts_after_discovery = _parse_bool(auto_detect_layouts_value, default=False)
-    auto_extract_text_after_layout_review = _parse_bool(auto_extract_text_value, default=False)
     gemini_usage_path = _resolve_path(project_root, gemini_usage_path_value)
 
     return Settings(
@@ -154,8 +148,6 @@ def load_settings() -> Settings:
         result_dir=result_dir,
         allowed_extensions=allowed_extensions,
         enable_background_jobs=enable_background_jobs,
-        auto_detect_layouts_after_discovery=auto_detect_layouts_after_discovery,
-        auto_extract_text_after_layout_review=auto_extract_text_after_layout_review,
         gemini_keys=gemini_keys_value,
         gemini_usage_path=gemini_usage_path,
     )
