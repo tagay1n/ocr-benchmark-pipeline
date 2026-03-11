@@ -42,6 +42,11 @@ export function formatZoomPercent(percentValue) {
   return `${rounded.toFixed(1)}%`;
 }
 
+export function isLayoutNotFoundErrorMessage(value) {
+  const message = String(value ?? "").trim().toLowerCase();
+  return message === "layout not found" || message === "layout not found.";
+}
+
 export function computeZoomScale({
   mode,
   zoomPercent,

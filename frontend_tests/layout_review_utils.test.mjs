@@ -19,6 +19,7 @@ import {
   computeZoomScale,
   findMaxFittingFontSize,
   formatZoomPercent,
+  isLayoutNotFoundErrorMessage,
   normalizeReviewHistory,
   normalizeZoomMode,
   nextHistoryPageId,
@@ -54,6 +55,15 @@ test("formatZoomPercent renders integer and 1-decimal labels", () => {
   assert.equal(formatZoomPercent(100), "100%");
   assert.equal(formatZoomPercent(49.14), "49.1%");
   assert.equal(formatZoomPercent(49.15), "49.2%");
+});
+
+test("isLayoutNotFoundErrorMessage matches exact backend not-found detail", () => {
+  assert.equal(isLayoutNotFoundErrorMessage("Layout not found."), true);
+  assert.equal(isLayoutNotFoundErrorMessage("Layout not found"), true);
+  assert.equal(isLayoutNotFoundErrorMessage("layout not found."), true);
+  assert.equal(isLayoutNotFoundErrorMessage("Layout not Found."), true);
+  assert.equal(isLayoutNotFoundErrorMessage("Page not found."), false);
+  assert.equal(isLayoutNotFoundErrorMessage(""), false);
 });
 
 test("computeZoomScale supports fit modes and custom percentages", () => {

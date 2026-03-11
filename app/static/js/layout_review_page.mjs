@@ -7,6 +7,7 @@
         computeZoomScale,
         computeOverlayBadgeScale,
         filterReviewHistory,
+        isLayoutNotFoundErrorMessage,
         mergeLayoutsForReview,
         nextHistoryPageId,
         normalizeReviewHistory,
@@ -34,6 +35,7 @@
         createPageLayout,
         deleteLayout,
         detectPageLayouts,
+        fetchLayoutBenchmarkGrid,
         fetchLayoutDetectionDefaults,
         fetchNextLayoutReviewPage,
         fetchPageDetails,
@@ -50,6 +52,12 @@
 
       const params = new URLSearchParams(window.location.search);
       const pageId = Number(params.get("page_id"));
+      const AGREED_DETECT_DEFAULT_CONF = 0.2;
+      const AGREED_DETECT_DEFAULT_IOU = 0.45;
+      const DETECT_MIN_IMGSZ = 32;
+      const DETECT_MAX_IMGSZ = 4096;
+      const DETECT_MIN_MAX_DET = 1;
+      const DETECT_MAX_MAX_DET = 3000;
       const STORAGE_KEYS = {
         layoutDraftPrefix: "layout.draft.page",
         zoomMode: "layout.zoom.mode",
@@ -80,8 +88,10 @@
       const historyBackBtn = document.getElementById("history-back-btn");
       const historyForthBtn = document.getElementById("history-forth-btn");
       const detectModal = document.getElementById("detect-modal");
+      const detectModalCard = detectModal.querySelector(".modal-card");
       const detectModalRunBtn = document.getElementById("detect-modal-run-btn");
       const detectModalCancelBtn = document.getElementById("detect-modal-cancel-btn");
+      const detectModalTopConfigInput = document.getElementById("detect-modal-top-config");
       const detectModalModelInput = document.getElementById("detect-modal-model");
       const detectModalConfInput = document.getElementById("detect-modal-conf");
       const detectModalIouInput = document.getElementById("detect-modal-iou");
@@ -89,6 +99,16 @@
       const detectModalMaxDetInput = document.getElementById("detect-modal-max-det");
       const detectModalReplaceExistingInput = document.getElementById("detect-modal-replace-existing");
       const detectModalAgnosticNmsInput = document.getElementById("detect-modal-agnostic-nms");
+      const detectModalHelpButtons = Array.from(detectModal.querySelectorAll(".field-help-btn"));
+      const detectModalHelpCloud = document.getElementById("detect-modal-help-cloud");
+      const DETECT_HELP_TEXT_BY_KEY = {
+        model: "Selects which trained YOLO DocLayNet checkpoint is used for detection.",
+        conf: "Minimum prediction confidence to keep a box. Lower catches more but may add noise.",
+        iou: "NMS overlap threshold. Lower removes overlaps more aggressively; higher keeps more nearby boxes.",
+        imgsz: "Inference resize target. Larger values can improve detail but increase runtime and memory.",
+        max_det: "Maximum number of detections returned for one page after NMS.",
+        agnostic_nms: "If enabled, NMS suppresses overlaps across classes instead of per class.",
+      };
 
       const state = {
         page: null,
@@ -117,6 +137,8 @@
         reviewSubmitInProgress: false,
         detectInProgress: false,
         detectDefaultsLoaded: false,
+        detectTopConfigs: [],
+        activeDetectHelpKey: null,
         layoutsLoaded: false,
         magnifierEnabled: false,
       };
@@ -2103,6 +2125,93 @@
         detectModalModelInput.value = resolvedSelectedModel;
       }
 
+      function normalizeTopConfigRows(rows) {
+        const inputRows = Array.isArray(rows) ? rows : [];
+        const normalized = [];
+        const seen = new Set();
+        for (const row of inputRows) {
+          if (!row || typeof row !== "object") {
+            continue;
+          }
+          const modelCheckpoint = String(row.model_checkpoint || "").trim();
+          const imageSize = Number(row.image_size);
+          const meanScore = Number(row.mean_score);
+          if (!modelCheckpoint || !Number.isInteger(imageSize) || imageSize < 32) {
+            continue;
+          }
+          const dedupeKey = `${modelCheckpoint}|${imageSize}`;
+          if (seen.has(dedupeKey)) {
+            continue;
+          }
+          seen.add(dedupeKey);
+          normalized.push({
+            model_checkpoint: modelCheckpoint,
+            image_size: imageSize,
+            mean_score: Number.isFinite(meanScore) ? meanScore : 0,
+          });
+        }
+        normalized.sort((left, right) => Number(right.mean_score) - Number(left.mean_score));
+        return normalized.slice(0, 3);
+      }
+
+      function applySelectedTopConfig(optionValue) {
+        const selectedIndex = Number(optionValue);
+        if (!Number.isInteger(selectedIndex) || selectedIndex < 0) {
+          return;
+        }
+        const selected = state.detectTopConfigs[selectedIndex];
+        if (!selected || typeof selected !== "object") {
+          return;
+        }
+
+        const modelCheckpoint = String(selected.model_checkpoint || "").trim();
+        const imageSize = Number(selected.image_size);
+        if (modelCheckpoint) {
+          let optionFound = false;
+          for (const option of detectModalModelInput.options) {
+            if (String(option.value) === modelCheckpoint) {
+              optionFound = true;
+              break;
+            }
+          }
+          if (!optionFound) {
+            const option = document.createElement("option");
+            option.value = modelCheckpoint;
+            option.textContent = modelCheckpoint;
+            detectModalModelInput.appendChild(option);
+          }
+          detectModalModelInput.value = modelCheckpoint;
+        }
+        if (Number.isInteger(imageSize) && imageSize >= 32) {
+          detectModalImgszInput.value = String(imageSize);
+        }
+      }
+
+      function setDetectModalTopConfigOptions(topConfigs) {
+        state.detectTopConfigs = normalizeTopConfigRows(topConfigs);
+        detectModalTopConfigInput.innerHTML = "";
+        if (state.detectTopConfigs.length === 0) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No benchmark configs yet";
+          detectModalTopConfigInput.appendChild(option);
+          detectModalTopConfigInput.disabled = true;
+          return;
+        }
+
+        state.detectTopConfigs.forEach((configRow, index) => {
+          const option = document.createElement("option");
+          option.value = String(index);
+          option.textContent =
+            `#${index + 1} ${configRow.model_checkpoint} imgsz=${configRow.image_size} ` +
+            `score=${Number(configRow.mean_score).toFixed(4)}`;
+          detectModalTopConfigInput.appendChild(option);
+        });
+        detectModalTopConfigInput.disabled = false;
+        detectModalTopConfigInput.value = "0";
+        applySelectedTopConfig("0");
+      }
+
       async function ensureDetectModalDefaultsLoaded() {
         if (state.detectDefaultsLoaded) {
           return;
@@ -2112,10 +2221,24 @@
           defaultsPayload && typeof defaultsPayload.defaults === "object"
             ? defaultsPayload.defaults
             : {};
-        setDetectModalModelOptions(defaultsPayload?.available_models, defaults.model_checkpoint);
-        detectModalConfInput.value = String(Number(defaults.confidence_threshold ?? 0.25));
-        detectModalIouInput.value = String(Number(defaults.iou_threshold ?? 0.45));
+        let topConfigs = normalizeTopConfigRows(defaultsPayload?.top_configs);
+        if (topConfigs.length === 0) {
+          try {
+            const benchmarkPayload = await fetchLayoutBenchmarkGrid();
+            topConfigs = normalizeTopConfigRows(benchmarkPayload?.rows);
+          } catch {
+            topConfigs = [];
+          }
+        }
+        const availableModels = Array.isArray(defaultsPayload?.available_models)
+          ? defaultsPayload.available_models
+          : [];
+        const suggestedModels = topConfigs.map((row) => row.model_checkpoint);
+        setDetectModalModelOptions([...availableModels, ...suggestedModels], defaults.model_checkpoint);
+        detectModalConfInput.value = String(AGREED_DETECT_DEFAULT_CONF);
+        detectModalIouInput.value = String(AGREED_DETECT_DEFAULT_IOU);
         detectModalImgszInput.value = String(Number(defaults.image_size ?? 1024));
+        setDetectModalTopConfigOptions(topConfigs);
         state.detectDefaultsLoaded = true;
       }
 
@@ -2126,6 +2249,7 @@
         detectModalRunBtn.disabled = inProgress;
         detectModalRunBtn.classList.toggle("is-busy", inProgress);
         detectModalCancelBtn.disabled = inProgress;
+        detectModalTopConfigInput.disabled = inProgress || state.detectTopConfigs.length === 0;
         detectModalModelInput.disabled = inProgress;
         detectModalConfInput.disabled = inProgress;
         detectModalIouInput.disabled = inProgress;
@@ -2133,6 +2257,79 @@
         detectModalMaxDetInput.disabled = inProgress;
         detectModalReplaceExistingInput.disabled = inProgress;
         detectModalAgnosticNmsInput.disabled = inProgress;
+        for (const button of detectModalHelpButtons) {
+          button.disabled = inProgress;
+        }
+        if (inProgress) {
+          hideDetectModalHelp();
+        }
+      }
+
+      function hideDetectModalHelp() {
+        state.activeDetectHelpKey = null;
+        if (detectModalHelpCloud instanceof HTMLElement) {
+          detectModalHelpCloud.hidden = true;
+          detectModalHelpCloud.classList.remove("up");
+        }
+        for (const button of detectModalHelpButtons) {
+          button.classList.remove("active");
+        }
+      }
+
+      function showDetectModalHelp(helpKeyRaw, anchorButton) {
+        const helpKey = String(helpKeyRaw || "").trim();
+        const helpText = DETECT_HELP_TEXT_BY_KEY[helpKey];
+        if (!helpText || !(anchorButton instanceof HTMLElement)) {
+          return;
+        }
+        if (!(detectModalHelpCloud instanceof HTMLElement) || !(detectModalCard instanceof HTMLElement)) {
+          return;
+        }
+        for (const button of detectModalHelpButtons) {
+          button.classList.toggle("active", false);
+        }
+        state.activeDetectHelpKey = helpKey;
+        detectModalHelpCloud.textContent = helpText;
+        detectModalHelpCloud.hidden = false;
+
+        for (const button of detectModalHelpButtons) {
+          const key = String(button.dataset.helpKey || "");
+          button.classList.toggle("active", key === helpKey);
+        }
+
+        const cardRect = detectModalCard.getBoundingClientRect();
+        const anchorRect = anchorButton.getBoundingClientRect();
+        const cloudWidth = detectModalHelpCloud.offsetWidth || 220;
+        const cloudHeight = detectModalHelpCloud.offsetHeight || 44;
+        const horizontalPadding = 8;
+        const verticalGap = 8;
+
+        let left = anchorRect.left - cardRect.left + (anchorRect.width / 2) - (cloudWidth / 2);
+        left = Math.max(horizontalPadding, Math.min(left, cardRect.width - cloudWidth - horizontalPadding));
+
+        let top = anchorRect.bottom - cardRect.top + verticalGap;
+        let up = false;
+        if (top + cloudHeight > cardRect.height - horizontalPadding) {
+          top = anchorRect.top - cardRect.top - cloudHeight - verticalGap;
+          up = true;
+        }
+        top = Math.max(horizontalPadding, top);
+        detectModalHelpCloud.style.left = `${Math.round(left)}px`;
+        detectModalHelpCloud.style.top = `${Math.round(top)}px`;
+        detectModalHelpCloud.classList.toggle("up", up);
+      }
+
+      function toggleDetectModalHelp(helpKeyRaw, anchorButton) {
+        const helpKey = String(helpKeyRaw || "").trim();
+        if (!helpKey) {
+          hideDetectModalHelp();
+          return;
+        }
+        if (state.activeDetectHelpKey === helpKey) {
+          hideDetectModalHelp();
+          return;
+        }
+        showDetectModalHelp(helpKey, anchorButton);
       }
 
       async function openDetectModal() {
@@ -2140,6 +2337,7 @@
           return;
         }
         detectModal.hidden = false;
+        hideDetectModalHelp();
         try {
           await ensureDetectModalDefaultsLoaded();
         } catch (error) {
@@ -2151,6 +2349,7 @@
         if (state.detectInProgress) {
           return;
         }
+        hideDetectModalHelp();
         detectModal.hidden = true;
       }
 
@@ -2169,11 +2368,19 @@
         if (Number.isNaN(iou) || iou < 0 || iou > 1) {
           throw new Error("IoU (`iou`) must be between 0 and 1.");
         }
-        if (!Number.isInteger(imageSize) || imageSize < 32) {
-          throw new Error("Image size (`imgsz`) must be an integer >= 32.");
+        if (!Number.isInteger(imageSize) || imageSize < DETECT_MIN_IMGSZ || imageSize > DETECT_MAX_IMGSZ) {
+          throw new Error(
+            `Image size (\`imgsz\`) must be an integer between ${DETECT_MIN_IMGSZ} and ${DETECT_MAX_IMGSZ}.`,
+          );
         }
-        if (!Number.isInteger(maxDetections) || maxDetections < 1) {
-          throw new Error("Max detections (`max_det`) must be an integer >= 1.");
+        if (
+          !Number.isInteger(maxDetections) ||
+          maxDetections < DETECT_MIN_MAX_DET ||
+          maxDetections > DETECT_MAX_MAX_DET
+        ) {
+          throw new Error(
+            `Max detections (\`max_det\`) must be an integer between ${DETECT_MIN_MAX_DET} and ${DETECT_MAX_MAX_DET}.`,
+          );
         }
         return {
           model_checkpoint: modelCheckpoint,
@@ -2325,23 +2532,51 @@
       }
 
       async function markReviewed() {
-        state.reviewSubmitInProgress = true;
-        updateReviewUiState();
-        try {
+        const runSubmitOnce = async () => {
+          let staleLayoutRefFound = false;
           const deletedIds = Array.from(state.deletedLayoutIds).sort((a, b) => a - b);
           const editedEntries = Object.entries(state.localEditsById).sort(
             ([a], [b]) => Number(a) - Number(b),
           );
 
           for (const layoutId of deletedIds) {
-            await deleteLayout(layoutId);
+            try {
+              await deleteLayout(layoutId);
+            } catch (error) {
+              if (!isLayoutNotFoundErrorMessage(error?.message)) {
+                throw error;
+              }
+              staleLayoutRefFound = true;
+              state.deletedLayoutIds.delete(Number(layoutId));
+              delete state.localEditsById[String(layoutId)];
+              delete state.captionBindingsByCaptionId[String(layoutId)];
+              for (const [captionId, targetIds] of Object.entries(state.captionBindingsByCaptionId)) {
+                state.captionBindingsByCaptionId[captionId] = normalizeLayoutIdList(targetIds).filter(
+                  (targetId) => targetId !== Number(layoutId),
+                );
+              }
+            }
           }
 
           for (const [layoutId, draft] of editedEntries) {
             if (state.deletedLayoutIds.has(Number(layoutId))) {
               continue;
             }
-            await patchLayout(layoutId, draft);
+            try {
+              await patchLayout(layoutId, draft);
+            } catch (error) {
+              if (!isLayoutNotFoundErrorMessage(error?.message)) {
+                throw error;
+              }
+              staleLayoutRefFound = true;
+              delete state.localEditsById[String(layoutId)];
+              state.deletedLayoutIds.delete(Number(layoutId));
+            }
+          }
+
+          if (staleLayoutRefFound) {
+            persistLayoutDraftState();
+            await loadLayouts();
           }
 
           const captionBindingsPayload = buildCaptionBindingsRequestPayload();
@@ -2367,6 +2602,21 @@
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();
+        };
+
+        state.reviewSubmitInProgress = true;
+        updateReviewUiState();
+        try {
+          await loadLayouts();
+          try {
+            await runSubmitOnce();
+          } catch (error) {
+            if (!isLayoutNotFoundErrorMessage(error?.message)) {
+              throw error;
+            }
+            await loadLayouts();
+            await runSubmitOnce();
+          }
         } catch (error) {
           setStatus(`Mark reviewed failed: ${error.message}`, { isError: true });
         } finally {
@@ -2512,7 +2762,29 @@
         }
         closeDetectModal();
       });
+      detectModalTopConfigInput.addEventListener("change", () => {
+        if (state.detectInProgress) {
+          return;
+        }
+        applySelectedTopConfig(detectModalTopConfigInput.value);
+      });
+      for (const helpButton of detectModalHelpButtons) {
+        helpButton.addEventListener("click", (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (state.detectInProgress) {
+            return;
+          }
+          toggleDetectModalHelp(helpButton.dataset.helpKey, helpButton);
+        });
+      }
       detectModal.addEventListener("pointerdown", (event) => {
+        const target = event.target;
+        if (target instanceof Element) {
+          if (!target.closest(".field-help-btn") && !target.closest("#detect-modal-help-cloud")) {
+            hideDetectModalHelp();
+          }
+        }
         if (event.target === detectModal && !state.detectInProgress) {
           closeDetectModal();
         }

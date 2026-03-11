@@ -292,6 +292,39 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3])
         self.assertEqual([int(row["id"]) for row in page_layouts], [int(third["id"]), int(first["id"]), int(second["id"])])
 
+    def test_patch_layout_reorders_sparse_orders_without_unique_constraint_collision(self) -> None:
+        self._write_image("layout/reorder-sparse-patch.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        created = []
+        for order in range(1, 7):
+            layout = main.create_page_layout(
+                page_id,
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=order,
+                    bbox=main.BBoxPayload(
+                        x1=0.1,
+                        y1=min(0.95, 0.05 * order),
+                        x2=0.4,
+                        y2=min(0.99, 0.05 * order + 0.03),
+                    ),
+                ),
+            )["layout"]
+            created.append(layout)
+
+        main.remove_layout(int(created[0]["id"]))
+        main.remove_layout(int(created[1]["id"]))
+
+        target_id = int(created[5]["id"])
+        patched = main.patch_layout(target_id, main.UpdateLayoutRequest(reading_order=1))["layout"]
+        self.assertEqual(int(patched["reading_order"]), 1)
+
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3, 4])
+        self.assertEqual(len({int(row["reading_order"]) for row in page_layouts}), 4)
+
     def test_get_activity_snapshot_starts_worker_when_jobs_queued(self) -> None:
         now = main._utc_now()
         with db.get_session() as session:

@@ -230,7 +230,11 @@ def _normalize_page_reading_orders(session, page_id: int) -> None:
     if current == desired:
         return
 
-    offset = len(rows) + 1
+    # Use a disjoint temporary range to avoid UNIQUE(page_id, reading_order)
+    # collisions while reshuffling sparse/non-contiguous orders.
+    current_max = max(current)
+    final_max = len(rows)
+    offset = max(current_max, final_max) + 1
     for index, row in enumerate(rows, start=1):
         row.reading_order = offset + index
     session.flush()
@@ -266,7 +270,9 @@ def _move_layout_to_reading_order(session, layout: Layout, requested_order: int)
     ordered_ids.insert(target_order - 1, layout_id)
 
     final_order_by_id = {row_id: index + 1 for index, row_id in enumerate(ordered_ids)}
-    offset = total + 1
+    current_max = max(int(row.reading_order) for row in rows)
+    final_max = total
+    offset = max(current_max, final_max) + 1
     for row in rows:
         row.reading_order = int(final_order_by_id[int(row.id)]) + offset
     session.flush()
