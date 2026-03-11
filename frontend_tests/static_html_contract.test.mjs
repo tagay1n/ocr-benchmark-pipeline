@@ -94,6 +94,8 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(pageModule.includes("box-bind-btn"), true);
   assert.equal(pageModule.includes("caption-bind-chip-remove"), true);
   assert.equal(pageModule.includes("layout-show-bbox-btn"), true);
+  assert.equal(pageModule.includes('event.key === "Insert"'), true);
+  assert.equal(pageModule.includes('event.key === "Delete"'), true);
   assert.equal(pageModule.includes('"/static/js/magnifier.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/layout_class_catalog.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/layout_review_api.mjs"'), true);

@@ -139,6 +139,7 @@
         drawModeActive: false,
         drawPointerId: null,
         drawStartPoint: null,
+        drawPreviewBBox: null,
         draggingLayoutId: null,
         dragOverLayoutId: null,
         dragOverPosition: null,
@@ -155,6 +156,8 @@
           fallback: MAGNIFIER_ZOOM_DEFAULT,
         }),
       };
+      let cursorGuideHorizontal = null;
+      let cursorGuideVertical = null;
 
       function updateMagnifierToggleUi() {
         if (!(magnifierToggleBtn instanceof HTMLButtonElement)) {
@@ -199,8 +202,8 @@
           state.magnifierZoom = Number(zoom);
           writeStorage(STORAGE_KEYS.magnifierZoom, zoom);
         },
-        getOverlayItems: () =>
-          state.layouts.map((layout) => {
+        getOverlayItems: () => {
+          const items = state.layouts.map((layout) => {
             const layoutId = Number(layout.id);
             const color = colorForClass(layout.class_name);
             const selected = layoutId === Number(state.selectedLayoutId);
@@ -210,7 +213,18 @@
               fill: selected ? hexToRgba(color, 0.2) : "",
               lineWidth: selected ? 2 : 1.3,
             };
-          }),
+          });
+          if (state.drawModeActive && state.drawPreviewBBox) {
+            items.push({
+              bbox: state.drawPreviewBBox,
+              stroke: "#0b7a75",
+              fill: "rgba(11, 122, 117, 0.12)",
+              lineWidth: 1.8,
+              dash: [5, 3],
+            });
+          }
+          return items;
+        },
       });
 
       function setMagnifierEnabled(enabled) {
@@ -920,6 +934,41 @@
         applyActivePointHighlightStyles();
       }
 
+      function hideCursorGuides() {
+        if (cursorGuideHorizontal instanceof HTMLElement) {
+          cursorGuideHorizontal.hidden = true;
+        }
+        if (cursorGuideVertical instanceof HTMLElement) {
+          cursorGuideVertical.hidden = true;
+        }
+      }
+
+      function updateCursorGuidesFromPointerEvent(event) {
+        if (!(event instanceof PointerEvent)) {
+          return;
+        }
+        if (!(cursorGuideHorizontal instanceof HTMLElement) || !(cursorGuideVertical instanceof HTMLElement)) {
+          return;
+        }
+        const rect = overlay.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+          hideCursorGuides();
+          return;
+        }
+        const localX = event.clientX - rect.left;
+        const localY = event.clientY - rect.top;
+        if (localX < 0 || localY < 0 || localX > rect.width || localY > rect.height) {
+          hideCursorGuides();
+          return;
+        }
+        const x = Math.round(Math.max(0, Math.min(rect.width, localX)));
+        const y = Math.round(Math.max(0, Math.min(rect.height, localY)));
+        cursorGuideHorizontal.style.top = `${y}px`;
+        cursorGuideVertical.style.left = `${x}px`;
+        cursorGuideHorizontal.hidden = false;
+        cursorGuideVertical.hidden = false;
+      }
+
       function clearActivePointHighlight(layoutId, handle) {
         const current = state.activePointHighlight;
         if (!current) {
@@ -1026,6 +1075,57 @@
         if (!changed) {
           return false;
         }
+        persistLayoutDraftState();
+        renderLayouts();
+        return true;
+      }
+
+      function markLayoutDeleted(layoutId) {
+        const normalizedLayoutId = Number(layoutId);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return false;
+        }
+        const removedLayout = state.layouts.find((row) => Number(row.id) === normalizedLayoutId) || null;
+        if (!removedLayout) {
+          return false;
+        }
+        const removedOrder = removedLayout.reading_order;
+
+        state.deletedLayoutIds.add(normalizedLayoutId);
+        delete state.localEditsById[String(normalizedLayoutId)];
+        delete state.captionBindingsByCaptionId[String(normalizedLayoutId)];
+        if (Number(state.activeBindingCaptionId) === normalizedLayoutId) {
+          state.activeBindingCaptionId = null;
+        }
+        for (const [captionId, targetIds] of Object.entries(state.captionBindingsByCaptionId)) {
+          state.captionBindingsByCaptionId[captionId] = normalizeLayoutIdList(targetIds).filter(
+            (targetId) => targetId !== normalizedLayoutId,
+          );
+        }
+
+        const remainingLayouts = state.layouts.filter((row) => Number(row.id) !== normalizedLayoutId);
+        const { layouts: compactedLayouts, shiftedIds } = compactReadingOrdersAfterDeletion(
+          remainingLayouts,
+          removedOrder,
+        );
+        state.layouts = compactedLayouts;
+
+        for (const shiftedId of shiftedIds) {
+          const shiftedLayout = state.layouts.find((row) => Number(row.id) === Number(shiftedId));
+          if (!shiftedLayout) {
+            continue;
+          }
+          const shiftedDraft = toDraftShape(shiftedLayout);
+          const shiftedServer = state.serverLayoutsById[String(shiftedId)];
+          const shiftedBaseline = shiftedServer ? toDraftShape(shiftedServer) : shiftedDraft;
+          if (sameDraft(shiftedDraft, shiftedBaseline)) {
+            delete state.localEditsById[String(shiftedId)];
+          } else {
+            state.localEditsById[String(shiftedId)] = shiftedDraft;
+          }
+          state.deletedLayoutIds.delete(Number(shiftedId));
+        }
+
         persistLayoutDraftState();
         renderLayouts();
         return true;
@@ -1286,6 +1386,21 @@
         const overlapLayer = document.createElement("div");
         overlapLayer.className = "overlap-layer";
         overlay.appendChild(overlapLayer);
+        const cursorGuidesLayer = document.createElement("div");
+        cursorGuidesLayer.id = "cursor-guides-layer";
+        const horizontalGuide = document.createElement("div");
+        horizontalGuide.className = "cursor-guide-line horizontal";
+        horizontalGuide.style.width = `${overlayWidth}px`;
+        horizontalGuide.hidden = true;
+        const verticalGuide = document.createElement("div");
+        verticalGuide.className = "cursor-guide-line vertical";
+        verticalGuide.style.height = `${overlayHeight}px`;
+        verticalGuide.hidden = true;
+        cursorGuidesLayer.appendChild(horizontalGuide);
+        cursorGuidesLayer.appendChild(verticalGuide);
+        overlay.appendChild(cursorGuidesLayer);
+        cursorGuideHorizontal = horizontalGuide;
+        cursorGuideVertical = verticalGuide;
 
         const activeBindingCaptionId = Number(state.activeBindingCaptionId);
         const activeBindingTargetIds = Number.isInteger(activeBindingCaptionId) && activeBindingCaptionId > 0
@@ -2035,43 +2150,9 @@
         deleteBtn.setAttribute("aria-label", "Delete layout");
         deleteBtn.textContent = "🗑";
         deleteBtn.addEventListener("click", () => {
-          const removedLayout = state.layouts.find((row) => Number(row.id) === layoutId) || null;
-          const removedOrder = removedLayout?.reading_order;
-
-          state.deletedLayoutIds.add(layoutId);
-          delete state.localEditsById[String(layoutId)];
-          delete state.captionBindingsByCaptionId[String(layoutId)];
-          for (const [captionId, targetIds] of Object.entries(state.captionBindingsByCaptionId)) {
-            state.captionBindingsByCaptionId[captionId] = normalizeLayoutIdList(targetIds).filter(
-              (targetId) => targetId !== layoutId,
-            );
+          if (!markLayoutDeleted(layoutId)) {
+            return;
           }
-
-          const remainingLayouts = state.layouts.filter((row) => Number(row.id) !== layoutId);
-          const { layouts: compactedLayouts, shiftedIds } = compactReadingOrdersAfterDeletion(
-            remainingLayouts,
-            removedOrder,
-          );
-          state.layouts = compactedLayouts;
-
-          for (const shiftedId of shiftedIds) {
-            const shiftedLayout = state.layouts.find((row) => Number(row.id) === Number(shiftedId));
-            if (!shiftedLayout) {
-              continue;
-            }
-            const shiftedDraft = toDraftShape(shiftedLayout);
-            const shiftedServer = state.serverLayoutsById[String(shiftedId)];
-            const shiftedBaseline = shiftedServer ? toDraftShape(shiftedServer) : shiftedDraft;
-            if (sameDraft(shiftedDraft, shiftedBaseline)) {
-              delete state.localEditsById[String(shiftedId)];
-            } else {
-              state.localEditsById[String(shiftedId)] = shiftedDraft;
-            }
-            state.deletedLayoutIds.delete(Number(shiftedId));
-          }
-
-          persistLayoutDraftState();
-          renderLayouts();
           setStatus("Layout marked for deletion. It will be deleted after review.");
         });
         actionsWrap.appendChild(deleteBtn);
@@ -2480,7 +2561,9 @@
       }
 
       function clearDrawPreview() {
+        state.drawPreviewBBox = null;
         drawPreviewBox.hidden = true;
+        imageMagnifier.refresh();
       }
 
       function resetDrawInteraction() {
@@ -2534,6 +2617,20 @@
         drawPreviewBox.style.width = `${width}px`;
         drawPreviewBox.style.height = `${height}px`;
         drawPreviewBox.hidden = false;
+        if (startPoint.width > 0 && startPoint.height > 0) {
+          const x1 = roundTo4(clamp(left / startPoint.width, 0, 1));
+          const y1 = roundTo4(clamp(top / startPoint.height, 0, 1));
+          const x2 = roundTo4(clamp((left + width) / startPoint.width, 0, 1));
+          const y2 = roundTo4(clamp((top + height) / startPoint.height, 0, 1));
+          if (x2 > x1 && y2 > y1) {
+            state.drawPreviewBBox = { x1, y1, x2, y2 };
+          } else {
+            state.drawPreviewBBox = null;
+          }
+        } else {
+          state.drawPreviewBBox = null;
+        }
+        imageMagnifier.refresh();
       }
 
       async function createLayoutFromBBox(bbox) {
@@ -2678,6 +2775,7 @@
       }
 
       drawLayer.addEventListener("pointermove", (event) => {
+        updateCursorGuidesFromPointerEvent(event);
         if (!state.drawModeActive) {
           return;
         }
@@ -2751,6 +2849,19 @@
         drawLayer.releasePointerCapture?.(event.pointerId);
         resetDrawInteraction();
       });
+      imageViewport.addEventListener("pointermove", (event) => {
+        updateCursorGuidesFromPointerEvent(event);
+      });
+      imageViewport.addEventListener("pointerleave", () => {
+        hideCursorGuides();
+      });
+      imageViewport.addEventListener(
+        "scroll",
+        () => {
+          hideCursorGuides();
+        },
+        { passive: true },
+      );
 
       detectBtn.addEventListener("click", async () => {
         if (state.drawModeActive) {
@@ -2976,6 +3087,43 @@
           toggleMagnifier();
           return;
         }
+        if (
+          event.key === "Insert" &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          detectModal.hidden &&
+          !isInteractiveShortcutTarget(event.target)
+        ) {
+          event.preventDefault();
+          if (state.activeBindingCaptionId !== null) {
+            setActiveBindingCaption(null);
+          }
+          toggleDrawMode();
+          return;
+        }
+        if (
+          event.key === "Delete" &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          detectModal.hidden &&
+          !state.drawModeActive &&
+          !isInteractiveShortcutTarget(event.target)
+        ) {
+          const selectedLayoutId = Number(state.selectedLayoutId);
+          if (!Number.isInteger(selectedLayoutId) || selectedLayoutId <= 0) {
+            return;
+          }
+          const deleted = markLayoutDeleted(selectedLayoutId);
+          if (deleted) {
+            event.preventDefault();
+            setStatus("Layout marked for deletion. It will be deleted after review.");
+          }
+          return;
+        }
         if (event.key === "Escape") {
           closeZoomMenu();
           if (!state.detectInProgress) {
@@ -3004,6 +3152,7 @@
       pageImage.addEventListener("load", () => {
         applyZoom();
         imageMagnifier.refresh();
+        hideCursorGuides();
       });
 
       if (typeof ResizeObserver !== "undefined") {

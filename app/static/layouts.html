@@ -593,6 +593,34 @@
         z-index: 3;
       }
 
+      #cursor-guides-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 4;
+      }
+
+      .cursor-guide-line {
+        position: absolute;
+        pointer-events: none;
+        background: rgba(33, 41, 47, 0.22);
+        opacity: 0.75;
+      }
+
+      .cursor-guide-line[hidden] {
+        display: none;
+      }
+
+      .cursor-guide-line.horizontal {
+        left: 0;
+        height: 1px;
+      }
+
+      .cursor-guide-line.vertical {
+        top: 0;
+        width: 1px;
+      }
+
       .overlap-segment {
         position: absolute;
         border-radius: 2px;
