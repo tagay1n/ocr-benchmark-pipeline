@@ -19,6 +19,8 @@ import {
   computeZoomScale,
   findMaxFittingFontSize,
   formatZoomPercent,
+  guessManualReadingOrderByY,
+  hasContiguousUniqueReadingOrders,
   isLayoutNotFoundErrorMessage,
   normalizeReviewHistory,
   normalizeZoomMode,
@@ -32,6 +34,7 @@ import {
   reconstructionLineHeight,
   reconstructionWordSpacing,
   reorderReadingOrderIds,
+  shiftDraftReadingOrdersAfterInsertion,
   updateReviewHistoryOnVisit,
   ZOOM_PRESET_PERCENTS,
 } from "../app/static/js/layout_review_utils.mjs";
@@ -323,6 +326,99 @@ test("nextManualReadingOrder appends after visible draft rows", () => {
       { id: null, reading_order: 10 },
     ]),
     3,
+  );
+});
+
+test("guessManualReadingOrderByY inserts before first layout lower on Y axis", () => {
+  const layouts = [
+    { id: 101, reading_order: 1, bbox: { y1: 0.05, y2: 0.12 } },
+    { id: 102, reading_order: 2, bbox: { y1: 0.20, y2: 0.28 } },
+    { id: 103, reading_order: 3, bbox: { y1: 0.40, y2: 0.48 } },
+  ];
+  assert.equal(
+    guessManualReadingOrderByY(layouts, { y1: 0.22, y2: 0.34 }),
+    3,
+  );
+});
+
+test("guessManualReadingOrderByY appends when bbox is below all existing layouts", () => {
+  const layouts = [
+    { id: 101, reading_order: 1, bbox: { y1: 0.05, y2: 0.12 } },
+    { id: 102, reading_order: 2, bbox: { y1: 0.20, y2: 0.28 } },
+  ];
+  assert.equal(
+    guessManualReadingOrderByY(layouts, { y1: 0.80, y2: 0.95 }),
+    3,
+  );
+});
+
+test("guessManualReadingOrderByY falls back when bbox is invalid", () => {
+  const layouts = [
+    { id: 101, reading_order: 1, bbox: { y1: 0.05, y2: 0.12 } },
+    { id: 102, reading_order: 2, bbox: { y1: 0.20, y2: 0.28 } },
+  ];
+  assert.equal(
+    guessManualReadingOrderByY(layouts, { y1: "oops", y2: 0.95 }),
+    3,
+  );
+});
+
+test("shiftDraftReadingOrdersAfterInsertion shifts edited rows at/after insertion point", () => {
+  const layouts = [
+    { id: 1, reading_order: 1 },
+    { id: 2, reading_order: 2 },
+    { id: 3, reading_order: 3 },
+    { id: 4, reading_order: 4 },
+  ];
+  const localEditsById = {
+    "2": { class_name: "text", reading_order: 2, bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } },
+    "4": { class_name: "text", reading_order: 4, bbox: { x1: 0.3, y1: 0.3, x2: 0.4, y2: 0.4 } },
+  };
+  const next = shiftDraftReadingOrdersAfterInsertion({
+    layouts,
+    localEditsById,
+    insertedOrder: 3,
+  });
+  assert.equal(next["2"].reading_order, 2);
+  assert.equal(next["4"].reading_order, 5);
+  assert.equal(localEditsById["4"].reading_order, 4);
+});
+
+test("shiftDraftReadingOrdersAfterInsertion ignores invalid insertion order", () => {
+  const localEditsById = {
+    "9": { class_name: "text", reading_order: 9, bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } },
+  };
+  const next = shiftDraftReadingOrdersAfterInsertion({
+    layouts: [{ id: 9, reading_order: 9 }],
+    localEditsById,
+    insertedOrder: null,
+  });
+  assert.equal(next["9"].reading_order, 9);
+});
+
+test("hasContiguousUniqueReadingOrders validates strict 1..N order uniqueness", () => {
+  assert.equal(
+    hasContiguousUniqueReadingOrders([
+      { id: 1, reading_order: 1 },
+      { id: 2, reading_order: 2 },
+      { id: 3, reading_order: 3 },
+    ]),
+    true,
+  );
+  assert.equal(
+    hasContiguousUniqueReadingOrders([
+      { id: 1, reading_order: 1 },
+      { id: 2, reading_order: 2 },
+      { id: 3, reading_order: 2 },
+    ]),
+    false,
+  );
+  assert.equal(
+    hasContiguousUniqueReadingOrders([
+      { id: 1, reading_order: 1 },
+      { id: 2, reading_order: 3 },
+    ]),
+    false,
   );
 });
 

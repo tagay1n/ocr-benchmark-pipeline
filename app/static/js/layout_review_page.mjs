@@ -7,16 +7,18 @@
         computeZoomScale,
         computeOverlayBadgeScale,
         filterReviewHistory,
+        guessManualReadingOrderByY,
+        hasContiguousUniqueReadingOrders,
         isLayoutNotFoundErrorMessage,
         mergeLayoutsForReview,
         nextHistoryPageId,
-        nextManualReadingOrder,
         normalizeReviewHistory,
         nextLayoutReviewUrl,
         normalizeZoomMode,
         pointHandleForCoordinateKey,
         previousHistoryPageId,
         reorderReadingOrderIds,
+        shiftDraftReadingOrdersAfterInsertion,
         ZOOM_PRESET_PERCENTS,
         updateReviewHistoryOnVisit,
       } from "/static/js/layout_review_utils.mjs";
@@ -72,6 +74,7 @@
         magnifierZoom: "layout.magnifier.zoom",
         reviewNavHistory: "layout.review_nav.history",
         reviewNavIndex: "layout.review_nav.index",
+        lastAddedClass: "layout.last_added_class",
       };
 
       const pageMeta = document.getElementById("page-meta");
@@ -155,6 +158,7 @@
           max: MAGNIFIER_ZOOM_MAX,
           fallback: MAGNIFIER_ZOOM_DEFAULT,
         }),
+        lastAddedClass: normalizeClassName(readStorage(STORAGE_KEYS.lastAddedClass)) || "text",
       };
       let cursorGuideHorizontal = null;
       let cursorGuideVertical = null;
@@ -685,6 +689,12 @@
         updateReviewUiState();
       }
 
+      function rememberLastAddedClass(className) {
+        const normalized = normalizeClassName(className) || "text";
+        state.lastAddedClass = normalized;
+        writeStorage(STORAGE_KEYS.lastAddedClass, normalized);
+      }
+
       function hexToRgba(hex, alpha) {
         const clean = hex.replace("#", "");
         const r = Number.parseInt(clean.slice(0, 2), 16);
@@ -1179,6 +1189,32 @@
           selectLayout(draggingLayoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
           setStatus("Draft saved locally. Order updated by drag-and-drop.");
         }
+      }
+
+      function moveLayoutToOrder(layoutId, requestedOrder) {
+        const normalizedLayoutId = Number(layoutId);
+        const desiredOrder = Number(requestedOrder);
+        if (
+          !Number.isInteger(normalizedLayoutId) ||
+          normalizedLayoutId <= 0 ||
+          !Number.isInteger(desiredOrder)
+        ) {
+          return false;
+        }
+        const orderedIds = layoutIdsInCurrentOrder();
+        const currentIndex = orderedIds.indexOf(normalizedLayoutId);
+        if (currentIndex < 0) {
+          return false;
+        }
+        const total = orderedIds.length;
+        const targetOrder = Math.max(1, Math.min(total, desiredOrder));
+        if (targetOrder === currentIndex + 1) {
+          return false;
+        }
+        const nextOrder = [...orderedIds];
+        nextOrder.splice(currentIndex, 1);
+        nextOrder.splice(targetOrder - 1, 0, normalizedLayoutId);
+        return applySequentialReadingOrder(nextOrder);
       }
 
       function rowDragStart(event, layoutId) {
@@ -1861,10 +1897,84 @@
 
         const orderTd = document.createElement("td");
         orderTd.className = "layout-order-col";
-        const orderValue = document.createElement("span");
-        orderValue.className = "layout-order-value";
-        orderValue.textContent = layout.reading_order === null ? "" : String(layout.reading_order);
-        orderTd.appendChild(orderValue);
+        const orderValueBtn = document.createElement("button");
+        orderValueBtn.type = "button";
+        orderValueBtn.className = "layout-order-value-btn";
+        orderValueBtn.textContent = layout.reading_order === null ? "" : String(layout.reading_order);
+
+        const orderEditInput = document.createElement("input");
+        orderEditInput.type = "text";
+        orderEditInput.inputMode = "numeric";
+        orderEditInput.pattern = "[0-9]*";
+        orderEditInput.className = "layout-order-edit-input";
+        orderEditInput.hidden = true;
+        orderEditInput.value = layout.reading_order === null ? "" : String(layout.reading_order);
+
+        function closeOrderEditor({ restore = false } = {}) {
+          if (restore) {
+            orderEditInput.value = layout.reading_order === null ? "" : String(layout.reading_order);
+          }
+          orderEditInput.hidden = true;
+          orderValueBtn.hidden = false;
+        }
+
+        function openOrderEditor() {
+          orderEditInput.max = String(Math.max(1, state.layouts.length));
+          orderEditInput.value = layout.reading_order === null ? "" : String(layout.reading_order);
+          orderValueBtn.hidden = true;
+          orderEditInput.hidden = false;
+          requestAnimationFrame(() => {
+            orderEditInput.focus();
+            orderEditInput.select();
+          });
+        }
+
+        function commitOrderEditorValue() {
+          const rawValue = String(orderEditInput.value || "").trim();
+          if (!rawValue) {
+            closeOrderEditor({ restore: true });
+            return;
+          }
+          const parsed = Number(rawValue);
+          if (!Number.isInteger(parsed)) {
+            closeOrderEditor({ restore: true });
+            return;
+          }
+          const changed = moveLayoutToOrder(layoutId, parsed);
+          if (changed) {
+            selectLayout(layoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
+            setStatus("Draft saved locally. Order updated.");
+            return;
+          }
+          closeOrderEditor({ restore: true });
+        }
+
+        orderValueBtn.addEventListener("click", () => {
+          openOrderEditor();
+        });
+        orderEditInput.addEventListener("focus", () => {
+          selectLayout(layoutId, { scrollImageToLayout: true });
+        });
+        orderEditInput.addEventListener("pointerdown", () => {
+          selectLayout(layoutId, { scrollImageToLayout: true });
+        });
+        orderEditInput.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commitOrderEditorValue();
+            return;
+          }
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closeOrderEditor({ restore: true });
+            return;
+          }
+        });
+        orderEditInput.addEventListener("blur", () => {
+          commitOrderEditorValue();
+        });
+        orderTd.appendChild(orderValueBtn);
+        orderTd.appendChild(orderEditInput);
         tr.appendChild(orderTd);
 
         const classTd = document.createElement("td");
@@ -1995,7 +2105,9 @@
         function applyDraftToInputs(draft) {
           classInput.value = draft.class_name;
           applyClassColorToSelect(classInput, draft.class_name);
-          orderValue.textContent = draft.reading_order === null ? "" : String(draft.reading_order);
+          orderValueBtn.textContent = draft.reading_order === null ? "" : String(draft.reading_order);
+          orderEditInput.value = draft.reading_order === null ? "" : String(draft.reading_order);
+          closeOrderEditor();
           bboxFields[0][1].value = toFixed(draft.bbox.x1);
           bboxFields[1][1].value = toFixed(draft.bbox.y1);
           bboxFields[2][1].value = toFixed(draft.bbox.x2);
@@ -2069,6 +2181,7 @@
 
         classInput.addEventListener("change", () => {
           applyClassColorToSelect(classInput, classInput.value);
+          rememberLastAddedClass(classInput.value);
           if (saveLocalDraft()) {
             renderLayouts();
           }
@@ -2214,6 +2327,10 @@
 
         state.layouts = merged.mergedLayouts;
         state.layoutsLoaded = true;
+        if (!hasContiguousUniqueReadingOrders(state.layouts)) {
+          applySequentialReadingOrder(layoutIdsInCurrentOrder());
+          return;
+        }
         persistLayoutDraftState();
         renderLayouts();
       }
@@ -2636,12 +2753,20 @@
       async function createLayoutFromBBox(bbox) {
         addBtn.disabled = true;
         try {
-          const nextReadingOrder = nextManualReadingOrder(state.layouts);
+          const nextReadingOrder = guessManualReadingOrderByY(state.layouts, bbox);
+          const className = normalizeClassName(state.lastAddedClass) || "text";
           const payload = await createPageLayout(pageId, {
-            class_name: "text",
+            class_name: className,
             reading_order: nextReadingOrder,
             bbox,
           });
+          state.localEditsById = shiftDraftReadingOrdersAfterInsertion({
+            layouts: state.layouts,
+            localEditsById: state.localEditsById,
+            insertedOrder: nextReadingOrder,
+          });
+          persistLayoutDraftState();
+          rememberLastAddedClass(className);
           setStatus("Manual layout added.");
           await loadPage();
           await loadLayouts();

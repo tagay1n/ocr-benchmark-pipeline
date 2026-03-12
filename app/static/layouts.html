@@ -454,10 +454,40 @@
       }
 
       .layout-order-col {
-        width: 2.4ch;
-        min-width: 2.4ch;
+        width: 3ch;
+        min-width: 3ch;
         text-align: right;
         vertical-align: top;
+      }
+
+      .layout-order-value-btn {
+        width: 100%;
+        min-width: 2ch;
+        border: none;
+        background: transparent;
+        padding: 2px 0;
+        margin: 0;
+        color: inherit;
+        text-align: right;
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum";
+        cursor: text;
+      }
+
+      .layout-order-edit-input {
+        width: 100%;
+        min-width: 2ch;
+        padding: 2px 0;
+        border: none;
+        border-bottom: 1px solid var(--border);
+        border-radius: 0;
+        background: transparent;
+        color: inherit;
+        text-align: right;
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        font-feature-settings: "tnum";
       }
 
       .layout-actions-col {
@@ -465,15 +495,6 @@
         min-width: 0;
         text-align: right;
         vertical-align: top;
-      }
-
-      .layout-order-value {
-        display: inline-block;
-        min-width: 2ch;
-        padding-top: 7px;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-        font-feature-settings: "tnum";
       }
 
       .layout-bbox-editor {

@@ -319,6 +319,119 @@ export function nextManualReadingOrder(layouts) {
   return Math.max(1, visibleCount + 1);
 }
 
+export function guessManualReadingOrderByY(layouts, bbox) {
+  const y1 = Number(bbox?.y1);
+  const y2 = Number(bbox?.y2);
+  if (!Number.isFinite(y1) || !Number.isFinite(y2)) {
+    return nextManualReadingOrder(layouts);
+  }
+  const newCenterY = (y1 + y2) / 2;
+  if (!Number.isFinite(newCenterY)) {
+    return nextManualReadingOrder(layouts);
+  }
+
+  const orderedLayouts = (Array.isArray(layouts) ? layouts : [])
+    .map((layout) => {
+      const order = Number(layout?.reading_order);
+      const ly1 = Number(layout?.bbox?.y1);
+      const ly2 = Number(layout?.bbox?.y2);
+      if (
+        !Number.isInteger(order) ||
+        order < 1 ||
+        !Number.isFinite(ly1) ||
+        !Number.isFinite(ly2)
+      ) {
+        return null;
+      }
+      return {
+        readingOrder: order,
+        centerY: (ly1 + ly2) / 2,
+      };
+    })
+    .filter((row) => row && Number.isFinite(row.centerY))
+    .sort((left, right) => left.readingOrder - right.readingOrder);
+
+  if (orderedLayouts.length === 0) {
+    return 1;
+  }
+
+  for (const layout of orderedLayouts) {
+    if (newCenterY < layout.centerY) {
+      return layout.readingOrder;
+    }
+  }
+  return orderedLayouts.length + 1;
+}
+
+export function shiftDraftReadingOrdersAfterInsertion({
+  layouts,
+  localEditsById,
+  insertedOrder,
+}) {
+  const threshold = Number(insertedOrder);
+  if (!Number.isInteger(threshold) || threshold < 1) {
+    return { ...(localEditsById || {}) };
+  }
+  const nextEdits = { ...(localEditsById || {}) };
+  const orderedLayouts = (Array.isArray(layouts) ? layouts : [])
+    .map((layout) => {
+      const layoutId = Number(layout?.id);
+      const readingOrder = Number(layout?.reading_order);
+      if (!Number.isInteger(layoutId) || layoutId <= 0 || !Number.isInteger(readingOrder)) {
+        return null;
+      }
+      return { id: layoutId, readingOrder };
+    })
+    .filter((item) => item !== null)
+    .sort((left, right) => {
+      if (left.readingOrder !== right.readingOrder) {
+        return left.readingOrder - right.readingOrder;
+      }
+      return left.id - right.id;
+    });
+
+  for (const item of orderedLayouts) {
+    if (item.readingOrder < threshold) {
+      continue;
+    }
+    const key = String(item.id);
+    const existingDraft = nextEdits[key];
+    if (!existingDraft || typeof existingDraft !== "object") {
+      continue;
+    }
+    nextEdits[key] = {
+      ...existingDraft,
+      reading_order: item.readingOrder + 1,
+    };
+  }
+  return nextEdits;
+}
+
+export function hasContiguousUniqueReadingOrders(layouts) {
+  const rows = (Array.isArray(layouts) ? layouts : [])
+    .map((layout) => ({
+      id: Number(layout?.id),
+      readingOrder: Number(layout?.reading_order),
+    }))
+    .filter((row) => Number.isInteger(row.id) && row.id > 0);
+  if (rows.length === 0) {
+    return true;
+  }
+  if (rows.some((row) => !Number.isInteger(row.readingOrder) || row.readingOrder < 1)) {
+    return false;
+  }
+  const orders = rows.map((row) => row.readingOrder).sort((left, right) => left - right);
+  if (new Set(orders).size !== orders.length) {
+    return false;
+  }
+  for (let index = 0; index < orders.length; index += 1) {
+    if (orders[index] !== index + 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function reorderReadingOrderIds({
   orderedIds,
   draggedId,
