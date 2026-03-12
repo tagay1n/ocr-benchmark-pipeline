@@ -10,17 +10,15 @@ from ..discovery import discover_images
 from ..layouts import get_page
 from ..models import DuplicateFile, Page
 from ..pipeline_constants import (
-    EVENT_JOBS_ENQUEUED,
     EVENT_SCAN_FINISHED,
     EVENT_SCAN_STARTED,
     STAGE_DISCOVERY,
-    STAGE_LAYOUT_DETECT,
 )
-from ..pipeline_runtime import emit_event, enqueue_layout_detection_for_new_pages as _enqueue_layout_detection_for_new_pages
-from ..runtime_options import should_auto_detect_layouts_after_discovery
+from ..pipeline_runtime import emit_event
 
 
 LAYOUT_REVIEW_QUEUE_STATUS = "layout_detected"
+LAYOUT_REVIEW_QUEUE_STATUSES = ("layout_detected", "new")
 OCR_REVIEW_QUEUE_STATUS = "ocr_done"
 
 
@@ -29,12 +27,6 @@ def _settings():
     from ..config import settings as default_settings
 
     return getattr(main_module, "settings", default_settings)
-
-
-def _enqueue_layout_detection_for_new_pages_dynamic():
-    from .. import main as main_module
-
-    return getattr(main_module, "enqueue_layout_detection_for_new_pages", _enqueue_layout_detection_for_new_pages)
 
 
 def _utc_now() -> str:
@@ -108,25 +100,12 @@ def run_discovery_scan_with_events(
     return payload
 
 
-def emit_auto_layout_enqueue_event(*, trigger: str, context_label: str) -> dict[str, int]:
-    auto = _enqueue_layout_detection_for_new_pages_dynamic()()
-    emit_event(
-        stage=STAGE_LAYOUT_DETECT,
-        event_type=EVENT_JOBS_ENQUEUED,
-        message=f"Auto-enqueued {auto['queued']} layout detection jobs after {context_label}.",
-        data={"trigger": trigger, **auto},
-    )
-    return auto
-
-
 def run_startup_scan() -> None:
     run_discovery_scan_with_events(
         trigger="startup",
         started_message="Startup discovery scan started",
         finished_prefix="Startup discovery scan finished.",
     )
-    if should_auto_detect_layouts_after_discovery():
-        emit_auto_layout_enqueue_event(trigger="startup", context_label="startup discovery")
 
 
 def _next_page_response_from_row(row: tuple[object, ...] | None) -> dict[str, object]:
@@ -153,6 +132,39 @@ def next_page_for_status(
             select(Page.id, Page.rel_path)
             .where(Page.is_missing.is_(False))
             .where(Page.status == status)
+        )
+        if current_page_id is None:
+            row = session.execute(base_query.order_by(Page.id.asc()).limit(1)).first()
+            return _next_page_response_from_row(row)
+
+        row = session.execute(
+            base_query.where(Page.id > current_page_id).order_by(Page.id.asc()).limit(1)
+        ).first()
+        if row is None:
+            row = session.execute(
+                base_query.where(Page.id < current_page_id).order_by(Page.id.asc()).limit(1)
+            ).first()
+    return _next_page_response_from_row(row)
+
+
+def next_page_for_statuses(
+    *,
+    statuses: list[str] | tuple[str, ...],
+    current_page_id: int | None = None,
+) -> dict[str, object]:
+    normalized_statuses = tuple(
+        str(status).strip()
+        for status in (statuses or [])
+        if str(status).strip()
+    )
+    if not normalized_statuses:
+        return _next_page_response_from_row(None)
+
+    with get_session() as session:
+        base_query = (
+            select(Page.id, Page.rel_path)
+            .where(Page.is_missing.is_(False))
+            .where(Page.status.in_(normalized_statuses))
         )
         if current_page_id is None:
             row = session.execute(base_query.order_by(Page.id.asc()).limit(1)).first()

@@ -21,8 +21,6 @@ from ..pipeline_constants import (
     EVENT_EXPORT_FAILED,
     EVENT_EXPORT_STARTED,
     EVENT_JOB_COMPLETED,
-    EVENT_JOB_ENQUEUED,
-    EVENT_JOB_ENQUEUE_SKIPPED,
     EVENT_JOB_FAILED,
     EVENT_JOB_STARTED,
     EVENT_MANUAL_DETECT_COMPLETED,
@@ -37,8 +35,7 @@ from ..pipeline_constants import (
     STAGE_OCR_EXTRACT,
     STAGE_OCR_REVIEW,
 )
-from ..pipeline_runtime import emit_event, enqueue_job as _enqueue_job
-from ..runtime_options import should_auto_extract_text_after_layout_review
+from ..pipeline_runtime import emit_event
 from ..db import get_session
 from .schemas import (
     CreateLayoutRequest,
@@ -50,11 +47,12 @@ from .schemas import (
     UpdateOcrOutputRequest,
 )
 from .shared import (
-    LAYOUT_REVIEW_QUEUE_STATUS,
+    LAYOUT_REVIEW_QUEUE_STATUSES,
     OCR_REVIEW_QUEUE_STATUS,
     _utc_now,
     ensure_page_exists_or_404,
     next_page_for_status,
+    next_page_for_statuses,
 )
 
 router = APIRouter()
@@ -64,12 +62,6 @@ def _extract_ocr_for_page_dynamic():
     from .. import main as main_module
 
     return getattr(main_module, "extract_ocr_for_page", _extract_ocr_for_page)
-
-
-def _enqueue_job_dynamic():
-    from .. import main as main_module
-
-    return getattr(main_module, "enqueue_job", _enqueue_job)
 
 
 def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
@@ -191,7 +183,7 @@ def page_layouts(page_id: int) -> dict[str, object]:
 
 @router.get("/api/layout-review/next")
 def next_layout_review_page_global() -> dict[str, object]:
-    return next_page_for_status(status=LAYOUT_REVIEW_QUEUE_STATUS)
+    return next_page_for_statuses(statuses=LAYOUT_REVIEW_QUEUE_STATUSES)
 
 
 @router.get("/api/ocr-review/next")
@@ -202,7 +194,7 @@ def next_ocr_review_page_global() -> dict[str, object]:
 @router.get("/api/pages/{page_id}/layout-review-next")
 def next_layout_review_page(page_id: int) -> dict[str, object]:
     ensure_page_exists_or_404(page_id)
-    return next_page_for_status(status=LAYOUT_REVIEW_QUEUE_STATUS, current_page_id=page_id)
+    return next_page_for_statuses(statuses=LAYOUT_REVIEW_QUEUE_STATUSES, current_page_id=page_id)
 
 
 @router.get("/api/pages/{page_id}/ocr-review-next")
@@ -321,24 +313,6 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
         message="Layout review completed.",
         data={"layout_count": result["layout_count"]},
     )
-    if should_auto_extract_text_after_layout_review():
-        enqueued = _enqueue_job_dynamic()(STAGE_OCR_EXTRACT, page_id=page_id, payload={"trigger": "layout_review_complete"})
-        if enqueued:
-            emit_event(
-                stage=STAGE_OCR_EXTRACT,
-                event_type=EVENT_JOB_ENQUEUED,
-                page_id=page_id,
-                message="Queued OCR extraction after layout review completion.",
-                data={"trigger": "layout_review_complete"},
-            )
-        else:
-            emit_event(
-                stage=STAGE_OCR_EXTRACT,
-                event_type=EVENT_JOB_ENQUEUE_SKIPPED,
-                page_id=page_id,
-                message="Skipped queuing OCR extraction because a job is already queued or running.",
-                data={"trigger": "layout_review_complete"},
-            )
     return result
 
 

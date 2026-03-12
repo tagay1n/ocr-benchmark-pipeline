@@ -1049,12 +1049,12 @@ class PipelineStagesTests(unittest.TestCase):
         main.scan_images()
 
         payload = main.next_layout_review_page_global()
-        self.assertFalse(payload["has_next"])
-        self.assertIsNone(payload["next_page_id"])
+        self.assertTrue(payload["has_next"])
 
         pages = main.list_pages()["pages"]
         page_ids = [int(page["id"]) for page in pages]
         self.assertGreaterEqual(len(page_ids), 2)
+        self.assertEqual(payload["next_page_id"], min(page_ids))
         for page_id in page_ids:
             main.create_page_layout(
                 page_id,
