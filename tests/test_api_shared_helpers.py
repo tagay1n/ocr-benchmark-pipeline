@@ -73,7 +73,7 @@ class ApiSharedHelpersTests(unittest.TestCase):
         self.assertIn("Unit scan started", str(events[-2].message))
         self.assertIn("Unit scan finished", str(events[-1].message))
 
-    def test_next_page_for_status_handles_empty_and_wraparound(self) -> None:
+    def test_next_page_for_status_handles_empty_and_no_wraparound(self) -> None:
         self._write_image("helpers/one.png", b"x")
         self._write_image("helpers/two.png", b"y")
         main.scan_images()
@@ -95,9 +95,9 @@ class ApiSharedHelpersTests(unittest.TestCase):
         self.assertTrue(direct["has_next"])
         self.assertEqual(direct["next_page_id"], first_id)
 
-        wrapped = shared.next_page_for_status(status="layout_detected", current_page_id=second_id)
-        self.assertTrue(wrapped["has_next"])
-        self.assertEqual(wrapped["next_page_id"], first_id)
+        after_last = shared.next_page_for_status(status="layout_detected", current_page_id=second_id)
+        self.assertFalse(after_last["has_next"])
+        self.assertIsNone(after_last["next_page_id"])
 
         main.complete_layout_review(first_id)
         main.complete_layout_review(second_id)

@@ -127,6 +127,7 @@
       const historyForthBtn = document.getElementById("history-forth-btn");
       const reextractModal = document.getElementById("reextract-modal");
       const reextractModalLayoutsContainer = document.getElementById("reextract-modal-layouts");
+      const reextractModalSelectAllInput = document.getElementById("reextract-modal-select-all");
       const reextractModalTemperatureInput = document.getElementById("reextract-modal-temperature");
       const reextractModalMaxRetriesInput = document.getElementById("reextract-modal-max-retries");
       const reextractModalCancelBtn = document.getElementById("reextract-modal-cancel-btn");
@@ -159,11 +160,14 @@
         serverOutputsByLayoutId: {},
         localEditsByLayoutId: {},
         selectedLayoutId: null,
+        explicitSelectedLayoutId: null,
         reextractHoverLayoutId: null,
         hoveredLine: null,
         expandedEditorLayoutId: null,
         reviewSubmitInProgress: false,
         reextractInProgress: false,
+        reextractProgressCurrent: 0,
+        reextractProgressTotal: 0,
         reconstructedRenderMode: "markdown",
         zoomMode: "automatic",
         zoomPercent: 100,
@@ -1393,7 +1397,7 @@
         if (String(output.output_format || "").toLowerCase() === "skip") {
           return;
         }
-        selectOutput(normalized, { scrollImageToLayout: true });
+        selectOutput(normalized, { scrollImageToLayout: true, isUserSelection: true });
         state.expandedEditorLayoutId = normalized;
         expandedEditor.hidden = false;
         const content = String(output.content ?? "");
@@ -1570,6 +1574,9 @@
         reextractModalCancelBtn.disabled = inProgress;
         reextractModalTemperatureInput.disabled = inProgress;
         reextractModalMaxRetriesInput.disabled = inProgress;
+        if (reextractModalSelectAllInput instanceof HTMLInputElement) {
+          reextractModalSelectAllInput.disabled = inProgress;
+        }
         const layoutInputs = reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]');
         for (const checkbox of layoutInputs) {
           checkbox.disabled = inProgress;
@@ -1602,7 +1609,7 @@
       }
 
       function defaultReextractSelection(layouts) {
-        const selectedLayoutId = Number(state.selectedLayoutId);
+        const selectedLayoutId = Number(state.explicitSelectedLayoutId);
         if (
           Number.isInteger(selectedLayoutId) &&
           selectedLayoutId > 0 &&
@@ -1613,12 +1620,43 @@
         return new Set(layouts.map((layout) => Number(layout.id)));
       }
 
+      function updateReextractModalSelectAllState() {
+        if (!(reextractModalSelectAllInput instanceof HTMLInputElement)) {
+          return;
+        }
+        const checkboxes = Array.from(
+          reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]'),
+        );
+        if (checkboxes.length === 0) {
+          reextractModalSelectAllInput.checked = false;
+          reextractModalSelectAllInput.indeterminate = false;
+          reextractModalSelectAllInput.disabled = true;
+          return;
+        }
+        const checkedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+        reextractModalSelectAllInput.disabled = state.reextractInProgress;
+        reextractModalSelectAllInput.checked = checkedCount === checkboxes.length;
+        reextractModalSelectAllInput.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+      }
+
+      function updateReextractModalRunButtonLabel() {
+        if (state.reextractInProgress) {
+          const current = Math.max(0, Number(state.reextractProgressCurrent) || 0);
+          const total = Math.max(0, Number(state.reextractProgressTotal) || 0);
+          reextractModalRunBtn.textContent = `Processing ${Math.min(current, total)}/${total}`;
+          return;
+        }
+        reextractModalRunBtn.textContent = "Run";
+      }
+
       function updateReextractModalRunButtonState() {
         const checkboxes = Array.from(
           reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]'),
         );
         const checkedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
         reextractModalRunBtn.disabled = state.reextractInProgress || checkboxes.length === 0 || checkedCount === 0;
+        updateReextractModalSelectAllState();
+        updateReextractModalRunButtonLabel();
       }
 
       function renderReextractLayoutOptions() {
@@ -1698,12 +1736,14 @@
         if (state.reviewSubmitInProgress || state.reextractInProgress) {
           return;
         }
+        state.reextractProgressCurrent = 0;
+        state.reextractProgressTotal = 0;
         renderReextractLayoutOptions();
         reextractModal.hidden = false;
       }
 
-      function closeReextractModal() {
-        if (state.reextractInProgress) {
+      function closeReextractModal(force = false) {
+        if (state.reextractInProgress && !force) {
           return;
         }
         setReextractHoveredLayout(null);
@@ -1727,7 +1767,7 @@
           .map((checkbox) => Number(checkbox.value))
           .filter((value) => Number.isInteger(value) && value > 0);
         if (layoutIds.length === 0) {
-          throw new Error("Select at least one layout to detect.");
+          throw new Error("Select at least one layout to process.");
         }
 
         return {
@@ -2412,11 +2452,14 @@
         });
       }
 
-      function selectOutput(layoutId, { scrollImageToLayout = false } = {}) {
+      function selectOutput(layoutId, { scrollImageToLayout = false, isUserSelection = false } = {}) {
         const normalized = Number(layoutId);
         if (!Number.isInteger(normalized) || normalized <= 0) return;
         if (!outputByLayoutId(normalized)) return;
         state.selectedLayoutId = normalized;
+        if (isUserSelection) {
+          state.explicitSelectedLayoutId = normalized;
+        }
         applySelectedStyles();
         if (scrollImageToLayout) {
           ensureLayoutVisible(normalized);
@@ -2823,7 +2866,7 @@
           item.style.borderColor = hexToRgba(color, 0.6);
           item.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) return;
-            selectOutput(output.layout_id);
+            selectOutput(output.layout_id, { isUserSelection: true });
           });
           item.addEventListener("dblclick", (event) => {
             event.preventDefault();
@@ -2919,7 +2962,7 @@
           box.style.background = hexToRgba(color, 0.16);
           box.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) return;
-            selectOutput(output.layout_id);
+            selectOutput(output.layout_id, { isUserSelection: true });
           });
           box.addEventListener("dblclick", (event) => {
             event.preventDefault();
@@ -3179,15 +3222,45 @@
           return;
         }
 
+        const selectedLayoutIds = Array.isArray(payloadBody?.layout_ids)
+          ? payloadBody.layout_ids
+              .map((value) => Number(value))
+              .filter((value) => Number.isInteger(value) && value > 0)
+          : [];
+        if (selectedLayoutIds.length === 0) {
+          setStatus("Reextraction failed: Select at least one layout to process.", { isError: true });
+          return;
+        }
+
         state.reextractInProgress = true;
+        state.reextractProgressCurrent = 0;
+        state.reextractProgressTotal = selectedLayoutIds.length;
         setReextractModalBusy(true);
         updateReviewUiState();
 
         const selectedLayoutId = Number(state.selectedLayoutId);
         let shouldCloseModal = false;
+        const summary = {
+          extracted: 0,
+          skipped: 0,
+          requests: 0,
+        };
         try {
-          const result = await reextractPageOcr(state.pageId, payloadBody);
+          for (let index = 0; index < selectedLayoutIds.length; index += 1) {
+            const layoutId = selectedLayoutIds[index];
+            state.reextractProgressCurrent = index + 1;
+            updateReextractModalRunButtonState();
+            const result = await reextractPageOcr(state.pageId, {
+              ...payloadBody,
+              layout_ids: [layoutId],
+            });
+            summary.extracted += Number(result?.extracted_count || 0);
+            summary.skipped += Number(result?.skipped_count || 0);
+            summary.requests += Number(result?.requests_count || 0);
+          }
+
           shouldCloseModal = true;
+          closeReextractModal(true);
 
           clearDraftState();
           await loadPageData();
@@ -3207,12 +3280,14 @@
           await loadForthAvailability();
 
           setStatus(
-            `Reextraction finished. Extracted: ${result.extracted_count}, skipped: ${result.skipped_count}, requests: ${result.requests_count}.`,
+            `Reextraction finished. Extracted: ${summary.extracted}, skipped: ${summary.skipped}, requests: ${summary.requests}.`,
           );
         } catch (error) {
           setStatus(`Reextraction failed: ${error.message}`, { isError: true });
         } finally {
           state.reextractInProgress = false;
+          state.reextractProgressCurrent = 0;
+          state.reextractProgressTotal = 0;
           setReextractModalBusy(false);
           updateReviewUiState();
           if (shouldCloseModal) {
@@ -3475,6 +3550,17 @@
 
       reextractBtn.addEventListener("click", () => {
         openReextractModal();
+      });
+      reextractModalSelectAllInput?.addEventListener("change", () => {
+        if (state.reextractInProgress) {
+          return;
+        }
+        const checked = Boolean(reextractModalSelectAllInput.checked);
+        const checkboxes = reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]');
+        for (const checkbox of checkboxes) {
+          checkbox.checked = checked;
+        }
+        updateReextractModalRunButtonState();
       });
       renderMarkdownBtn.addEventListener("click", () => {
         setReconstructedRenderMode("markdown");

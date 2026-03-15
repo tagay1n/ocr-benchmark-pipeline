@@ -117,8 +117,10 @@ def mark_ocr_reviewed(page_id: int) -> dict[str, Any]:
         raise ValueError("Page is marked as missing and cannot be reviewed.")
 
     status = str(page.get("status") or "")
-    if status not in {"ocr_done", "ocr_reviewed"}:
-        raise ValueError(f"Page status must be ocr_done for OCR review (got {status}).")
+    if status not in {"ocr_done", "ocr_reviewed", "ocr_failed"}:
+        raise ValueError(
+            f"Page status must allow OCR review (expected ocr_done/ocr_reviewed/ocr_failed, got {status})."
+        )
 
     with get_session() as session:
         outputs_count = int(

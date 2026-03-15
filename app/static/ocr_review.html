@@ -388,11 +388,6 @@
         margin: 0 0 8px;
       }
 
-      .modal-hint {
-        margin: 0 0 12px;
-        color: var(--muted);
-      }
-
       .modal-grid {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -440,6 +435,20 @@
         border: 1px solid var(--border);
         border-radius: 10px;
         background: #fff;
+      }
+
+      .modal-layout-select-all {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+        color: var(--muted);
+        font-size: 13px;
+        cursor: pointer;
+      }
+
+      .modal-layout-select-all input {
+        margin: 0;
       }
 
       .modal-layout-option {
@@ -1212,10 +1221,12 @@
     <div id="reextract-modal" class="modal-backdrop" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="reextract-modal-title">
         <h2 id="reextract-modal-title">Detect</h2>
-        <p class="modal-hint">Select layouts and extraction parameters.</p>
         <div class="modal-field">
-          <label>Layouts to detect</label>
-          <div id="reextract-modal-layouts" class="modal-layout-list" role="group" aria-label="Layouts to detect"></div>
+          <label class="modal-layout-select-all" for="reextract-modal-select-all">
+            <input id="reextract-modal-select-all" type="checkbox" />
+            <span>Select all</span>
+          </label>
+          <div id="reextract-modal-layouts" class="modal-layout-list" role="group" aria-label="Layouts"></div>
         </div>
         <div class="modal-grid">
           <div class="modal-field">
@@ -1229,7 +1240,7 @@
         </div>
         <div class="modal-actions">
           <button id="reextract-modal-cancel-btn" class="secondary" type="button">Cancel</button>
-          <button id="reextract-modal-run-btn" type="button">Run detection</button>
+          <button id="reextract-modal-run-btn" type="button">Run</button>
         </div>
       </div>
     </div>

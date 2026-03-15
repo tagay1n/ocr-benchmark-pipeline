@@ -140,10 +140,6 @@ def next_page_for_status(
         row = session.execute(
             base_query.where(Page.id > current_page_id).order_by(Page.id.asc()).limit(1)
         ).first()
-        if row is None:
-            row = session.execute(
-                base_query.where(Page.id < current_page_id).order_by(Page.id.asc()).limit(1)
-            ).first()
     return _next_page_response_from_row(row)
 
 
@@ -173,10 +169,6 @@ def next_page_for_statuses(
         row = session.execute(
             base_query.where(Page.id > current_page_id).order_by(Page.id.asc()).limit(1)
         ).first()
-        if row is None:
-            row = session.execute(
-                base_query.where(Page.id < current_page_id).order_by(Page.id.asc()).limit(1)
-            ).first()
     return _next_page_response_from_row(row)
 
 

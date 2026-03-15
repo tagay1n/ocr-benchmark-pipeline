@@ -549,7 +549,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(first["class_name"], "text")
         self.assertEqual(first["output_format"], "markdown")
         self.assertIn('Return output as JSON only: {"content":"..."}', first["prompt"])
-        self.assertIn("For text class:", first["prompt"])
+        self.assertIn("Keep text as normal Markdown paragraphs.", first["prompt"])
         self.assertNotIn("clip", first["prompt"].lower())
 
     def test_ocr_extract_stores_exhausted_keys_as_json_array(self) -> None:
@@ -753,12 +753,12 @@ class PipelineStagesTests(unittest.TestCase):
             "inference_params": {
                 "temperature": 0.2,
                 "max_retries_per_layout": 5,
-                "prompt_template": "Layout class: {class_name}. {format_rule}",
+                "prompt_template": "Rules: {class_rule}. {format_rule}",
             },
         }
         request_payload = main.ReextractOcrRequest(
             layout_ids=[layout_id],
-            prompt_template="Layout class: {class_name}. {format_rule}",
+            prompt_template="Rules: {class_rule}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
         )
@@ -769,7 +769,7 @@ class PipelineStagesTests(unittest.TestCase):
         extract_mock.assert_called_once_with(
             page_id,
             layout_ids=[layout_id],
-            prompt_template="Layout class: {class_name}. {format_rule}",
+            prompt_template="Rules: {class_rule}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
         )
@@ -1035,8 +1035,8 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(next_from_first["next_page_id"], second_id)
 
         next_from_second = main.next_layout_review_page(second_id)
-        self.assertTrue(next_from_second["has_next"])
-        self.assertEqual(next_from_second["next_page_id"], first_id)
+        self.assertFalse(next_from_second["has_next"])
+        self.assertIsNone(next_from_second["next_page_id"])
 
         main.complete_layout_review(first_id)
         main.complete_layout_review(second_id)
@@ -1070,7 +1070,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertTrue(payload["has_next"])
         self.assertEqual(payload["next_page_id"], min(page_ids))
 
-    def test_next_ocr_review_page_wraparound_and_global_progress(self) -> None:
+    def test_next_ocr_review_page_no_wraparound_and_global_progress(self) -> None:
         self._write_image("ocr-next/a.png", b"a")
         self._write_image("ocr-next/b.png", b"b")
         main.scan_images()
@@ -1107,8 +1107,8 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(next_from_first["next_page_id"], second_id)
 
         next_from_second = main.next_ocr_review_page(second_id)
-        self.assertTrue(next_from_second["has_next"])
-        self.assertEqual(next_from_second["next_page_id"], first_id)
+        self.assertFalse(next_from_second["has_next"])
+        self.assertIsNone(next_from_second["next_page_id"])
 
         global_next = main.next_ocr_review_page_global()
         self.assertTrue(global_next["has_next"])
