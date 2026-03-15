@@ -170,6 +170,22 @@
         gap: 8px;
       }
 
+      .order-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .order-mode-select {
+        height: 38px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0 10px;
+        background: var(--surface);
+        color: var(--ink);
+        font-weight: 600;
+      }
+
       .zoom-control {
         position: relative;
       }
@@ -1137,6 +1153,14 @@
               <path d="m20 20-4.2-4.2"></path>
             </svg>
           </button>
+          <div class="order-controls">
+            <select id="layout-order-mode" class="order-mode-select" aria-label="Reading order mode">
+              <option value="auto">Auto</option>
+              <option value="single">Single</option>
+              <option value="multi-column">Multi-column</option>
+              <option value="two-page">Two-page</option>
+            </select>
+          </div>
           <button id="detect-btn" type="button">Detect</button>
           <button id="review-btn" type="button">Mark reviewed</button>
         </div>

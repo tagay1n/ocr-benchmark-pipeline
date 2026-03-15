@@ -7,13 +7,13 @@
         computeZoomScale,
         computeOverlayBadgeScale,
         filterReviewHistory,
-        guessManualReadingOrderByY,
         hasContiguousUniqueReadingOrders,
         isLayoutNotFoundErrorMessage,
         mergeLayoutsForReview,
         nextHistoryPageId,
         normalizeReviewHistory,
         nextLayoutReviewUrl,
+        normalizeLayoutOrderMode,
         normalizeZoomMode,
         pointHandleForCoordinateKey,
         previousHistoryPageId,
@@ -47,6 +47,8 @@
         fetchPages,
         patchLayout,
         putCaptionBindings,
+        reorderPageLayouts,
+        updateLayoutOrderMode,
       } from "/static/js/layout_review_api.mjs";
       import {
         readStorage,
@@ -98,6 +100,7 @@
       const detectBtn = document.getElementById("detect-btn");
       const addBtn = document.getElementById("add-btn");
       const reviewBtn = document.getElementById("review-btn");
+      const layoutOrderModeInput = document.getElementById("layout-order-mode");
       const magnifierToggleBtn = document.getElementById("magnifier-toggle-btn");
       const historyBackBtn = document.getElementById("history-back-btn");
       const historyForthBtn = document.getElementById("history-forth-btn");
@@ -151,6 +154,8 @@
         dragOverPosition: null,
         reviewSubmitInProgress: false,
         detectInProgress: false,
+        layoutOrderModeUpdateInProgress: false,
+        layoutReorderInProgress: false,
         detectDefaultsLoaded: false,
         detectTopConfigs: [],
         activeDetectHelpKey: null,
@@ -781,9 +786,26 @@
           : "Mark this page as reviewed.";
       }
 
+      function currentLayoutOrderMode() {
+        const pageMode = normalizeLayoutOrderMode(state.page?.layout_order_mode, { fallback: "auto" });
+        if (state.page) {
+          state.page.layout_order_mode = pageMode;
+        }
+        return pageMode;
+      }
+
+      function updateLayoutOrderControls() {
+        const mode = currentLayoutOrderMode();
+        if (layoutOrderModeInput instanceof HTMLSelectElement) {
+          layoutOrderModeInput.value = mode;
+          layoutOrderModeInput.disabled = state.layoutOrderModeUpdateInProgress || state.layoutReorderInProgress;
+        }
+      }
+
       function updateReviewUiState() {
         updateReviewBadge();
         updateReviewButtonState();
+        updateLayoutOrderControls();
       }
 
       function toFixed(value) {
@@ -2391,6 +2413,66 @@
         renderLayouts();
       }
 
+      async function setPageLayoutOrderMode(nextModeRaw) {
+        const nextMode = normalizeLayoutOrderMode(nextModeRaw, { fallback: "auto" });
+        if (!state.page) {
+          return;
+        }
+        const currentMode = currentLayoutOrderMode();
+        if (nextMode === currentMode) {
+          updateLayoutOrderControls();
+          return;
+        }
+        state.layoutOrderModeUpdateInProgress = true;
+        updateReviewUiState();
+        try {
+          const payload = await updateLayoutOrderMode(pageId, { mode: nextMode });
+          const appliedMode = normalizeLayoutOrderMode(payload?.layout_order_mode, { fallback: nextMode });
+          state.page.layout_order_mode = appliedMode;
+          await recomputeReadingOrder({ modeOverride: appliedMode });
+        } catch (error) {
+          setStatus(`Ordering mode update failed: ${error.message}`, { isError: true });
+        } finally {
+          state.layoutOrderModeUpdateInProgress = false;
+          updateReviewUiState();
+        }
+      }
+
+      async function recomputeReadingOrder({ modeOverride = null } = {}) {
+        if (!state.page || state.layoutReorderInProgress) {
+          return;
+        }
+        if (hasPendingLayoutDraftChanges()) {
+          setStatus(
+            "Cannot reorder while local draft changes exist. Submit review (or restore drafts) first.",
+            { isError: true },
+          );
+          return;
+        }
+
+        const mode = normalizeLayoutOrderMode(
+          modeOverride === null ? currentLayoutOrderMode() : modeOverride,
+          { fallback: "auto" },
+        );
+
+        state.layoutReorderInProgress = true;
+        updateReviewUiState();
+        try {
+          const payload = await reorderPageLayouts(pageId, { mode });
+          if (state.page) {
+            state.page.layout_order_mode = normalizeLayoutOrderMode(payload?.layout_order_mode, { fallback: mode });
+          }
+          await loadLayouts();
+          const changed = Boolean(payload?.changed);
+          setStatus(changed ? "Reading order recomputed." : "Reading order already matches selected mode.");
+        } catch (error) {
+          setStatus(`Reorder failed: ${error.message}`, { isError: true });
+        } finally {
+          state.layoutReorderInProgress = false;
+          updateReviewUiState();
+        }
+      }
+
       async function refreshNextReviewButton() {
         try {
           const payload = await fetchNextLayoutReviewPage(pageId);
@@ -2809,21 +2891,21 @@
       async function createLayoutFromBBox(bbox) {
         addBtn.disabled = true;
         try {
-          const nextReadingOrder = guessManualReadingOrderByY(state.layouts, bbox);
+          const orderingMode = currentLayoutOrderMode();
           const className = normalizeClassName(state.lastAddedClass) || "text";
           const payload = await createPageLayout(pageId, {
             class_name: className,
-            reading_order: nextReadingOrder,
             bbox,
           });
+          const insertedOrder = Number(payload?.layout?.reading_order);
           state.localEditsById = shiftDraftReadingOrdersAfterInsertion({
             layouts: state.layouts,
             localEditsById: state.localEditsById,
-            insertedOrder: nextReadingOrder,
+            insertedOrder: Number.isInteger(insertedOrder) ? insertedOrder : null,
           });
           persistLayoutDraftState();
           rememberLastAddedClass(className);
-          setStatus("Manual layout added.");
+          setStatus(`Manual layout added (${orderingMode} mode).`);
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();
@@ -3068,6 +3150,9 @@
         toggleDrawMode();
       });
       reviewBtn.addEventListener("click", markReviewed);
+      layoutOrderModeInput?.addEventListener("change", async () => {
+        await setPageLayoutOrderMode(layoutOrderModeInput.value);
+      });
       historyBackBtn.addEventListener("click", () => {
         const targetPageId = previousHistoryPageId(state.reviewHistory, state.reviewHistoryIndex);
         if (!Number.isInteger(targetPageId) || targetPageId <= 0) {
