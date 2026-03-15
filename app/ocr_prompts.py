@@ -1,6 +1,34 @@
 from __future__ import annotations
 
-from typing import Final
+from dataclasses import dataclass
+import re
+from typing import Final, Literal
+
+from .layout_classes import normalize_class_name
+
+OutputFormat = Literal["markdown", "html", "latex", "skip"]
+
+
+@dataclass(frozen=True)
+class PromptClassConfig:
+    output_format: OutputFormat
+    class_rule: str
+
+
+@dataclass(frozen=True)
+class PromptSpec:
+    class_name: str
+    output_format: OutputFormat
+    class_rule: str
+    format_rule: str
+
+
+@dataclass(frozen=True)
+class RenderedPrompt:
+    class_name: str
+    output_format: OutputFormat
+    prompt: str
+
 
 PROMPT_BLOCK_TASK_CONTEXT: Final[str] = "You are given one cropped image region from a document page."
 PROMPT_BLOCK_HARD_REQUIREMENTS: Final[str] = (
@@ -135,21 +163,36 @@ CLASS_RULE_TABLE: Final[str] = (
     "- Do not add CSS, classes, style attributes, wrapper tags, or Markdown table syntax."
 )
 
+SECTION_HEADER_RULE: Final[str] = (
+    "- Treat this crop as heading-like text.\n"
+    "- Preserve visible heading markers/tokens when present.\n"
+    f"{CLASS_RULE_TEXT}"
+)
+
+DEFAULT_CLASS_CONFIG: Final[PromptClassConfig] = PromptClassConfig(
+    output_format="markdown",
+    class_rule="",
+)
+
+CLASS_PROMPT_CONFIG: Final[dict[str, PromptClassConfig]] = {
+    "text": PromptClassConfig(output_format="markdown", class_rule=CLASS_RULE_TEXT),
+    "section_header": PromptClassConfig(output_format="markdown", class_rule=SECTION_HEADER_RULE),
+    "list_item": PromptClassConfig(output_format="markdown", class_rule=CLASS_RULE_LIST_ITEM),
+    "picture_text": PromptClassConfig(output_format="markdown", class_rule=CLASS_RULE_TEXT),
+    "page_header": PromptClassConfig(output_format="markdown", class_rule=CLASS_RULE_TEXT),
+    "page_footer": PromptClassConfig(output_format="markdown", class_rule=CLASS_RULE_TEXT),
+    "footnote": PromptClassConfig(output_format="markdown", class_rule=CLASS_RULE_FOOTNOTE),
+    "caption": PromptClassConfig(output_format="markdown", class_rule=CLASS_RULE_CAPTION),
+    "table": PromptClassConfig(output_format="html", class_rule=CLASS_RULE_TABLE),
+    "formula": PromptClassConfig(output_format="latex", class_rule=CLASS_RULE_FORMULA),
+    "picture": PromptClassConfig(output_format="skip", class_rule=""),
+}
+
+# Backward-compatible view used in tests and potential external callers.
 CLASS_RULES_BY_LAYOUT_CLASS: Final[dict[str, str]] = {
-    "text": CLASS_RULE_TEXT,
-    "section_header": (
-        "- Treat this crop as heading-like text.\n"
-        "- Preserve visible heading markers/tokens when present.\n"
-        f"{CLASS_RULE_TEXT}"
-    ),
-    "list_item": CLASS_RULE_LIST_ITEM,
-    "picture_text": CLASS_RULE_TEXT,
-    "page_header": CLASS_RULE_TEXT,
-    "page_footer": CLASS_RULE_TEXT,
-    "footnote": CLASS_RULE_FOOTNOTE,
-    "caption": CLASS_RULE_CAPTION,
-    "formula": CLASS_RULE_FORMULA,
-    "table": CLASS_RULE_TABLE,
+    class_name: config.class_rule
+    for class_name, config in CLASS_PROMPT_CONFIG.items()
+    if config.class_rule
 }
 
 
@@ -158,7 +201,20 @@ def format_rule_for_output_format(output_format: str) -> str:
 
 
 def class_rule_for_layout_class(class_name: str) -> str:
-    return CLASS_RULES_BY_LAYOUT_CLASS.get(class_name, "")
+    normalized_class_name = normalize_class_name(class_name)
+    return CLASS_PROMPT_CONFIG.get(normalized_class_name, DEFAULT_CLASS_CONFIG).class_rule
+
+
+def resolve_prompt_spec(class_name: str) -> PromptSpec:
+    normalized_class_name = normalize_class_name(class_name)
+    config = CLASS_PROMPT_CONFIG.get(normalized_class_name, DEFAULT_CLASS_CONFIG)
+    output_format = config.output_format
+    return PromptSpec(
+        class_name=normalized_class_name,
+        output_format=output_format,
+        class_rule=config.class_rule,
+        format_rule=format_rule_for_output_format(output_format),
+    )
 
 
 def render_prompt_template(
@@ -168,9 +224,42 @@ def render_prompt_template(
     format_rule: str,
 ) -> str:
     prompt = str(prompt_template)
+    template_placeholders = set(re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", prompt))
+    unresolved_placeholders = sorted(
+        template_placeholders - {"class_rule", "format_rule"}
+    )
+    if unresolved_placeholders:
+        raise RuntimeError(
+            "OCR prompt template contains unresolved placeholders: "
+            + ", ".join(unresolved_placeholders)
+        )
     prompt = prompt.replace("{class_rule}", class_rule)
     prompt = prompt.replace("{format_rule}", format_rule)
     prompt = prompt.strip()
     if not prompt:
         raise RuntimeError("OCR prompt template produced an empty prompt.")
     return prompt
+
+
+def render_prompt_for_layout_class(
+    class_name: str,
+    *,
+    prompt_template: str = DEFAULT_PROMPT_TEMPLATE,
+) -> RenderedPrompt:
+    spec = resolve_prompt_spec(class_name)
+    if spec.output_format == "skip":
+        return RenderedPrompt(
+            class_name=spec.class_name,
+            output_format=spec.output_format,
+            prompt="",
+        )
+    prompt = render_prompt_template(
+        prompt_template,
+        class_rule=spec.class_rule,
+        format_rule=spec.format_rule,
+    )
+    return RenderedPrompt(
+        class_name=spec.class_name,
+        output_format=spec.output_format,
+        prompt=prompt,
+    )

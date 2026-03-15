@@ -17,19 +17,14 @@ from sqlalchemy import delete, select
 from .config import settings
 from .db import get_session
 from .layout_classes import (
-    HTML_LAYOUT_CLASSES as HTML_CLASSES,
-    LATEX_LAYOUT_CLASSES as LATEX_CLASSES,
     MARKDOWN_LAYOUT_CLASSES as MARKDOWN_CLASSES,
-    SKIP_LAYOUT_CLASSES as SKIP_CLASSES,
     normalize_class_name,
 )
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import Layout, OcrOutput, Page
 from .ocr_prompts import (
     DEFAULT_PROMPT_TEMPLATE,
-    class_rule_for_layout_class,
-    format_rule_for_output_format,
-    render_prompt_template,
+    render_prompt_for_layout_class,
 )
 
 GEMINI_MODEL = "gemini-3-flash-preview"
@@ -394,28 +389,11 @@ def _is_quota_error(message: str) -> bool:
 
 def _prompt_for_layout(layout: dict[str, Any], *, prompt_template: str) -> tuple[str, str]:
     class_name = normalize_class_name(str(layout["class_name"]))
-    if class_name in MARKDOWN_CLASSES:
-        output_format = "markdown"
-    elif class_name in HTML_CLASSES:
-        output_format = "html"
-    elif class_name in LATEX_CLASSES:
-        output_format = "latex"
-    elif class_name in SKIP_CLASSES:
-        output_format = "skip"
-    else:
-        output_format = "markdown"
-
-    if output_format == "skip":
-        return ("", "skip")
-
-    format_rule = format_rule_for_output_format(output_format)
-    class_rule = class_rule_for_layout_class(class_name)
-    prompt = render_prompt_template(
-        prompt_template,
-        class_rule=class_rule,
-        format_rule=format_rule,
+    rendered_prompt = render_prompt_for_layout_class(
+        class_name,
+        prompt_template=prompt_template,
     )
-    return (prompt, output_format)
+    return (rendered_prompt.prompt, rendered_prompt.output_format)
 
 
 def _crop_layout_png_bytes(image_path: Path, bbox: dict[str, float]) -> bytes:

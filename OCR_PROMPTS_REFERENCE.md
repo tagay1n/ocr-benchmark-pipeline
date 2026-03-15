@@ -1,7 +1,6 @@
 # OCR Prompts Reference
 
 This file shows the final default prompts sent to Gemini per layout class (no image bytes).
-Generated at: 2026-03-15T10:49:31.994451+00:00
 
 ## section_header
 
@@ -439,3 +438,4 @@ IF UNSURE:
 - Keep visible text/tokens as-is rather than normalizing aggressively.
 - Leave ambiguous or unreadable fragments empty instead of inventing content.
 ```
+

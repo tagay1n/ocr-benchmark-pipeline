@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 import unittest
 
 from app import ocr_prompts
+from app.layout_classes import KNOWN_LAYOUT_CLASSES
 
 
 class OcrPromptsTests(unittest.TestCase):
@@ -51,6 +54,27 @@ class OcrPromptsTests(unittest.TestCase):
         self.assertIn("Preserve line breaks exactly as shown in the crop.", ocr_prompts.FORMAT_RULE_MARKDOWN)
         self.assertIn("using <br> only when clearly visible", ocr_prompts.FORMAT_RULE_HTML)
         self.assertIn("visible formula layout", ocr_prompts.FORMAT_RULE_LATEX)
+
+    def test_resolve_prompt_spec_matrix(self) -> None:
+        expected_formats = {
+            "text": "markdown",
+            "section_header": "markdown",
+            "list_item": "markdown",
+            "picture_text": "markdown",
+            "page_header": "markdown",
+            "page_footer": "markdown",
+            "footnote": "markdown",
+            "caption": "markdown",
+            "table": "html",
+            "formula": "latex",
+            "picture": "skip",
+            "unknown_custom": "markdown",
+        }
+        for class_name, output_format in expected_formats.items():
+            spec = ocr_prompts.resolve_prompt_spec(class_name)
+            self.assertEqual(spec.class_name, class_name if class_name != "unknown_custom" else "unknown_custom")
+            self.assertEqual(spec.output_format, output_format)
+            self.assertEqual(spec.format_rule, ocr_prompts.format_rule_for_output_format(output_format))
 
     def test_class_rule_mapping(self) -> None:
         self.assertEqual(
@@ -127,15 +151,45 @@ class OcrPromptsTests(unittest.TestCase):
         self.assertIn("class_rule=CLASS-RULE", rendered)
         self.assertIn("rule=RULE", rendered)
 
-    def test_render_prompt_template_ignores_unknown_placeholders(self) -> None:
+    def test_render_prompt_template_allows_braces_inside_replacement_values(self) -> None:
         rendered = ocr_prompts.render_prompt_template(
-            "unknown={unknown_placeholder}\nclass_rule={class_rule}\nrule={format_rule}",
-            class_rule="CLASS-RULE",
+            "class_rule={class_rule}; rule={format_rule}",
+            class_rule=r"Use LaTeX like \\frac{a}{b}",
             format_rule="RULE",
         )
-        self.assertIn("unknown={unknown_placeholder}", rendered)
-        self.assertIn("class_rule=CLASS-RULE", rendered)
-        self.assertIn("rule=RULE", rendered)
+        self.assertIn(r"\\frac{a}{b}", rendered)
+
+    def test_render_prompt_template_raises_for_unknown_placeholders(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "unresolved placeholders"):
+            ocr_prompts.render_prompt_template(
+                "unknown={unknown_placeholder}\nclass_rule={class_rule}\nrule={format_rule}",
+                class_rule="CLASS-RULE",
+                format_rule="RULE",
+            )
+
+    def test_render_prompt_for_layout_class(self) -> None:
+        rendered_text = ocr_prompts.render_prompt_for_layout_class("text")
+        self.assertEqual(rendered_text.output_format, "markdown")
+        self.assertIn("HARD REQUIREMENTS:", rendered_text.prompt)
+        self.assertIn("OUTPUT FORMAT REQUIREMENTS:", rendered_text.prompt)
+
+        rendered_picture = ocr_prompts.render_prompt_for_layout_class("picture")
+        self.assertEqual(rendered_picture.output_format, "skip")
+        self.assertEqual(rendered_picture.prompt, "")
+
+
+class OcrPromptSnapshotsTests(unittest.TestCase):
+    def test_prompt_snapshots_match_expected_reference(self) -> None:
+        snapshot_path = Path("tests/fixtures/ocr_prompt_snapshots.json")
+        expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        actual: dict[str, dict[str, str]] = {}
+        for class_name in KNOWN_LAYOUT_CLASSES:
+            rendered = ocr_prompts.render_prompt_for_layout_class(class_name)
+            actual[class_name] = {
+                "output_format": rendered.output_format,
+                "prompt": rendered.prompt,
+            }
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

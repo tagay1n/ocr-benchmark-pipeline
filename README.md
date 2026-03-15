@@ -126,6 +126,12 @@ node --test frontend_tests/*.test.mjs
 Prompt source-of-truth (editable):
 
 - `app/ocr_prompts.py`
+- `tests/fixtures/ocr_prompt_snapshots.json` (golden prompt snapshots used by tests)
+
+Generate prompt reference markdown deterministically:
+
+- `.venv/bin/python scripts/generate_prompt_reference.py`
+- Output: `OCR_PROMPTS_REFERENCE.md`
 
 Gemini OCR response contract:
 
