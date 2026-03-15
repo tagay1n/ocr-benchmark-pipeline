@@ -60,9 +60,28 @@ CLASS_RULE_TEXT: Final[str] = (
     "- If formula notation is unclear, keep the visible text as-is."
 )
 
+CLASS_RULE_TABLE: Final[str] = (
+    "For table class:\n"
+    "- Treat this crop as a table extraction task.\n"
+    "- Treat tabular alignment as table structure even when grid lines are faint, partial, or absent.\n"
+    "- Infer rows and columns from alignment/spacing only when clearly supported by visual layout.\n"
+    "- If structure is ambiguous, prefer conservative segmentation and do not invent extra rows or columns.\n"
+    "- Preserve table structure exactly as visible: row order, column order, and cell boundaries.\n"
+    "- Use semantic HTML tags: <table>, <thead>, <tbody>, <tr>, <th>, <td>.\n"
+    "- Use <thead> and <tbody> only when clearly inferable.\n"
+    "- Use <th> only when header role is clearly visible; otherwise use <td>.\n"
+    "- Preserve merged cells using rowspan/colspan when clearly visible.\n"
+    "- If a cell is visibly empty, output it as an empty cell.\n"
+    "- If cell text is unreadable, keep the cell and leave its content empty; do not invent text.\n"
+    "- Preserve visible line breaks inside a cell using <br> only when clearly visible.\n"
+    "- Do not infer or reconstruct hidden rows/columns outside crop boundaries.\n"
+    "- Do not add CSS, classes, style attributes, wrapper tags, or Markdown table syntax."
+)
+
 CLASS_RULES_BY_LAYOUT_CLASS: Final[dict[str, str]] = {
     "text": CLASS_RULE_TEXT,
     "section_header": CLASS_RULE_TEXT,
+    "table": CLASS_RULE_TABLE,
 }
 
 
