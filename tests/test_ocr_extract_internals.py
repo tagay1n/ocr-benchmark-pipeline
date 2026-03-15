@@ -70,6 +70,13 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(markdown_fmt, "markdown")
         self.assertIn("valid Markdown", markdown_prompt)
         self.assertIn("For text class:", markdown_prompt)
+        section_prompt, section_fmt = ocr_extract._prompt_for_layout(
+            {"class_name": "section_header"},
+            [],
+            prompt_template=prompt_template,
+        )
+        self.assertEqual(section_fmt, "markdown")
+        self.assertIn("For text class:", section_prompt)
 
         html_prompt, html_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "table"},
@@ -190,6 +197,29 @@ class OcrExtractInternalsTests(unittest.TestCase):
             ocr_extract._extract_content_from_json_response('{"content":"ok","extra":"x"}')
         with self.assertRaisesRegex(RuntimeError, '"content" must be a string'):
             ocr_extract._extract_content_from_json_response('{"content":1}')
+
+    def test_section_header_level_assignment_from_geometry(self) -> None:
+        layouts = [
+            {"id": 1, "class_name": "text", "bbox": {"y1": 0.10, "y2": 0.13}},
+            {"id": 2, "class_name": "text", "bbox": {"y1": 0.30, "y2": 0.33}},
+            {"id": 3, "class_name": "section_header", "bbox": {"y1": 0.00, "y2": 0.09}},
+            {"id": 4, "class_name": "section_header", "bbox": {"y1": 0.20, "y2": 0.255}},
+            {"id": 5, "class_name": "section_header", "bbox": {"y1": 0.50, "y2": 0.54}},
+        ]
+        levels = ocr_extract._section_header_levels_by_layout_id(layouts)
+        self.assertEqual(levels[3], 2)
+        self.assertEqual(levels[4], 3)
+        self.assertEqual(levels[5], 4)
+
+    def test_apply_section_header_heading_level_normalizes_first_nonempty_line(self) -> None:
+        self.assertEqual(
+            ocr_extract._apply_section_header_heading_level("Title line", 3),
+            "### Title line",
+        )
+        self.assertEqual(
+            ocr_extract._apply_section_header_heading_level("\n  ## Existing heading", 2),
+            "## Existing heading",
+        )
 
     def test_normalize_text_nfc_collapses_equivalent_unicode_sequences(self) -> None:
         decomposed = "е\u0308"  # cyrillic e + combining diaeresis
@@ -314,6 +344,38 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(len(outputs), 1)
         content = outputs[0]["content"]
         self.assertEqual(content, "ё and ё")
+
+    def test_extract_ocr_for_page_formats_section_header_from_geometry(self) -> None:
+        self._write_image("ocr/section-header.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.15, x2=1.0, y2=0.19),
+            ),
+        )
+        section_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="section_header",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.01, x2=1.0, y2=0.11),
+            ),
+        )["layout"]
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", side_effect=["Body text", "Header text"]
+        ):
+            ocr_extract.extract_ocr_for_page(page_id)
+
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        by_layout = {int(output["layout_id"]): output for output in outputs}
+        section_output = by_layout[int(section_layout["id"])]
+        self.assertEqual(section_output["class_name"], "section_header")
+        self.assertTrue(str(section_output["content"]).startswith("## "))
 
     def test_extract_ocr_for_page_skip_layout_writes_skip_output_without_requests(self) -> None:
         self.test_settings = Settings(

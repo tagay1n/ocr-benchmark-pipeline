@@ -43,6 +43,10 @@ class OcrPromptsTests(unittest.TestCase):
             ocr_prompts.class_rule_for_layout_class("text"),
             ocr_prompts.CLASS_RULE_TEXT,
         )
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("section_header"),
+            ocr_prompts.CLASS_RULE_TEXT,
+        )
         self.assertEqual(ocr_prompts.class_rule_for_layout_class("table"), "")
 
     def test_render_prompt_template_replaces_known_placeholders(self) -> None:

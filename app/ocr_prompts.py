@@ -62,6 +62,7 @@ CLASS_RULE_TEXT: Final[str] = (
 
 CLASS_RULES_BY_LAYOUT_CLASS: Final[dict[str, str]] = {
     "text": CLASS_RULE_TEXT,
+    "section_header": CLASS_RULE_TEXT,
 }
 
 

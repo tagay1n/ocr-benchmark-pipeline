@@ -443,7 +443,7 @@ class LayoutClassContractsTests(unittest.TestCase):
         outputs = {int(row["layout_id"]): row for row in main.page_ocr_outputs(page_id)["outputs"]}
         self.assertEqual(str(outputs[first_layout_id]["class_name"]), "section_header")
         self.assertEqual(str(outputs[second_layout_id]["class_name"]), "text")
-        self.assertEqual(str(outputs[first_layout_id]["content"]), "Updated header")
+        self.assertRegex(str(outputs[first_layout_id]["content"]), r"^#{2,6}\s+Updated header$")
         self.assertEqual(str(outputs[second_layout_id]["content"]), "Initial body")
         self.assertNotIn("title", {str(row["class_name"]) for row in outputs.values()})
 

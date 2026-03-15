@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from io import BytesIO
 import json
 from pathlib import Path
+import re
+import statistics
 from typing import Any
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
@@ -36,6 +38,112 @@ DEFAULT_GEMINI_TEMPERATURE = 0.0
 
 class GeminiQuotaExhaustedError(RuntimeError):
     pass
+
+
+_SECTION_HEADER_LEVEL_H2 = 2
+_SECTION_HEADER_LEVEL_H3 = 3
+_SECTION_HEADER_LEVEL_H4 = 4
+
+
+def _layout_height_ratio(layout: dict[str, Any]) -> float:
+    bbox = layout.get("bbox")
+    if not isinstance(bbox, dict):
+        return 0.0
+    try:
+        y1 = float(bbox.get("y1", 0.0))
+        y2 = float(bbox.get("y2", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, y2 - y1)
+
+
+def _median(values: list[float]) -> float:
+    cleaned = [float(value) for value in values if float(value) > 0.0]
+    if not cleaned:
+        return 0.0
+    return float(statistics.median(cleaned))
+
+
+def _section_header_baseline_text_height(layouts: list[dict[str, Any]]) -> float:
+    text_heights = [
+        _layout_height_ratio(layout)
+        for layout in layouts
+        if normalize_class_name(str(layout.get("class_name", ""))) == "text"
+    ]
+    baseline = _median(text_heights)
+    if baseline > 0:
+        return baseline
+
+    fallback_heights = [
+        _layout_height_ratio(layout)
+        for layout in layouts
+        if normalize_class_name(str(layout.get("class_name", ""))) in {"list_item", "footnote", "picture_text"}
+    ]
+    baseline = _median(fallback_heights)
+    if baseline > 0:
+        return baseline
+
+    any_markdown_heights = [
+        _layout_height_ratio(layout)
+        for layout in layouts
+        if normalize_class_name(str(layout.get("class_name", ""))) in MARKDOWN_CLASSES
+        and normalize_class_name(str(layout.get("class_name", ""))) != "section_header"
+    ]
+    return _median(any_markdown_heights)
+
+
+def _section_header_level_from_ratio(height_ratio: float, baseline_text_height: float) -> int:
+    if baseline_text_height <= 0:
+        return _SECTION_HEADER_LEVEL_H3
+    ratio = float(height_ratio) / float(baseline_text_height)
+    if ratio >= 2.2:
+        return _SECTION_HEADER_LEVEL_H2
+    if ratio >= 1.6:
+        return _SECTION_HEADER_LEVEL_H3
+    return _SECTION_HEADER_LEVEL_H4
+
+
+def _section_header_levels_by_layout_id(layouts: list[dict[str, Any]]) -> dict[int, int]:
+    baseline_text_height = _section_header_baseline_text_height(layouts)
+    levels: dict[int, int] = {}
+    for layout in layouts:
+        class_name = normalize_class_name(str(layout.get("class_name", "")))
+        if class_name != "section_header":
+            continue
+        layout_id_raw = layout.get("id")
+        try:
+            layout_id = int(layout_id_raw)
+        except (TypeError, ValueError):
+            continue
+        levels[layout_id] = _section_header_level_from_ratio(
+            _layout_height_ratio(layout),
+            baseline_text_height,
+        )
+    return levels
+
+
+def _strip_markdown_heading_prefix(line: str) -> str:
+    return re.sub(r"^\s{0,3}#{1,6}\s*", "", str(line)).strip()
+
+
+def _apply_section_header_heading_level(content: str, level: int) -> str:
+    text = str(content).strip()
+    if not text:
+        return text
+    safe_level = max(1, min(6, int(level)))
+    lines = text.splitlines()
+    first_content_idx = -1
+    for idx, line in enumerate(lines):
+        if line.strip():
+            first_content_idx = idx
+            break
+    if first_content_idx < 0:
+        return text
+    heading_text = _strip_markdown_heading_prefix(lines[first_content_idx])
+    if not heading_text:
+        heading_text = lines[first_content_idx].strip()
+    lines[first_content_idx] = f"{'#' * safe_level} {heading_text}".strip()
+    return "\n".join(lines).strip()
 
 
 def _utc_now() -> str:
@@ -386,6 +494,7 @@ def extract_ocr_for_page(
         raise ValueError("max_retries_per_layout must be >= 1.")
 
     exhausted_keys = _load_usage_state()
+    section_header_levels = _section_header_levels_by_layout_id(layouts)
 
     pending_outputs: list[dict[str, Any]] = []
     prompt_debug_rows: list[dict[str, Any]] = []
@@ -451,6 +560,9 @@ def extract_ocr_for_page(
             raise RuntimeError(f"OCR extraction failed for layout {layout['id']}: {last_error}")
 
         response_text = normalize_text_nfc(response_text)
+        if str(layout["class_name"]) == "section_header":
+            target_level = section_header_levels.get(int(layout["id"]), _SECTION_HEADER_LEVEL_H3)
+            response_text = _apply_section_header_heading_level(response_text, target_level)
         lookalike_warnings = (
             detect_suspicious_lookalikes(response_text, markdown_code_aware=True)
             if output_format == "markdown"
