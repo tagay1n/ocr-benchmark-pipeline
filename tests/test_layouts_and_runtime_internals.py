@@ -349,6 +349,56 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3])
         self.assertEqual([row["class_name"] for row in page_layouts], ["text", "text", "section_header"])
 
+    def test_detect_layouts_dedupes_strongly_overlapping_predictions_by_confidence(self) -> None:
+        self._write_image("layout/detect-dedupe-overlap.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        detected_rows = [
+            {
+                "class_name": "text",
+                "confidence": 0.93,
+                "x1": 0.11,
+                "y1": 0.11,
+                "x2": 0.49,
+                "y2": 0.49,
+            },
+            {
+                "class_name": "text",
+                "confidence": 0.88,
+                "x1": 0.1,
+                "y1": 0.1,
+                "x2": 0.5,
+                "y2": 0.5,
+            },
+            {
+                "class_name": "picture",
+                "confidence": 0.81,
+                "x1": 0.6,
+                "y1": 0.6,
+                "x2": 0.9,
+                "y2": 0.9,
+            },
+        ]
+        params = {
+            "confidence_threshold": 0.2,
+            "iou_threshold": 0.45,
+            "image_size": 1024,
+            "max_detections": 300,
+            "agnostic_nms": False,
+        }
+
+        with patch.object(layouts, "_detect_doclaynet_layouts", return_value=(detected_rows, params)):
+            result = main.detect_page_layouts(page_id, main.DetectLayoutsRequest(replace_existing=True))
+
+        self.assertEqual(result["created"], 2)
+        self.assertEqual(result["class_counts"], {"text": 1, "picture": 1})
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual(len(page_layouts), 2)
+        text_layout = next(row for row in page_layouts if row["class_name"] == "text")
+        self.assertAlmostEqual(float(text_layout["bbox"]["x1"]), 0.11, places=4)
+        self.assertAlmostEqual(float(text_layout["bbox"]["x2"]), 0.49, places=4)
+
     def test_patch_layout_reorders_without_unique_constraint_collision(self) -> None:
         self._write_image("layout/reorder-patch.png")
         main.scan_images()

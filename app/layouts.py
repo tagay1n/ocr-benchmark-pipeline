@@ -28,6 +28,7 @@ DOC_LAYOUTNET_DEFAULT_CONF = 0.25
 DOC_LAYOUTNET_DEFAULT_IOU = 0.45
 DOC_LAYOUTNET_DEFAULT_MAX_DET = 300
 DOC_LAYOUTNET_DEFAULT_AGNOSTIC_NMS = False
+DOC_LAYOUTNET_DUPLICATE_OVERLAP_THRESHOLD = 0.85
 
 DOC_LAYOUTNET_AVAILABLE_CHECKPOINTS = (
     "yolov10m-doclaynet.pt",
@@ -57,6 +58,75 @@ def _utc_now() -> str:
 
 def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
+
+
+def _bbox_intersection_over_min_area(box_a: dict[str, Any], box_b: dict[str, Any]) -> float:
+    ax1 = float(box_a["x1"])
+    ay1 = float(box_a["y1"])
+    ax2 = float(box_a["x2"])
+    ay2 = float(box_a["y2"])
+    bx1 = float(box_b["x1"])
+    by1 = float(box_b["y1"])
+    bx2 = float(box_b["x2"])
+    by2 = float(box_b["y2"])
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+    if inter_x2 <= inter_x1 or inter_y2 <= inter_y1:
+        return 0.0
+
+    inter_area = (inter_x2 - inter_x1) * (inter_y2 - inter_y1)
+    area_a = max(0.0, (ax2 - ax1) * (ay2 - ay1))
+    area_b = max(0.0, (bx2 - bx1) * (by2 - by1))
+    min_area = min(area_a, area_b)
+    if min_area <= 0.0:
+        return 0.0
+    return inter_area / min_area
+
+
+def _dedupe_overlapping_layout_rows(
+    rows: list[dict[str, Any]],
+    *,
+    overlap_threshold: float = DOC_LAYOUTNET_DUPLICATE_OVERLAP_THRESHOLD,
+) -> list[dict[str, Any]]:
+    if len(rows) <= 1:
+        return rows
+
+    def row_confidence(row: dict[str, Any]) -> float:
+        try:
+            return float(row.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def row_area(row: dict[str, Any]) -> float:
+        try:
+            width = max(0.0, float(row["x2"]) - float(row["x1"]))
+            height = max(0.0, float(row["y2"]) - float(row["y1"]))
+        except (TypeError, ValueError, KeyError):
+            return 0.0
+        return width * height
+
+    candidates = sorted(
+        rows,
+        key=lambda row: (
+            -row_confidence(row),
+            -row_area(row),
+        ),
+    )
+
+    deduped: list[dict[str, Any]] = []
+    for candidate in candidates:
+        is_duplicate = False
+        for kept in deduped:
+            overlap = _bbox_intersection_over_min_area(candidate, kept)
+            if overlap >= overlap_threshold:
+                is_duplicate = True
+                break
+        if not is_duplicate:
+            deduped.append(candidate)
+    return deduped
 
 
 def _load_doclaynet_model(checkpoint: str):
@@ -176,8 +246,9 @@ def _detect_doclaynet_layouts(
             }
         )
 
-    rows.sort(key=lambda row: (row["y1"], row["x1"]))
-    return rows, inference_params
+    deduped_rows = _dedupe_overlapping_layout_rows(rows)
+    deduped_rows.sort(key=lambda row: (row["y1"], row["x1"]))
+    return deduped_rows, inference_params
 
 
 def validate_bbox(x1: float, y1: float, x2: float, y2: float) -> None:
@@ -371,6 +442,8 @@ def detect_layouts_for_page(
         }
         for row in detected_rows
     ]
+    detected_rows = _dedupe_overlapping_layout_rows(detected_rows)
+    detected_rows.sort(key=lambda row: (row["y1"], row["x1"]))
     detector_params = {
         "confidence_threshold": float(
             thresholds.get("confidence_threshold", resolved_confidence_threshold)
