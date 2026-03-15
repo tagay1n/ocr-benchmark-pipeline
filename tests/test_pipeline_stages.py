@@ -548,7 +548,8 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(first["page_id"], page_id)
         self.assertEqual(first["class_name"], "text")
         self.assertEqual(first["output_format"], "markdown")
-        self.assertIn("Layout class: text.", first["prompt"])
+        self.assertIn('Return output as JSON only: {"content":"..."}', first["prompt"])
+        self.assertIn("For text class:", first["prompt"])
         self.assertNotIn("clip", first["prompt"].lower())
 
     def test_ocr_extract_stores_exhausted_keys_as_json_array(self) -> None:

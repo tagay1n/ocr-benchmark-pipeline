@@ -58,6 +58,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         prompt_template = (
             "Layout class: {class_name}.{caption_line}\n"
             "Targets: {caption_targets}\n"
+            "{class_rule}\n"
             "{format_rule}"
         )
 
@@ -68,6 +69,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         )
         self.assertEqual(markdown_fmt, "markdown")
         self.assertIn("valid Markdown", markdown_prompt)
+        self.assertIn("For text class:", markdown_prompt)
 
         html_prompt, html_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "table"},
@@ -173,7 +175,21 @@ class OcrExtractInternalsTests(unittest.TestCase):
                 {"not_content": True},
             ]
         }
-        self.assertEqual(ocr_extract._extract_text_from_response(payload), "A\nB\nC")
+        self.assertEqual(ocr_extract._extract_text_from_response(payload), "A  B")
+
+    def test_extract_content_from_json_response_validates_schema(self) -> None:
+        self.assertEqual(
+            ocr_extract._extract_content_from_json_response('{"content":"ok"}'),
+            "ok",
+        )
+        with self.assertRaisesRegex(RuntimeError, "not valid JSON"):
+            ocr_extract._extract_content_from_json_response("not-json")
+        with self.assertRaisesRegex(RuntimeError, "must be an object"):
+            ocr_extract._extract_content_from_json_response('["content"]')
+        with self.assertRaisesRegex(RuntimeError, "exactly one key"):
+            ocr_extract._extract_content_from_json_response('{"content":"ok","extra":"x"}')
+        with self.assertRaisesRegex(RuntimeError, '"content" must be a string'):
+            ocr_extract._extract_content_from_json_response('{"content":1}')
 
     def test_normalize_text_nfc_collapses_equivalent_unicode_sequences(self) -> None:
         decomposed = "е\u0308"  # cyrillic e + combining diaeresis

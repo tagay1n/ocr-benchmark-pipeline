@@ -38,16 +38,25 @@ class OcrPromptsTests(unittest.TestCase):
         )
         self.assertEqual(ocr_prompts.format_rule_for_output_format("skip"), "")
 
+    def test_class_rule_mapping(self) -> None:
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("text"),
+            ocr_prompts.CLASS_RULE_TEXT,
+        )
+        self.assertEqual(ocr_prompts.class_rule_for_layout_class("table"), "")
+
     def test_render_prompt_template_replaces_known_placeholders(self) -> None:
         rendered = ocr_prompts.render_prompt_template(
-            "class={class_name}; cap={caption_line}; targets={caption_targets}; rule={format_rule}",
+            "class={class_name}; cap={caption_line}; targets={caption_targets}; class_rule={class_rule}; rule={format_rule}",
             class_name="caption",
             caption_targets=["table [id:1]", "formula [id:2]"],
+            class_rule="CLASS-RULE",
             format_rule="RULE",
         )
         self.assertIn("class=caption", rendered)
         self.assertIn("cap= Caption targets: table [id:1], formula [id:2].", rendered)
         self.assertIn("targets=table [id:1], formula [id:2]", rendered)
+        self.assertIn("class_rule=CLASS-RULE", rendered)
         self.assertIn("rule=RULE", rendered)
 
 

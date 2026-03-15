@@ -25,6 +25,7 @@ from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import CaptionBinding, Layout, OcrOutput, Page
 from .ocr_prompts import (
     DEFAULT_PROMPT_TEMPLATE,
+    class_rule_for_layout_class,
     format_rule_for_output_format,
     render_prompt_template,
 )
@@ -105,7 +106,6 @@ def _extract_text_from_response(payload: dict[str, Any]) -> str:
     candidates = payload.get("candidates")
     if not isinstance(candidates, list):
         return ""
-    fragments: list[str] = []
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
@@ -115,13 +115,35 @@ def _extract_text_from_response(payload: dict[str, Any]) -> str:
         parts = content.get("parts")
         if not isinstance(parts, list):
             continue
+        fragments: list[str] = []
         for part in parts:
             if not isinstance(part, dict):
                 continue
             text = part.get("text")
-            if isinstance(text, str) and text.strip():
-                fragments.append(text.strip())
-    return "\n".join(fragments).strip()
+            if isinstance(text, str):
+                fragments.append(text)
+        joined = "".join(fragments).strip()
+        if joined:
+            return joined
+    return ""
+
+
+def _extract_content_from_json_response(raw_text: str) -> str:
+    text = str(raw_text).strip()
+    if not text:
+        raise RuntimeError("Gemini response text is empty.")
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"Gemini response is not valid JSON: {error.msg}.") from error
+    if not isinstance(payload, dict):
+        raise RuntimeError("Gemini response JSON must be an object.")
+    if set(payload.keys()) != {"content"}:
+        raise RuntimeError('Gemini response JSON must contain exactly one key: "content".')
+    content = payload.get("content")
+    if not isinstance(content, str):
+        raise RuntimeError('Gemini response JSON field "content" must be a string.')
+    return content
 
 
 def _gemini_generate_content(
@@ -141,7 +163,10 @@ def _gemini_generate_content(
                 ],
             }
         ],
-        "generationConfig": {"temperature": float(temperature)},
+        "generationConfig": {
+            "temperature": float(temperature),
+            "responseMimeType": "application/json",
+        },
     }
     request_payload = json.dumps(payload, ensure_ascii=True).encode("utf-8")
     request = urllib_request.Request(
@@ -162,10 +187,10 @@ def _gemini_generate_content(
     except json.JSONDecodeError as error:
         raise RuntimeError("Gemini request returned invalid JSON.") from error
 
-    output = _extract_text_from_response(response_payload)
-    if not output:
+    raw_output = _extract_text_from_response(response_payload)
+    if not raw_output:
         raise RuntimeError("Gemini request returned an empty response.")
-    return output
+    return _extract_content_from_json_response(raw_output)
 
 
 def _is_quota_error(message: str) -> bool:
@@ -197,10 +222,12 @@ def _prompt_for_layout(
         return ("", "skip")
 
     format_rule = format_rule_for_output_format(output_format)
+    class_rule = class_rule_for_layout_class(class_name)
     prompt = render_prompt_template(
         prompt_template,
         class_name=class_name,
         caption_targets=caption_targets,
+        class_rule=class_rule,
         format_rule=format_rule,
     )
     return (prompt, output_format)

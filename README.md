@@ -127,6 +127,11 @@ Prompt source-of-truth (editable):
 
 - `app/ocr_prompts.py`
 
+Gemini OCR response contract:
+
+- Gemini must return JSON with exactly one key: `{"content":"..."}`
+- Backend validates JSON shape and retries per existing retry policy on invalid responses.
+
 Each OCR extraction run writes resolved text prompts (without image clip bytes) to:
 
 - `_artifacts/ocr_prompts/<timestamp>_page_<page_id>.jsonl`
