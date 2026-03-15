@@ -1054,6 +1054,7 @@ def get_latest_benchmark_status() -> dict[str, Any]:
 
 def get_layout_benchmark_grid() -> dict[str, Any]:
     eligible_pages_count = len(_load_eligible_pages())
+    active_config_keys = {_config_key(config) for config in _benchmark_configs()}
     with get_session() as session:
         rows = session.execute(
             select(LayoutBenchmarkResult).order_by(
@@ -1114,8 +1115,15 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
             bucket["hard_case_score_sum"] += score
             bucket["hard_case_page_count"] += 1
 
+    active_aggregate = {
+        key: bucket
+        for key, bucket in aggregate.items()
+        if key in active_config_keys
+    }
+    aggregate_source = active_aggregate if active_aggregate else aggregate
+
     grid_rows: list[dict[str, Any]] = []
-    for bucket in aggregate.values():
+    for bucket in aggregate_source.values():
         page_count = int(bucket["page_count"])
         score_sum = float(bucket["score_sum"])
         score_sum_sq = float(bucket["score_sum_sq"])

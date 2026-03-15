@@ -395,6 +395,54 @@ class LayoutBenchmarkTests(unittest.TestCase):
         # full coverage is reached again.
         self.assertEqual(int(payload["rows"][0]["page_count"]), 2)
 
+    def test_layout_benchmark_grid_hides_historical_non_grid_configs(self) -> None:
+        page_ids = self._seed_reviewed_pages(1)
+        page_id = int(page_ids[0])
+
+        with (
+            patch.object(layout_benchmark, "BENCHMARK_MODEL_CHECKPOINTS", ("bench-b.pt",)),
+            patch.object(layout_benchmark, "BENCHMARK_IMAGE_SIZES", (512,)),
+            patch.object(layout_benchmark, "BENCHMARK_CONFIDENCE_THRESHOLDS", (0.2,)),
+            patch.object(layout_benchmark, "BENCHMARK_IOU_THRESHOLDS", (0.5,)),
+            patch.object(
+                layout_benchmark,
+                "_detect_doclaynet_layouts",
+                return_value=self._fake_detect("bench-b.pt"),
+            ),
+        ):
+            layout_benchmark.run_layout_benchmark(force_full_rerun=False)
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                layout_benchmark.LayoutBenchmarkResult(
+                    page_id=page_id,
+                    page_fingerprint="legacy",
+                    model_checkpoint="legacy-model.pt",
+                    image_size=1024,
+                    confidence_threshold=0.15,
+                    iou_threshold=0.35,
+                    score=0.999,
+                    metrics_json="{}",
+                    predictions_json="[]",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        with (
+            patch.object(layout_benchmark, "BENCHMARK_MODEL_CHECKPOINTS", ("bench-b.pt",)),
+            patch.object(layout_benchmark, "BENCHMARK_IMAGE_SIZES", (512,)),
+            patch.object(layout_benchmark, "BENCHMARK_CONFIDENCE_THRESHOLDS", (0.2,)),
+            patch.object(layout_benchmark, "BENCHMARK_IOU_THRESHOLDS", (0.5,)),
+        ):
+            payload = main.layout_benchmark_grid()
+        self.assertGreaterEqual(len(payload["rows"]), 1)
+        self.assertTrue(
+            all(str(row["model_checkpoint"]) == "bench-b.pt" for row in payload["rows"])
+        )
+        self.assertEqual(str(payload["best_config"]["model_checkpoint"]), "bench-b.pt")
+
     def test_layout_benchmark_stop_endpoint_cancels_queued_jobs(self) -> None:
         now = main._utc_now()
         with db.get_session() as session:
