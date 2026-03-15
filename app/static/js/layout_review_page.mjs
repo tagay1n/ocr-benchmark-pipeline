@@ -67,6 +67,9 @@
       const MAGNIFIER_ZOOM_STEP = 0.5;
       const MAGNIFIER_ZOOM_DEFAULT = 3;
       const MAGNIFIER_NEAR_BOTTOM_THRESHOLD = 36;
+      const RESIZE_HANDLE_SPACING_PX = 180;
+      const RESIZE_HANDLE_MIN_INTERMEDIATE = 1;
+      const RESIZE_HANDLE_MAX_INTERMEDIATE = 12;
       const STORAGE_KEYS = {
         layoutDraftPrefix: "layout.draft.page",
         zoomMode: "layout.zoom.mode",
@@ -1330,6 +1333,55 @@
         return bboxWithMinSize(next, handle);
       }
 
+      function intermediateResizeHandleCount(
+        sideLengthPx,
+        { spacingPx = 180, minCount = 1, maxCount = 10 } = {},
+      ) {
+        const side = Number(sideLengthPx);
+        const spacing = Number(spacingPx);
+        const min = Math.max(0, Math.floor(Number(minCount) || 0));
+        const max = Math.max(min, Math.floor(Number(maxCount) || min));
+        if (!Number.isFinite(side) || side <= 0 || !Number.isFinite(spacing) || spacing <= 0) {
+          return min;
+        }
+        const estimated = Math.floor(side / spacing);
+        return Math.max(min, Math.min(max, estimated));
+      }
+
+      function adaptiveResizeHandlesForBBox(bbox, overlayWidth, overlayHeight) {
+        const widthPx = Math.max(0, Math.abs(Number(bbox.x2) - Number(bbox.x1)) * overlayWidth);
+        const heightPx = Math.max(0, Math.abs(Number(bbox.y2) - Number(bbox.y1)) * overlayHeight);
+        const topCount = intermediateResizeHandleCount(widthPx, {
+          spacingPx: RESIZE_HANDLE_SPACING_PX,
+          minCount: RESIZE_HANDLE_MIN_INTERMEDIATE,
+          maxCount: RESIZE_HANDLE_MAX_INTERMEDIATE,
+        });
+        const sideCount = intermediateResizeHandleCount(heightPx, {
+          spacingPx: RESIZE_HANDLE_SPACING_PX,
+          minCount: RESIZE_HANDLE_MIN_INTERMEDIATE,
+          maxCount: RESIZE_HANDLE_MAX_INTERMEDIATE,
+        });
+
+        const handles = [
+          { key: "nw", xRatio: 0, yRatio: 0, cursor: "nwse-resize" },
+          { key: "ne", xRatio: 1, yRatio: 0, cursor: "nesw-resize" },
+          { key: "se", xRatio: 1, yRatio: 1, cursor: "nwse-resize" },
+          { key: "sw", xRatio: 0, yRatio: 1, cursor: "nesw-resize" },
+        ];
+
+        for (let index = 1; index <= topCount; index += 1) {
+          const ratio = index / (topCount + 1);
+          handles.push({ key: `n-${index}`, xRatio: ratio, yRatio: 0, cursor: "ns-resize" });
+          handles.push({ key: `s-${index}`, xRatio: ratio, yRatio: 1, cursor: "ns-resize" });
+        }
+        for (let index = 1; index <= sideCount; index += 1) {
+          const ratio = index / (sideCount + 1);
+          handles.push({ key: `e-${index}`, xRatio: 1, yRatio: ratio, cursor: "ew-resize" });
+          handles.push({ key: `w-${index}`, xRatio: 0, yRatio: ratio, cursor: "ew-resize" });
+        }
+        return handles;
+      }
+
       function beginOverlayDrag(event, layoutId, handle, boxElement, color) {
         if (event.button !== 0) {
           return;
@@ -1526,13 +1578,17 @@
             box.appendChild(bindBtn);
           }
 
-          for (const handle of ["nw", "n-edge-left", "n", "n-edge-right", "ne", "e", "se", "s-edge-right", "s", "s-edge-left", "sw", "w"]) {
+          const resizeHandles = adaptiveResizeHandlesForBBox(layout.bbox, overlayWidth, overlayHeight);
+          for (const handle of resizeHandles) {
             const handleEl = document.createElement("div");
             handleEl.className = "box-handle";
-            handleEl.dataset.handle = handle;
+            handleEl.dataset.handle = handle.key;
             handleEl.dataset.layoutId = String(layoutId);
+            handleEl.style.left = `${(handle.xRatio * 100).toFixed(4)}%`;
+            handleEl.style.top = `${(handle.yRatio * 100).toFixed(4)}%`;
+            handleEl.style.cursor = handle.cursor;
             handleEl.addEventListener("pointerdown", (event) => {
-              beginOverlayDrag(event, layoutId, handle, box, color);
+              beginOverlayDrag(event, layoutId, handle.key, box, color);
             });
             box.appendChild(handleEl);
           }

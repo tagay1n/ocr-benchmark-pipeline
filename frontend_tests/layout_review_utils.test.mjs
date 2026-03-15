@@ -10,6 +10,7 @@ import {
   computeApproxLineBandByIndex,
   computeDraggedBBox,
   computeOverlayBadgeScale,
+  intermediateResizeHandleCount,
   detectOverlappingBorderSegments,
   filterReviewHistory,
   mergeLayoutsForReview,
@@ -284,6 +285,25 @@ test("pointHandleForCoordinateKey maps bbox coordinates to corner handles", () =
   assert.equal(pointHandleForCoordinateKey("x2"), "se");
   assert.equal(pointHandleForCoordinateKey("y2"), "se");
   assert.equal(pointHandleForCoordinateKey("unknown"), null);
+});
+
+test("intermediateResizeHandleCount keeps at least one handle and scales with side length", () => {
+  assert.equal(intermediateResizeHandleCount(20), 1);
+  assert.equal(intermediateResizeHandleCount(180), 1);
+  assert.equal(intermediateResizeHandleCount(360), 2);
+  assert.equal(intermediateResizeHandleCount(1080), 6);
+  assert.equal(intermediateResizeHandleCount(Number.NaN), 1);
+});
+
+test("intermediateResizeHandleCount honors bounds and custom spacing", () => {
+  assert.equal(
+    intermediateResizeHandleCount(2000, { spacingPx: 100, minCount: 1, maxCount: 5 }),
+    5,
+  );
+  assert.equal(
+    intermediateResizeHandleCount(50, { spacingPx: 100, minCount: 1, maxCount: 5 }),
+    1,
+  );
 });
 
 test("compactReadingOrdersAfterDeletion shifts all orders after deleted position", () => {

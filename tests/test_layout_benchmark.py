@@ -124,8 +124,29 @@ class LayoutBenchmarkTests(unittest.TestCase):
         payload = main.layout_detection_defaults()
         self.assertIn("defaults", payload)
         self.assertIn("available_models", payload)
+        self.assertIn("top_configs", payload)
+        self.assertEqual(payload["top_configs"], [])
         self.assertGreaterEqual(len(payload["available_models"]), 1)
         self.assertEqual(payload["defaults"]["model_checkpoint"], "yolo26m-doclaynet.pt")
+
+    def test_layout_detection_defaults_endpoint_includes_top_3_benchmark_configs(self) -> None:
+        self._seed_reviewed_pages(1)
+        with (
+            patch.object(layout_benchmark, "BENCHMARK_MODEL_CHECKPOINTS", ("bench-a.pt", "bench-b.pt")),
+            patch.object(layout_benchmark, "BENCHMARK_IMAGE_SIZES", (512, 1024)),
+            patch.object(layout_benchmark, "BENCHMARK_CONFIDENCE_THRESHOLDS", (0.2,)),
+            patch.object(layout_benchmark, "BENCHMARK_IOU_THRESHOLDS", (0.5,)),
+            patch.object(layout_benchmark, "_detect_doclaynet_layouts", side_effect=lambda *_args, **kwargs: self._fake_detect(str(kwargs.get("model_checkpoint") or "bench-a.pt"))),
+        ):
+            layout_benchmark.run_layout_benchmark(force_full_rerun=False)
+
+        payload = main.layout_detection_defaults()
+        self.assertIn("top_configs", payload)
+        top_configs = payload["top_configs"]
+        self.assertEqual(len(top_configs), 3)
+        self.assertEqual(top_configs[0]["model_checkpoint"], "bench-b.pt")
+        self.assertEqual(int(top_configs[0]["image_size"]), 512)
+        self.assertGreater(float(top_configs[0]["mean_score"]), float(top_configs[-1]["mean_score"]))
 
     def test_layout_benchmark_run_endpoint_emits_enqueue_events(self) -> None:
         with patch.object(main, "enqueue_job", return_value=True):
@@ -337,6 +358,42 @@ class LayoutBenchmarkTests(unittest.TestCase):
         self.assertEqual(int(row["hard_case_page_count"]), 1)
         self.assertEqual(float(row["hard_case_score"]), 0.0)
         self.assertNotIn("per_class", row)
+
+    def test_layout_benchmark_grid_keeps_last_known_rows_with_partial_coverage(self) -> None:
+        self._seed_reviewed_pages(2)
+
+        with (
+            patch.object(layout_benchmark, "BENCHMARK_MODEL_CHECKPOINTS", ("bench-b.pt",)),
+            patch.object(layout_benchmark, "BENCHMARK_IMAGE_SIZES", (512,)),
+            patch.object(layout_benchmark, "BENCHMARK_CONFIDENCE_THRESHOLDS", (0.2,)),
+            patch.object(layout_benchmark, "BENCHMARK_IOU_THRESHOLDS", (0.5,)),
+            patch.object(
+                layout_benchmark,
+                "_detect_doclaynet_layouts",
+                return_value=self._fake_detect("bench-b.pt"),
+            ),
+        ):
+            layout_benchmark.run_layout_benchmark(force_full_rerun=False)
+
+        # Add one more reviewed page after benchmark run. This page has no
+        # benchmark row yet, so coverage is partial.
+        self._seed_reviewed_page_with_layouts(
+            "bench/late_added.png",
+            [
+                main.CreateLayoutRequest(
+                    class_name="text",
+                    reading_order=1,
+                    bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.8, y2=0.8),
+                )
+            ],
+        )
+
+        payload = main.layout_benchmark_grid()
+        self.assertGreaterEqual(len(payload["rows"]), 1)
+        self.assertEqual(int(payload["total_eligible_pages"]), 3)
+        # Keep last known benchmark rows instead of hiding all rows until
+        # full coverage is reached again.
+        self.assertEqual(int(payload["rows"][0]["page_count"]), 2)
 
     def test_layout_benchmark_stop_endpoint_cancels_queued_jobs(self) -> None:
         now = main._utc_now()
@@ -598,6 +655,42 @@ class LayoutBenchmarkTests(unittest.TestCase):
         ]
         mismatch_score, _mismatch_metrics = layout_benchmark._map50_95_score(gt_list_item, text_pred)
         self.assertEqual(mismatch_score, 0.0)
+
+    def test_benchmark_excludes_picture_text_from_scoring(self) -> None:
+        gt = (
+            {
+                "class_name": "text",
+                "bbox": {"x1": 0.1, "y1": 0.1, "x2": 0.6, "y2": 0.6},
+            },
+            {
+                "class_name": "picture_text",
+                "bbox": {"x1": 0.65, "y1": 0.1, "x2": 0.95, "y2": 0.3},
+            },
+        )
+        pred = [
+            {
+                "class_name": "text",
+                "x1": 0.1,
+                "y1": 0.1,
+                "x2": 0.6,
+                "y2": 0.6,
+            },
+            {
+                "class_name": "picture_text",
+                "x1": 0.2,
+                "y1": 0.2,
+                "x2": 0.4,
+                "y2": 0.4,
+            },
+        ]
+
+        score, metrics = layout_benchmark._map50_95_score(gt, pred)
+        self.assertEqual(score, 1.0)
+        self.assertEqual(float(metrics["map50"]), 1.0)
+
+        normalized_predictions = layout_benchmark._normalize_prediction_rows(pred)
+        self.assertEqual(len(normalized_predictions), 1)
+        self.assertEqual(str(normalized_predictions[0]["class_name"]), "text")
 
 
 if __name__ == "__main__":

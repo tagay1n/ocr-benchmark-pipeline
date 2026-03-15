@@ -151,26 +151,28 @@
         color: transparent;
       }
 
-      #benchmark-toggle-btn.is-busy::after {
-        content: "";
-        position: absolute;
-        width: 14px;
-        height: 14px;
-        border-radius: 999px;
-        border: 2px solid rgba(255, 255, 255, 0.45);
-        border-top-color: #ffffff;
-        animation: spin 720ms linear infinite;
-      }
-
+      #benchmark-toggle-btn.is-busy::after,
       #benchmark-rescore-btn.is-busy::after {
         content: "";
         position: absolute;
+        left: 50%;
+        top: 50%;
         width: 14px;
         height: 14px;
+        margin-left: -7px;
+        margin-top: -7px;
         border-radius: 999px;
+        animation: spin 720ms linear infinite;
+      }
+
+      #benchmark-toggle-btn.is-busy::after {
+        border: 2px solid rgba(255, 255, 255, 0.45);
+        border-top-color: #ffffff;
+      }
+
+      #benchmark-rescore-btn.is-busy::after {
         border: 2px solid rgba(11, 122, 117, 0.35);
         border-top-color: var(--accent);
-        animation: spin 720ms linear infinite;
       }
 
       @keyframes spin {

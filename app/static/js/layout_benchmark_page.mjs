@@ -59,6 +59,7 @@ function configKey(config) {
     String(config.model_checkpoint || ""),
     String(Number(config.image_size || 0)),
     toNumberKey(config.confidence_threshold || 0),
+    toNumberKey(config.iou_threshold),
   ].join("|");
 }
 

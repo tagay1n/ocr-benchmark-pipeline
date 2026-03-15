@@ -1158,11 +1158,6 @@ def get_layout_benchmark_grid() -> dict[str, Any]:
             int(row["image_size"]),
         )
     )
-    if eligible_pages_count > 0:
-        grid_rows = [
-            row for row in grid_rows
-            if int(row.get("page_count") or 0) >= eligible_pages_count
-        ]
     best_row = grid_rows[0] if grid_rows else None
     return {
         "rows": grid_rows,

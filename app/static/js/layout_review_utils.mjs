@@ -283,6 +283,21 @@ export function pointHandleForCoordinateKey(key) {
   return null;
 }
 
+export function intermediateResizeHandleCount(
+  sideLengthPx,
+  { spacingPx = 180, minCount = 1, maxCount = 10 } = {},
+) {
+  const side = Number(sideLengthPx);
+  const spacing = Number(spacingPx);
+  const min = Math.max(0, Math.floor(Number(minCount) || 0));
+  const max = Math.max(min, Math.floor(Number(maxCount) || min));
+  if (!Number.isFinite(side) || side <= 0 || !Number.isFinite(spacing) || spacing <= 0) {
+    return min;
+  }
+  const estimated = Math.floor(side / spacing);
+  return Math.max(min, Math.min(max, estimated));
+}
+
 export function compactReadingOrdersAfterDeletion(layouts, deletedOrder) {
   const threshold = Number(deletedOrder);
   if (!Number.isInteger(threshold) || threshold < 1) {
