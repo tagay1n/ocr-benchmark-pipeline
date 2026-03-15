@@ -221,6 +221,34 @@ class OcrExtractInternalsTests(unittest.TestCase):
             "## Existing heading",
         )
 
+    def test_list_item_indent_level_and_normalization(self) -> None:
+        self.assertEqual(ocr_extract._list_item_indent_level_from_x1(0.20, 0.20), 0)
+        self.assertEqual(ocr_extract._list_item_indent_level_from_x1(0.26, 0.20), 2)
+        self.assertEqual(
+            ocr_extract._normalize_list_item_line("1) Item", indent_level=1),
+            "  1) Item",
+        )
+        self.assertEqual(
+            ocr_extract._normalize_list_item_line("• Item", indent_level=0),
+            "- Item",
+        )
+        self.assertEqual(
+            ocr_extract._normalize_list_item_line("Item without marker", indent_level=2),
+            "    - Item without marker",
+        )
+
+    def test_list_item_indent_levels_by_layout_id(self) -> None:
+        layouts = [
+            {"id": 11, "class_name": "list_item", "bbox": {"x1": 0.10}},
+            {"id": 12, "class_name": "list_item", "bbox": {"x1": 0.16}},
+            {"id": 13, "class_name": "list_item", "bbox": {"x1": 0.25}},
+            {"id": 14, "class_name": "text", "bbox": {"x1": 0.05}},
+        ]
+        levels = ocr_extract._list_item_indent_levels_by_layout_id(layouts)
+        self.assertEqual(levels[11], 0)
+        self.assertGreaterEqual(levels[12], 1)
+        self.assertGreaterEqual(levels[13], levels[12])
+
     def test_normalize_text_nfc_collapses_equivalent_unicode_sequences(self) -> None:
         decomposed = "е\u0308"  # cyrillic e + combining diaeresis
         composed = normalize_text_nfc(decomposed)
@@ -376,6 +404,46 @@ class OcrExtractInternalsTests(unittest.TestCase):
         section_output = by_layout[int(section_layout["id"])]
         self.assertEqual(section_output["class_name"], "section_header")
         self.assertTrue(str(section_output["content"]).startswith("## "))
+
+    def test_extract_ocr_for_page_formats_list_items_with_markers_and_indent(self) -> None:
+        self._write_image("ocr/list-item-formatting.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        root_item = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="list_item",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.10, y1=0.10, x2=0.90, y2=0.14),
+            ),
+        )["layout"]
+        nested_item = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="list_item",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.18, y1=0.15, x2=0.90, y2=0.19),
+            ),
+        )["layout"]
+        ordered_item = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="list_item",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.10, y1=0.20, x2=0.90, y2=0.24),
+            ),
+        )["layout"]
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", side_effect=["Root", "Nested", "3) Ordered"]
+        ):
+            ocr_extract.extract_ocr_for_page(page_id)
+
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        by_layout = {int(output["layout_id"]): output for output in outputs}
+        self.assertEqual(str(by_layout[int(root_item["id"])]["content"]), "- Root")
+        self.assertRegex(str(by_layout[int(nested_item["id"])]["content"]), r"^\s+-\s+Nested$")
+        self.assertEqual(str(by_layout[int(ordered_item["id"])]["content"]), "3) Ordered")
 
     def test_extract_ocr_for_page_skip_layout_writes_skip_output_without_requests(self) -> None:
         self.test_settings = Settings(

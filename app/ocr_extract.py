@@ -43,6 +43,9 @@ class GeminiQuotaExhaustedError(RuntimeError):
 _SECTION_HEADER_LEVEL_H2 = 2
 _SECTION_HEADER_LEVEL_H3 = 3
 _SECTION_HEADER_LEVEL_H4 = 4
+_LIST_INDENT_EPSILON = 0.03
+_ORDERED_LIST_PREFIX_RE = re.compile(r"^\s*((?:\d+|[A-Za-zА-Яа-яЁё])[.)])\s+")
+_UNORDERED_LIST_PREFIX_RE = re.compile(r"^\s*([-*•‣▪◦])\s+")
 
 
 def _layout_height_ratio(layout: dict[str, Any]) -> float:
@@ -144,6 +147,59 @@ def _apply_section_header_heading_level(content: str, level: int) -> str:
         heading_text = lines[first_content_idx].strip()
     lines[first_content_idx] = f"{'#' * safe_level} {heading_text}".strip()
     return "\n".join(lines).strip()
+
+
+def _list_item_indent_level_from_x1(x1: float, baseline_x1: float) -> int:
+    delta = max(0.0, float(x1) - float(baseline_x1))
+    return int(delta / _LIST_INDENT_EPSILON)
+
+
+def _normalize_list_item_line(
+    content: str,
+    *,
+    indent_level: int,
+    fallback_marker: str = "-",
+) -> str:
+    text = str(content).strip()
+    if not text:
+        return text
+    ordered_match = _ORDERED_LIST_PREFIX_RE.match(text)
+    unordered_match = _UNORDERED_LIST_PREFIX_RE.match(text)
+    marker = ""
+    body = text
+    if ordered_match is not None:
+        marker = ordered_match.group(1).strip()
+        body = text[ordered_match.end() :].strip()
+    elif unordered_match is not None:
+        marker = fallback_marker
+        body = text[unordered_match.end() :].strip()
+    else:
+        marker = fallback_marker
+        body = text
+    if not body:
+        body = text
+    indent = "  " * max(0, int(indent_level))
+    return f"{indent}{marker} {body}".rstrip()
+
+
+def _list_item_indent_levels_by_layout_id(layouts: list[dict[str, Any]]) -> dict[int, int]:
+    list_items: list[tuple[int, float]] = []
+    for layout in layouts:
+        if normalize_class_name(str(layout.get("class_name", ""))) != "list_item":
+            continue
+        try:
+            layout_id = int(layout.get("id"))
+            x1 = float(layout.get("bbox", {}).get("x1", 0.0))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        list_items.append((layout_id, x1))
+    if not list_items:
+        return {}
+    baseline_x1 = min(x1 for _, x1 in list_items)
+    return {
+        layout_id: _list_item_indent_level_from_x1(x1, baseline_x1)
+        for layout_id, x1 in list_items
+    }
 
 
 def _utc_now() -> str:
@@ -495,6 +551,7 @@ def extract_ocr_for_page(
 
     exhausted_keys = _load_usage_state()
     section_header_levels = _section_header_levels_by_layout_id(layouts)
+    list_item_indent_levels = _list_item_indent_levels_by_layout_id(layouts)
 
     pending_outputs: list[dict[str, Any]] = []
     prompt_debug_rows: list[dict[str, Any]] = []
@@ -560,9 +617,13 @@ def extract_ocr_for_page(
             raise RuntimeError(f"OCR extraction failed for layout {layout['id']}: {last_error}")
 
         response_text = normalize_text_nfc(response_text)
-        if str(layout["class_name"]) == "section_header":
+        class_name = str(layout["class_name"])
+        if class_name == "section_header":
             target_level = section_header_levels.get(int(layout["id"]), _SECTION_HEADER_LEVEL_H3)
             response_text = _apply_section_header_heading_level(response_text, target_level)
+        elif class_name == "list_item":
+            indent_level = list_item_indent_levels.get(int(layout["id"]), 0)
+            response_text = _normalize_list_item_line(response_text, indent_level=indent_level, fallback_marker="-")
         lookalike_warnings = (
             detect_suspicious_lookalikes(response_text, markdown_code_aware=True)
             if output_format == "markdown"
