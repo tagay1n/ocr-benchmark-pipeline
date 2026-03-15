@@ -34,6 +34,26 @@ export function normalizeZoomMode(value, { fallback = "automatic", allowCustom =
   return fallback;
 }
 
+export function normalizeLayoutOrderMode(value, { fallback = "auto" } = {}) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "single-column" || normalized === "single") {
+    return "single";
+  }
+  if (normalized === "auto") {
+    return "auto";
+  }
+  if (normalized === "single") {
+    return "single";
+  }
+  if (normalized === "multi-column") {
+    return "multi-column";
+  }
+  if (normalized === "two-page") {
+    return "two-page";
+  }
+  return fallback;
+}
+
 export function formatZoomPercent(percentValue) {
   const rounded = Math.round(Number(percentValue) * 10) / 10;
   if (Number.isInteger(rounded)) {

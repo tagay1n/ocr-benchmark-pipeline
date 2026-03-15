@@ -10,7 +10,9 @@ from ..layouts import (
     get_page,
     list_layouts,
     mark_layout_reviewed,
+    reorder_page_layouts,
     replace_caption_bindings,
+    update_page_layout_order_mode,
     update_layout,
 )
 from ..models import Page
@@ -42,7 +44,9 @@ from .schemas import (
     DetectLayoutsRequest,
     FinalExportRequest,
     ReextractOcrRequest,
+    ReorderLayoutsRequest,
     ReplaceCaptionBindingsRequest,
+    UpdateLayoutOrderModeRequest,
     UpdateLayoutRequest,
     UpdateOcrOutputRequest,
 )
@@ -179,6 +183,29 @@ def page_layouts(page_id: int) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="Page not found.")
     layouts = list_layouts(page_id)
     return {"page_id": page_id, "count": len(layouts), "layouts": layouts}
+
+
+@router.patch("/api/pages/{page_id}/layout-order-mode")
+def patch_layout_order_mode(
+    page_id: int, payload: UpdateLayoutOrderModeRequest
+) -> dict[str, object]:
+    try:
+        return update_page_layout_order_mode(page_id, mode=payload.mode)
+    except ValueError as error:
+        message = str(error)
+        status_code = 404 if message == "Page not found." else 400
+        raise HTTPException(status_code=status_code, detail=message) from error
+
+
+@router.post("/api/pages/{page_id}/layouts/reorder")
+def reorder_layouts(page_id: int, payload: ReorderLayoutsRequest | None = None) -> dict[str, object]:
+    mode = None if payload is None else payload.mode
+    try:
+        return reorder_page_layouts(page_id, mode=mode)
+    except ValueError as error:
+        message = str(error)
+        status_code = 404 if message == "Page not found." else 400
+        raise HTTPException(status_code=status_code, detail=message) from error
 
 
 @router.get("/api/layout-review/next")

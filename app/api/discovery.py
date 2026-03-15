@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import and_, delete, func, or_, select
 
 from ..db import get_session
-from ..layouts import get_page
+from ..layouts import get_page, normalize_layout_order_mode
 from ..models import DuplicateFile, Layout, OcrOutput, Page, PipelineEvent, PipelineJob
 from ..ocr_review import list_ocr_outputs
 from ..pipeline_constants import (
@@ -255,6 +255,7 @@ def list_pages(
             "rel_path": row.rel_path,
             "status": row.status,
             "is_missing": bool(row.is_missing),
+            "layout_order_mode": normalize_layout_order_mode(getattr(row, "layout_order_mode", None)),
             "created_at": row.created_at,
             "updated_at": row.updated_at,
             "last_seen_at": row.last_seen_at,

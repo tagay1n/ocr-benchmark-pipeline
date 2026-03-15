@@ -10,6 +10,8 @@ import {
   fetchLayoutDetectionDefaults,
   patchLayout,
   putCaptionBindings,
+  reorderPageLayouts,
+  updateLayoutOrderMode,
 } from "../app/static/js/layout_review_api.mjs";
 import {
   completeOcrReview,
@@ -38,6 +40,8 @@ test("layout review API module sends expected routes, methods, and payloads", as
   try {
     await detectPageLayouts(7, { replace_existing: true, confidence_threshold: 0.25 });
     await createPageLayout(7, { class_name: "text", bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 } });
+    await updateLayoutOrderMode(7, { mode: "two-page" });
+    await reorderPageLayouts(7, { mode: "two-page" });
     await patchLayout(11, { class_name: "section_header" });
     await deleteLayout(11);
     await putCaptionBindings(7, { bindings: [{ caption_layout_id: 1, target_layout_ids: [2] }] });
@@ -48,7 +52,7 @@ test("layout review API module sends expected routes, methods, and payloads", as
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(calls.length, 8);
+  assert.equal(calls.length, 10);
   assert.equal(calls[0].url, "/api/pages/7/layouts/detect");
   assert.equal(calls[0].options.method, "POST");
   assert.match(String(calls[0].options.body), /confidence_threshold/);
@@ -57,22 +61,30 @@ test("layout review API module sends expected routes, methods, and payloads", as
   assert.equal(calls[1].options.method, "POST");
   assert.match(String(calls[1].options.body), /class_name/);
 
-  assert.equal(calls[2].url, "/api/layouts/11");
+  assert.equal(calls[2].url, "/api/pages/7/layout-order-mode");
   assert.equal(calls[2].options.method, "PATCH");
+  assert.match(String(calls[2].options.body), /two-page/);
 
-  assert.equal(calls[3].url, "/api/layouts/11");
-  assert.equal(calls[3].options.method, "DELETE");
+  assert.equal(calls[3].url, "/api/pages/7/layouts/reorder");
+  assert.equal(calls[3].options.method, "POST");
+  assert.match(String(calls[3].options.body), /two-page/);
 
-  assert.equal(calls[4].url, "/api/pages/7/caption-bindings");
-  assert.equal(calls[4].options.method, "PUT");
-  assert.match(String(calls[4].options.body), /caption_layout_id/);
+  assert.equal(calls[4].url, "/api/layouts/11");
+  assert.equal(calls[4].options.method, "PATCH");
 
-  assert.equal(calls[5].url, "/api/pages/7/layouts/review-complete");
-  assert.equal(calls[5].options.method, "POST");
-  assert.equal(calls[6].url, "/api/layout-detection/defaults");
-  assert.equal(calls[6].options, undefined);
-  assert.equal(calls[7].url, "/api/layout-benchmark/grid");
-  assert.equal(calls[7].options, undefined);
+  assert.equal(calls[5].url, "/api/layouts/11");
+  assert.equal(calls[5].options.method, "DELETE");
+
+  assert.equal(calls[6].url, "/api/pages/7/caption-bindings");
+  assert.equal(calls[6].options.method, "PUT");
+  assert.match(String(calls[6].options.body), /caption_layout_id/);
+
+  assert.equal(calls[7].url, "/api/pages/7/layouts/review-complete");
+  assert.equal(calls[7].options.method, "POST");
+  assert.equal(calls[8].url, "/api/layout-detection/defaults");
+  assert.equal(calls[8].options, undefined);
+  assert.equal(calls[9].url, "/api/layout-benchmark/grid");
+  assert.equal(calls[9].options, undefined);
 });
 
 test("ocr review API module sends expected routes and propagates backend detail errors", async () => {

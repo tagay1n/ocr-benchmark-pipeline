@@ -23,18 +23,15 @@ from .layout_classes import (
 )
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import CaptionBinding, Layout, OcrOutput, Page
+from .ocr_prompts import (
+    DEFAULT_PROMPT_TEMPLATE,
+    format_rule_for_output_format,
+    render_prompt_template,
+)
 
 GEMINI_MODEL = "gemini-3-flash-preview"
 MAX_RETRIES_PER_LAYOUT = 3
 DEFAULT_GEMINI_TEMPERATURE = 0.0
-DEFAULT_PROMPT_TEMPLATE = (
-    "Layout class: {class_name}.{caption_line}\n"
-    "Extract only the content inside this crop.\n"
-    "Return only extracted content, without explanations.\n"
-    "Preserve line breaks exactly as shown in the crop.\n"
-    "Do not dehyphenate words split by line breaks.\n"
-    "{format_rule}"
-)
 
 class GeminiQuotaExhaustedError(RuntimeError):
     pass
@@ -199,26 +196,13 @@ def _prompt_for_layout(
     if output_format == "skip":
         return ("", "skip")
 
-    format_rule = ""
-    if output_format == "markdown":
-        format_rule = "Output must be valid Markdown and preserve visible emphasis like bold/italic."
-    elif output_format == "html":
-        format_rule = "Output must be only one HTML <table>...</table> block."
-    elif output_format == "latex":
-        format_rule = "Output must be only LaTeX expression(s), no markdown wrapper."
-
-    caption_line = ""
-    if class_name == "caption" and caption_targets:
-        caption_line = f" Caption targets: {', '.join(caption_targets)}."
-
-    prompt = str(prompt_template)
-    prompt = prompt.replace("{class_name}", class_name)
-    prompt = prompt.replace("{caption_line}", caption_line)
-    prompt = prompt.replace("{caption_targets}", ", ".join(caption_targets))
-    prompt = prompt.replace("{format_rule}", format_rule)
-    prompt = prompt.strip()
-    if not prompt:
-        raise RuntimeError("OCR prompt template produced an empty prompt.")
+    format_rule = format_rule_for_output_format(output_format)
+    prompt = render_prompt_template(
+        prompt_template,
+        class_name=class_name,
+        caption_targets=caption_targets,
+        format_rule=format_rule,
+    )
     return (prompt, output_format)
 
 

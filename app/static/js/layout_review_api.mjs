@@ -40,6 +40,22 @@ export function createPageLayout(pageId, payload) {
   });
 }
 
+export function updateLayoutOrderMode(pageId, payload) {
+  return fetchJson(`/api/pages/${pageId}/layout-order-mode`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function reorderPageLayouts(pageId, payload = {}) {
+  return fetchJson(`/api/pages/${pageId}/layouts/reorder`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export function deleteLayout(layoutId) {
   return fetchJson(`/api/layouts/${layoutId}`, { method: "DELETE" });
 }

@@ -58,6 +58,7 @@ class PagesPaginationApiTests(unittest.TestCase):
         self.assertEqual(first["direction"], "asc")
         first_ids = [int(page["id"]) for page in first["pages"]]
         self.assertEqual(first_ids, [1, 2])
+        self.assertEqual(first["pages"][0]["layout_order_mode"], "auto")
         self.assertTrue(first["next_cursor"])
 
         second = main.list_pages(limit=2, sort="id", direction="asc", cursor=first["next_cursor"])

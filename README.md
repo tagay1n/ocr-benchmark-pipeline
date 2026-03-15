@@ -30,6 +30,8 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
 - Layout review (`/static/layouts.html?page_id=<id>`):
   - Editable class, reading order, bbox.
   - Drag-and-drop reading order.
+  - Per-page reading-order mode selector: `Auto`, `Single`, `Multi-column`, `Two-page`.
+  - `Reorder` action recomputes reading order from the selected mode.
   - Bbox editing from table and by canvas handles.
   - Overlapping bbox borders are highlighted with striped warning segments.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with layout overlays.
@@ -105,6 +107,8 @@ node --test frontend_tests/*.test.mjs
 - `GET /api/pages/summary`
 - `DELETE /api/pages/{page_id}`
 - `GET /api/pages/{page_id}/layouts`
+- `PATCH /api/pages/{page_id}/layout-order-mode`
+- `POST /api/pages/{page_id}/layouts/reorder`
 - `POST /api/pages/{page_id}/layouts/detect`
 - `POST /api/pages/{page_id}/layouts/review-complete`
 - `GET /api/pages/{page_id}/ocr-outputs`
@@ -118,6 +122,10 @@ node --test frontend_tests/*.test.mjs
 - `POST /api/layout-benchmark/stop`
 
 ## OCR Prompt Debug Artifacts
+
+Prompt source-of-truth (editable):
+
+- `app/ocr_prompts.py`
 
 Each OCR extraction run writes resolved text prompts (without image clip bytes) to:
 

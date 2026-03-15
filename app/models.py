@@ -16,6 +16,7 @@ class Page(Base):
     rel_path: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     file_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="new")
+    layout_order_mode: Mapped[str] = mapped_column(String, nullable=False, default="auto")
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
     last_seen_at: Mapped[str] = mapped_column(String, nullable=False)

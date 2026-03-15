@@ -229,10 +229,40 @@ def _migrate_sqlite_layout_benchmark_predictions_column(engine: Engine) -> None:
             connection.commit()
 
 
+def _migrate_sqlite_pages_layout_order_mode_column(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.connect() as connection:
+        if not _sqlite_table_exists(connection, "pages"):
+            return
+        if not _sqlite_table_has_column(connection, "pages", "layout_order_mode"):
+            if connection.in_transaction():
+                connection.commit()
+            connection.exec_driver_sql(
+                "ALTER TABLE pages ADD COLUMN layout_order_mode VARCHAR NOT NULL DEFAULT 'auto';"
+            )
+            if connection.in_transaction():
+                connection.commit()
+
+        connection.exec_driver_sql(
+            """
+            UPDATE pages
+            SET layout_order_mode = 'auto'
+            WHERE lower(trim(replace(layout_order_mode, '_', '-'))) NOT IN (
+                'auto', 'single', 'single-column', 'multi-column', 'two-page'
+            )
+            """
+        )
+        if connection.in_transaction():
+            connection.commit()
+
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite_layouts_order_constraints(engine)
     _migrate_sqlite_layout_benchmark_predictions_column(engine)
+    _migrate_sqlite_pages_layout_order_mode_column(engine)
     # Ensure metadata-defined indexes/constraints are present after migrations.
     Base.metadata.create_all(bind=engine)

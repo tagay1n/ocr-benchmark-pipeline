@@ -23,6 +23,7 @@ import {
   guessManualReadingOrderByY,
   hasContiguousUniqueReadingOrders,
   isLayoutNotFoundErrorMessage,
+  normalizeLayoutOrderMode,
   normalizeReviewHistory,
   normalizeZoomMode,
   nextHistoryPageId,
@@ -54,6 +55,17 @@ test("normalizeZoomMode accepts known modes and falls back for invalid values", 
   assert.equal(normalizeZoomMode("custom", { allowCustom: false }), "automatic");
   assert.equal(normalizeZoomMode("invalid"), "automatic");
   assert.equal(normalizeZoomMode("", { fallback: "fit-page" }), "fit-page");
+});
+
+test("normalizeLayoutOrderMode accepts aliases and falls back for invalid values", () => {
+  assert.equal(normalizeLayoutOrderMode("auto"), "auto");
+  assert.equal(normalizeLayoutOrderMode("single"), "single");
+  assert.equal(normalizeLayoutOrderMode("single-column"), "single");
+  assert.equal(normalizeLayoutOrderMode("multi_column"), "multi-column");
+  assert.equal(normalizeLayoutOrderMode("two-page"), "two-page");
+  assert.equal(normalizeLayoutOrderMode("manual"), "auto");
+  assert.equal(normalizeLayoutOrderMode("unknown"), "auto");
+  assert.equal(normalizeLayoutOrderMode("", { fallback: "single" }), "single");
 });
 
 test("formatZoomPercent renders integer and 1-decimal labels", () => {

@@ -97,6 +97,8 @@ class ApiContractAndStreamTests(unittest.TestCase):
         self.assertIn("/api/layout-benchmark/run", paths)
         self.assertIn("/api/layout-benchmark/stop", paths)
         self.assertIn("/api/layout-benchmark/rescore", paths)
+        self.assertIn("/api/pages/{page_id}/layout-order-mode", paths)
+        self.assertIn("/api/pages/{page_id}/layouts/reorder", paths)
         self.assertIn("post", paths["/api/final/export"])
         final_export_post = paths["/api/final/export"]["post"]
         request_body = final_export_post.get("requestBody", {})

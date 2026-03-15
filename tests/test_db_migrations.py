@@ -112,6 +112,15 @@ class DbMigrationsTests(unittest.TestCase):
             self.assertIn("check(reading_order>=1)", table_sql)
             self.assertIn("unique(page_id,reading_order)", table_sql)
 
+            page_table_sql = str(
+                verify.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='pages'").fetchone()[0]
+            ).lower().replace(" ", "")
+            self.assertIn("layout_order_mode", page_table_sql)
+            page_mode = str(
+                verify.execute("SELECT layout_order_mode FROM pages WHERE id = ?", (page_id,)).fetchone()[0]
+            )
+            self.assertEqual(page_mode, "auto")
+
             orders = [
                 int(row[0])
                 for row in verify.execute(

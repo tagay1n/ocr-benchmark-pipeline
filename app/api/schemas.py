@@ -32,6 +32,14 @@ class UpdateLayoutRequest(BaseModel):
     bbox: BBoxPayload | None = None
 
 
+class UpdateLayoutOrderModeRequest(BaseModel):
+    mode: str = Field(min_length=1, max_length=32)
+
+
+class ReorderLayoutsRequest(BaseModel):
+    mode: str | None = Field(default=None, min_length=1, max_length=32)
+
+
 class WipeStateRequest(BaseModel):
     confirm: bool = False
     rescan: bool = True

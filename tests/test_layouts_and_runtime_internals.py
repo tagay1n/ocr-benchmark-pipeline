@@ -149,6 +149,338 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         page_layouts = main.page_layouts(page_id)["layouts"]
         self.assertEqual([int(row["reading_order"]) for row in page_layouts], [1, 2, 3, 4])
 
+    def test_layout_order_mode_manual_alias_normalizes_to_auto(self) -> None:
+        self._write_image("layout/manual-alias-mode.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.4, x2=0.3, y2=0.5),
+            ),
+        )
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.6, x2=0.3, y2=0.7),
+            ),
+        )
+
+        mode_payload = main.patch_layout_order_mode(
+            page_id,
+            main.UpdateLayoutOrderModeRequest(mode="manual"),
+        )
+        self.assertEqual(mode_payload["layout_order_mode"], "auto")
+
+    def test_create_layout_single_mode_inserts_by_reading_position(self) -> None:
+        self._write_image("layout/single-mode-insert.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        top_left = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.05, y1=0.10, x2=0.3, y2=0.2),
+            ),
+        )["layout"]
+        lower_left = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.05, y1=0.45, x2=0.3, y2=0.55),
+            ),
+        )["layout"]
+        self.assertEqual(int(top_left["reading_order"]), 1)
+        self.assertEqual(int(lower_left["reading_order"]), 2)
+
+        mode_payload = main.patch_layout_order_mode(
+            page_id,
+            main.UpdateLayoutOrderModeRequest(mode="single"),
+        )
+        self.assertEqual(mode_payload["layout_order_mode"], "single")
+
+        inserted = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.7, y1=0.2, x2=0.9, y2=0.3),
+            ),
+        )["layout"]
+        self.assertEqual(int(inserted["reading_order"]), 2)
+
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual(
+            [int(row["id"]) for row in page_layouts],
+            [int(top_left["id"]), int(inserted["id"]), int(lower_left["id"])],
+        )
+
+    def test_reorder_layouts_applies_multi_column_strategy(self) -> None:
+        self._write_image("layout/multi-column-reorder.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        left_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.10, x2=0.38, y2=0.18),
+            ),
+        )["layout"]
+        right_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.58, y1=0.10, x2=0.88, y2=0.18),
+            ),
+        )["layout"]
+        left_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.28, x2=0.38, y2=0.36),
+            ),
+        )["layout"]
+        right_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=4,
+                bbox=main.BBoxPayload(x1=0.58, y1=0.28, x2=0.88, y2=0.36),
+            ),
+        )["layout"]
+
+        payload = main.reorder_layouts(
+            page_id,
+            main.ReorderLayoutsRequest(mode="multi-column"),
+        )
+        self.assertEqual(payload["layout_order_mode"], "multi-column")
+        self.assertTrue(bool(payload["changed"]))
+
+        ordered_ids = [int(row["id"]) for row in main.page_layouts(page_id)["layouts"]]
+        self.assertEqual(
+            ordered_ids,
+            [int(left_top["id"]), int(left_bottom["id"]), int(right_top["id"]), int(right_bottom["id"])],
+        )
+
+    def test_reorder_layouts_multi_column_does_not_prefix_bottom_spanning_blocks(self) -> None:
+        self._write_image("layout/multi-column-bottom-spanning.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        left_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.10, x2=0.40, y2=0.18),
+            ),
+        )["layout"]
+        right_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.58, y1=0.10, x2=0.90, y2=0.18),
+            ),
+        )["layout"]
+        left_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.26, x2=0.40, y2=0.34),
+            ),
+        )["layout"]
+        right_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=4,
+                bbox=main.BBoxPayload(x1=0.58, y1=0.26, x2=0.90, y2=0.34),
+            ),
+        )["layout"]
+        bottom_spanning = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=5,
+                bbox=main.BBoxPayload(x1=0.10, y1=0.78, x2=0.90, y2=0.86),
+            ),
+        )["layout"]
+
+        payload = main.reorder_layouts(
+            page_id,
+            main.ReorderLayoutsRequest(mode="multi-column"),
+        )
+        self.assertEqual(payload["layout_order_mode"], "multi-column")
+        self.assertTrue(bool(payload["changed"]))
+
+        ordered_ids = [int(row["id"]) for row in main.page_layouts(page_id)["layouts"]]
+        self.assertEqual(
+            ordered_ids,
+            [
+                int(left_top["id"]),
+                int(left_bottom["id"]),
+                int(right_top["id"]),
+                int(right_bottom["id"]),
+                int(bottom_spanning["id"]),
+            ],
+        )
+
+    def test_reorder_layouts_auto_handles_multi_to_single_transition(self) -> None:
+        self._write_image("layout/auto-multi-to-single-transition.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        header = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="section_header",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.12, y1=0.08, x2=0.88, y2=0.12),
+            ),
+        )["layout"]
+        left_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.10, y1=0.13, x2=0.45, y2=0.30),
+            ),
+        )["layout"]
+        right_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.55, y1=0.13, x2=0.90, y2=0.30),
+            ),
+        )["layout"]
+        left_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=4,
+                bbox=main.BBoxPayload(x1=0.10, y1=0.31, x2=0.45, y2=0.56),
+            ),
+        )["layout"]
+        right_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=5,
+                bbox=main.BBoxPayload(x1=0.55, y1=0.31, x2=0.90, y2=0.56),
+            ),
+        )["layout"]
+        single_bottom_1 = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=6,
+                bbox=main.BBoxPayload(x1=0.12, y1=0.74, x2=0.88, y2=0.80),
+            ),
+        )["layout"]
+        single_bottom_2 = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=7,
+                bbox=main.BBoxPayload(x1=0.12, y1=0.81, x2=0.88, y2=0.87),
+            ),
+        )["layout"]
+
+        # Shuffle current order to validate recomputation from geometry.
+        main.patch_layout(int(single_bottom_1["id"]), main.UpdateLayoutRequest(reading_order=1))
+        main.patch_layout(int(header["id"]), main.UpdateLayoutRequest(reading_order=7))
+
+        payload = main.reorder_layouts(
+            page_id,
+            main.ReorderLayoutsRequest(mode="auto"),
+        )
+        self.assertEqual(payload["layout_order_mode"], "auto")
+        self.assertTrue(bool(payload["changed"]))
+
+        ordered_ids = [int(row["id"]) for row in main.page_layouts(page_id)["layouts"]]
+        self.assertEqual(
+            ordered_ids,
+            [
+                int(header["id"]),
+                int(left_top["id"]),
+                int(left_bottom["id"]),
+                int(right_top["id"]),
+                int(right_bottom["id"]),
+                int(single_bottom_1["id"]),
+                int(single_bottom_2["id"]),
+            ],
+        )
+
+    def test_reorder_layouts_auto_detects_two_page_structure(self) -> None:
+        self._write_image("layout/two-page-auto-reorder.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        left_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.07, y1=0.10, x2=0.34, y2=0.18),
+            ),
+        )["layout"]
+        right_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.66, y1=0.10, x2=0.93, y2=0.18),
+            ),
+        )["layout"]
+        left_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.07, y1=0.24, x2=0.34, y2=0.32),
+            ),
+        )["layout"]
+        right_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=4,
+                bbox=main.BBoxPayload(x1=0.66, y1=0.24, x2=0.93, y2=0.32),
+            ),
+        )["layout"]
+
+        # Make initial order cross-page by Y to verify auto mode can reorder left page first.
+        main.patch_layout(int(right_top["id"]), main.UpdateLayoutRequest(reading_order=2))
+        main.patch_layout(int(left_bottom["id"]), main.UpdateLayoutRequest(reading_order=3))
+
+        payload = main.reorder_layouts(
+            page_id,
+            main.ReorderLayoutsRequest(mode="auto"),
+        )
+        self.assertEqual(payload["layout_order_mode"], "auto")
+        self.assertTrue(bool(payload["changed"]))
+
+        ordered_ids = [int(row["id"]) for row in main.page_layouts(page_id)["layouts"]]
+        self.assertEqual(
+            ordered_ids,
+            [int(left_top["id"]), int(left_bottom["id"]), int(right_top["id"]), int(right_bottom["id"])],
+        )
+
     def test_delete_layout_compacts_remaining_reading_orders(self) -> None:
         self._write_image("layout/delete-compacts-orders.png")
         main.scan_images()
