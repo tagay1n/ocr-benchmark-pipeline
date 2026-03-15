@@ -5,6 +5,39 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
+export function normalizeLatexForRender(latexSource) {
+  let text = String(latexSource ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  const lines = text.split(/\r?\n/);
+  if (lines.length >= 2) {
+    const opening = lines[0].trim();
+    const closing = lines[lines.length - 1].trim();
+    if ((opening.startsWith("```") && closing === "```") || (opening.startsWith("~~~") && closing === "~~~")) {
+      text = lines.slice(1, -1).join("\n").trim();
+    }
+  }
+  if (text.startsWith("\\[") && text.endsWith("\\]") && text.length > 4) {
+    text = text.slice(2, -2).trim();
+  }
+  if (text.startsWith("$$") && text.endsWith("$$") && text.length > 4) {
+    text = text.slice(2, -2).trim();
+  }
+  if (text.startsWith("$") && text.endsWith("$") && text.length > 2) {
+    text = text.slice(1, -1).trim();
+  }
+  return text;
+}
+
+function latexDisplayWrapper(latex) {
+  const text = String(latex ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  return `$$\n${text}\n$$`;
+}
+
 export function containsMarkdownTable(markdown) {
   const text = String(markdown ?? "");
   if (!text) {
@@ -179,8 +212,9 @@ export function renderLatexInto(container, latexSource, { onRendered } = {}) {
   if (!container) {
     return;
   }
-  const latex = String(latexSource ?? "");
-  container.textContent = latex;
+  const latex = normalizeLatexForRender(latexSource);
+  const fallbackText = latexDisplayWrapper(latex);
+  container.textContent = fallbackText;
   void loadRendererDeps().then((deps) => {
     if (!deps || !deps.katex || typeof deps.katex.render !== "function") {
       return;
@@ -198,7 +232,7 @@ export function renderLatexInto(container, latexSource, { onRendered } = {}) {
         onRendered();
       }
     } catch {
-      container.textContent = latex;
+      container.textContent = fallbackText;
     }
   });
 }

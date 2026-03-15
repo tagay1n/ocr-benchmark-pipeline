@@ -71,6 +71,19 @@ CLASS_RULE_CAPTION: Final[str] = (
     "- If caption spans multiple lines, preserve line breaks exactly as shown."
 )
 
+CLASS_RULE_FORMULA: Final[str] = (
+    "For formula class:\n"
+    "- Your task is to extract a standalone display formula from this crop.\n"
+    "- The output must be LaTeX formula text only.\n"
+    "- Represent the formula in LaTeX as faithfully as possible.\n"
+    "- Preserve symbols, operators, and structure exactly as visible.\n"
+    "- If exact LaTeX mapping is unclear, preserve visible tokens conservatively and do not invent missing parts.\n"
+    "- Preserve line breaks exactly as shown in the crop.\n"
+    "- Do not include prose, labels, or explanations.\n"
+    "- Do not wrap output in $...$ or $$...$$.\n"
+    "- Do not output Markdown formatting."
+)
+
 CLASS_RULE_TABLE: Final[str] = (
     "For table class:\n"
     "- Treat this crop as a table extraction task.\n"
@@ -96,6 +109,7 @@ CLASS_RULES_BY_LAYOUT_CLASS: Final[dict[str, str]] = {
     "page_header": CLASS_RULE_TEXT,
     "page_footer": CLASS_RULE_TEXT,
     "caption": CLASS_RULE_CAPTION,
+    "formula": CLASS_RULE_FORMULA,
     "table": CLASS_RULE_TABLE,
 }
 

@@ -64,6 +64,10 @@ class OcrPromptsTests(unittest.TestCase):
             ocr_prompts.CLASS_RULE_CAPTION,
         )
         self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("formula"),
+            ocr_prompts.CLASS_RULE_FORMULA,
+        )
+        self.assertEqual(
             ocr_prompts.class_rule_for_layout_class("table"),
             ocr_prompts.CLASS_RULE_TABLE,
         )

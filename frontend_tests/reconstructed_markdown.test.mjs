@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   containsMarkdownTable,
+  normalizeLatexForRender,
   renderLatexInto,
   renderMarkdownInto,
 } from "../app/static/js/reconstructed_markdown.mjs";
@@ -79,4 +80,11 @@ test("renderer entry points do not throw for null containers", () => {
   assert.doesNotThrow(() => {
     renderLatexInto(null, "\\frac{1}{2}");
   });
+});
+
+test("normalizeLatexForRender strips wrappers and fences", () => {
+  assert.equal(normalizeLatexForRender("$x+y$"), "x+y");
+  assert.equal(normalizeLatexForRender("$$\n\\frac{a}{b}\n$$"), "\\frac{a}{b}");
+  assert.equal(normalizeLatexForRender("\\[z^2\\]"), "z^2");
+  assert.equal(normalizeLatexForRender("```latex\nx^2+y^2\n```"), "x^2+y^2");
 });

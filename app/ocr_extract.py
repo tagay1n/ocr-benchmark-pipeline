@@ -149,6 +149,31 @@ def _apply_section_header_heading_level(content: str, level: int) -> str:
     return "\n".join(lines).strip()
 
 
+def _normalize_formula_latex_content(content: str) -> str:
+    text = str(content).strip()
+    if not text:
+        return text
+
+    lines = text.splitlines()
+    if len(lines) >= 2:
+        opening = lines[0].strip()
+        closing = lines[-1].strip()
+        if (
+            (opening.startswith("```") and closing == "```")
+            or (opening.startswith("~~~") and closing == "~~~")
+        ):
+            text = "\n".join(lines[1:-1]).strip()
+            lines = text.splitlines()
+
+    if text.startswith("\\[") and text.endswith("\\]") and len(text) > 4:
+        text = text[2:-2].strip()
+    if text.startswith("$$") and text.endswith("$$") and len(text) > 4:
+        text = text[2:-2].strip()
+    if text.startswith("$") and text.endswith("$") and len(text) > 2:
+        text = text[1:-1].strip()
+    return text
+
+
 def _list_item_indent_level_from_x1(x1: float, baseline_x1: float) -> int:
     delta = max(0.0, float(x1) - float(baseline_x1))
     return int(delta / _LIST_INDENT_EPSILON)
@@ -624,6 +649,8 @@ def extract_ocr_for_page(
         elif class_name == "list_item":
             indent_level = list_item_indent_levels.get(int(layout["id"]), 0)
             response_text = _normalize_list_item_line(response_text, indent_level=indent_level, fallback_marker="-")
+        elif class_name == "formula":
+            response_text = _normalize_formula_latex_content(response_text)
         lookalike_warnings = (
             detect_suspicious_lookalikes(response_text, markdown_code_aware=True)
             if output_format == "markdown"

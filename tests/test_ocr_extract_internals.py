@@ -113,6 +113,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
             prompt_template=prompt_template,
         )
         self.assertEqual(latex_fmt, "latex")
+        self.assertIn("For formula class:", latex_prompt)
         self.assertIn("LaTeX", latex_prompt)
 
         skip_prompt, skip_fmt = ocr_extract._prompt_for_layout(
@@ -219,6 +220,12 @@ class OcrExtractInternalsTests(unittest.TestCase):
             ocr_extract._extract_content_from_json_response('{"content":"ok","extra":"x"}')
         with self.assertRaisesRegex(RuntimeError, '"content" must be a string'):
             ocr_extract._extract_content_from_json_response('{"content":1}')
+
+    def test_normalize_formula_latex_content_strips_wrappers(self) -> None:
+        self.assertEqual(ocr_extract._normalize_formula_latex_content("$x+y$"), "x+y")
+        self.assertEqual(ocr_extract._normalize_formula_latex_content("$$\n\\frac{a}{b}\n$$"), "\\frac{a}{b}")
+        self.assertEqual(ocr_extract._normalize_formula_latex_content("\\[z^2\\]"), "z^2")
+        self.assertEqual(ocr_extract._normalize_formula_latex_content("```latex\nx^2+y^2\n```"), "x^2+y^2")
 
     def test_section_header_level_assignment_from_geometry(self) -> None:
         layouts = [
@@ -466,6 +473,29 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(str(by_layout[int(root_item["id"])]["content"]), "- Root")
         self.assertRegex(str(by_layout[int(nested_item["id"])]["content"]), r"^\s+-\s+Nested$")
         self.assertEqual(str(by_layout[int(ordered_item["id"])]["content"]), "3) Ordered")
+
+    def test_extract_ocr_for_page_normalizes_formula_content(self) -> None:
+        self._write_image("ocr/formula-normalize.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        formula_layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="formula",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.10, y1=0.10, x2=0.90, y2=0.30),
+            ),
+        )["layout"]
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", return_value="```latex\n$$x^2+y^2$$\n```"
+        ):
+            ocr_extract.extract_ocr_for_page(page_id)
+
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        by_layout = {int(output["layout_id"]): output for output in outputs}
+        self.assertEqual(by_layout[int(formula_layout["id"])]["output_format"], "latex")
+        self.assertEqual(str(by_layout[int(formula_layout["id"])]["content"]), "x^2+y^2")
 
     def test_extract_ocr_for_page_skip_layout_writes_skip_output_without_requests(self) -> None:
         self.test_settings = Settings(
