@@ -64,6 +64,10 @@ class OcrPromptsTests(unittest.TestCase):
             ocr_prompts.CLASS_RULE_CAPTION,
         )
         self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("footnote"),
+            ocr_prompts.CLASS_RULE_FOOTNOTE,
+        )
+        self.assertEqual(
             ocr_prompts.class_rule_for_layout_class("formula"),
             ocr_prompts.CLASS_RULE_FORMULA,
         )
@@ -79,6 +83,15 @@ class OcrPromptsTests(unittest.TestCase):
         self.assertIn("rowspan/colspan", rule)
         self.assertIn("line breaks inside a cell using <br>", rule)
         self.assertIn("outside crop boundaries", rule)
+
+    def test_text_and_footnote_rules_cover_sup_sub_and_no_markdown_footnote_syntax(self) -> None:
+        self.assertIn("<sup>...</sup>", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("<sub>...</sub>", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn(
+            "Do not invent superscript/subscript where it is not clearly visible.",
+            ocr_prompts.CLASS_RULE_TEXT,
+        )
+        self.assertIn("Do not convert output to Markdown footnote syntax", ocr_prompts.CLASS_RULE_FOOTNOTE)
 
     def test_render_prompt_template_replaces_known_placeholders(self) -> None:
         rendered = ocr_prompts.render_prompt_template(

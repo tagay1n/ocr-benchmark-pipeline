@@ -98,6 +98,15 @@ class OcrExtractInternalsTests(unittest.TestCase):
         )
         self.assertEqual(page_footer_fmt, "markdown")
         self.assertIn("For text class:", page_footer_prompt)
+        footnote_prompt, footnote_fmt = ocr_extract._prompt_for_layout(
+            {"class_name": "footnote"},
+            [],
+            prompt_template=prompt_template,
+        )
+        self.assertEqual(footnote_fmt, "markdown")
+        self.assertIn("For text class:", footnote_prompt)
+        self.assertIn("For footnote class:", footnote_prompt)
+        self.assertIn("Do not convert output to Markdown footnote syntax", footnote_prompt)
 
         html_prompt, html_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "table"},

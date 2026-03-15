@@ -57,7 +57,10 @@ CLASS_RULE_TEXT: Final[str] = (
     "- Keep formulas inline with surrounding sentence text.\n"
     "- Do not turn regular words into formulas.\n"
     "- Do not convert the whole text block into a standalone formula block.\n"
-    "- If formula notation is unclear, keep the visible text as-is."
+    "- If formula notation is unclear, keep the visible text as-is.\n"
+    "- Preserve visible superscript/subscript formatting.\n"
+    "- Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.\n"
+    "- Do not invent superscript/subscript where it is not clearly visible."
 )
 
 CLASS_RULE_CAPTION: Final[str] = (
@@ -69,6 +72,13 @@ CLASS_RULE_CAPTION: Final[str] = (
     "- Preserve references to targets exactly as written; do not invent new target identifiers.\n"
     "- Preserve punctuation and separators exactly as visible.\n"
     "- If caption spans multiple lines, preserve line breaks exactly as shown."
+)
+
+CLASS_RULE_FOOTNOTE: Final[str] = (
+    f"{CLASS_RULE_TEXT}\n"
+    "For footnote class:\n"
+    "- Keep content as literal footnote text.\n"
+    "- Do not convert output to Markdown footnote syntax (for example: [^1] or [^1]: ...)."
 )
 
 CLASS_RULE_FORMULA: Final[str] = (
@@ -108,6 +118,7 @@ CLASS_RULES_BY_LAYOUT_CLASS: Final[dict[str, str]] = {
     "picture_text": CLASS_RULE_TEXT,
     "page_header": CLASS_RULE_TEXT,
     "page_footer": CLASS_RULE_TEXT,
+    "footnote": CLASS_RULE_FOOTNOTE,
     "caption": CLASS_RULE_CAPTION,
     "formula": CLASS_RULE_FORMULA,
     "table": CLASS_RULE_TABLE,
