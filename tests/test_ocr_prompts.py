@@ -138,7 +138,10 @@ class OcrPromptsTests(unittest.TestCase):
         self.assertIn("EXAMPLE INPUT END", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("EXAMPLE OUTPUT START", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("EXAMPLE OUTPUT END", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("Visual style in crop:", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn('{"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең', ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("**съезддан соң булган хәл-\\nләрнең бөтенесен**", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("*in nuce*", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("Do not convert output to Markdown footnote syntax", ocr_prompts.CLASS_RULE_FOOTNOTE)
 
     def test_list_item_rule_constrains_single_item_and_marker_behavior(self) -> None:
