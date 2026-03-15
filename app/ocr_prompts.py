@@ -60,6 +60,17 @@ CLASS_RULE_TEXT: Final[str] = (
     "- If formula notation is unclear, keep the visible text as-is."
 )
 
+CLASS_RULE_CAPTION: Final[str] = (
+    "For caption class:\n"
+    "- Keep this content as caption text only.\n"
+    "- Do not convert caption text into heading, list, or table.\n"
+    "- Preserve caption labels/prefixes exactly when visible (for example: Figure, Fig., Table, Рис.).\n"
+    "- Preserve caption numbering/indexes exactly as visible.\n"
+    "- Preserve references to targets exactly as written; do not invent new target identifiers.\n"
+    "- Preserve punctuation and separators exactly as visible.\n"
+    "- If caption spans multiple lines, preserve line breaks exactly as shown."
+)
+
 CLASS_RULE_TABLE: Final[str] = (
     "For table class:\n"
     "- Treat this crop as a table extraction task.\n"
@@ -81,6 +92,10 @@ CLASS_RULE_TABLE: Final[str] = (
 CLASS_RULES_BY_LAYOUT_CLASS: Final[dict[str, str]] = {
     "text": CLASS_RULE_TEXT,
     "section_header": CLASS_RULE_TEXT,
+    "picture_text": CLASS_RULE_TEXT,
+    "page_header": CLASS_RULE_TEXT,
+    "page_footer": CLASS_RULE_TEXT,
+    "caption": CLASS_RULE_CAPTION,
     "table": CLASS_RULE_TABLE,
 }
 

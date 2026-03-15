@@ -77,6 +77,27 @@ class OcrExtractInternalsTests(unittest.TestCase):
         )
         self.assertEqual(section_fmt, "markdown")
         self.assertIn("For text class:", section_prompt)
+        picture_text_prompt, picture_text_fmt = ocr_extract._prompt_for_layout(
+            {"class_name": "picture_text"},
+            [],
+            prompt_template=prompt_template,
+        )
+        self.assertEqual(picture_text_fmt, "markdown")
+        self.assertIn("For text class:", picture_text_prompt)
+        page_header_prompt, page_header_fmt = ocr_extract._prompt_for_layout(
+            {"class_name": "page_header"},
+            [],
+            prompt_template=prompt_template,
+        )
+        self.assertEqual(page_header_fmt, "markdown")
+        self.assertIn("For text class:", page_header_prompt)
+        page_footer_prompt, page_footer_fmt = ocr_extract._prompt_for_layout(
+            {"class_name": "page_footer"},
+            [],
+            prompt_template=prompt_template,
+        )
+        self.assertEqual(page_footer_fmt, "markdown")
+        self.assertIn("For text class:", page_footer_prompt)
 
         html_prompt, html_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "table"},
@@ -108,6 +129,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
             prompt_template=prompt_template,
         )
         self.assertEqual(caption_fmt, "markdown")
+        self.assertIn("For caption class:", caption_prompt)
         self.assertIn("Caption targets: table [id:9], formula [id:11].", caption_prompt)
         self.assertIn("Targets: table [id:9], formula [id:11]", caption_prompt)
 

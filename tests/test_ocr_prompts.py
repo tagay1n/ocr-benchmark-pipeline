@@ -47,7 +47,34 @@ class OcrPromptsTests(unittest.TestCase):
             ocr_prompts.class_rule_for_layout_class("section_header"),
             ocr_prompts.CLASS_RULE_TEXT,
         )
-        self.assertEqual(ocr_prompts.class_rule_for_layout_class("table"), "")
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("picture_text"),
+            ocr_prompts.CLASS_RULE_TEXT,
+        )
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("page_header"),
+            ocr_prompts.CLASS_RULE_TEXT,
+        )
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("page_footer"),
+            ocr_prompts.CLASS_RULE_TEXT,
+        )
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("caption"),
+            ocr_prompts.CLASS_RULE_CAPTION,
+        )
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("table"),
+            ocr_prompts.CLASS_RULE_TABLE,
+        )
+
+    def test_table_class_rule_contains_core_constraints(self) -> None:
+        rule = ocr_prompts.CLASS_RULE_TABLE
+        self.assertIn("table extraction task", rule)
+        self.assertIn("<thead>", rule)
+        self.assertIn("rowspan/colspan", rule)
+        self.assertIn("line breaks inside a cell using <br>", rule)
+        self.assertIn("outside crop boundaries", rule)
 
     def test_render_prompt_template_replaces_known_placeholders(self) -> None:
         rendered = ocr_prompts.render_prompt_template(
