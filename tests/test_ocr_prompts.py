@@ -133,6 +133,12 @@ class OcrPromptsTests(unittest.TestCase):
             "Do not invent superscript/subscript where it is not clearly visible.",
             ocr_prompts.CLASS_RULE_TEXT,
         )
+        self.assertIn("in nuce (яралгы хәлендә)", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("EXAMPLE INPUT START", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("EXAMPLE INPUT END", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("EXAMPLE OUTPUT START", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("EXAMPLE OUTPUT END", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn('{"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең', ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("Do not convert output to Markdown footnote syntax", ocr_prompts.CLASS_RULE_FOOTNOTE)
 
     def test_list_item_rule_constrains_single_item_and_marker_behavior(self) -> None:

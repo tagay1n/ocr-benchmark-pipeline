@@ -39,6 +39,15 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Preserve visible superscript/subscript formatting.
 - Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.
 - Do not invent superscript/subscript where it is not clearly visible.
+- One-shot example (text-like crop):
+  EXAMPLE INPUT START
+  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең
+  анализын тәмам иттек; бу анализ съезддан соң булган хәл-
+  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм
+  EXAMPLE INPUT END
+  EXAMPLE OUTPUT START
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ съезддан соң булган хәл-\nләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм"}
+  EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
 - Preserve line breaks exactly as shown in the crop.
@@ -83,6 +92,15 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Preserve visible superscript/subscript formatting.
 - Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.
 - Do not invent superscript/subscript where it is not clearly visible.
+- One-shot example (text-like crop):
+  EXAMPLE INPUT START
+  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең
+  анализын тәмам иттек; бу анализ съезддан соң булган хәл-
+  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм
+  EXAMPLE INPUT END
+  EXAMPLE OUTPUT START
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ съезддан соң булган хәл-\nләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм"}
+  EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
 - Preserve line breaks exactly as shown in the crop.
@@ -218,6 +236,15 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Preserve visible superscript/subscript formatting.
 - Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.
 - Do not invent superscript/subscript where it is not clearly visible.
+- One-shot example (text-like crop):
+  EXAMPLE INPUT START
+  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең
+  анализын тәмам иттек; бу анализ съезддан соң булган хәл-
+  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм
+  EXAMPLE INPUT END
+  EXAMPLE OUTPUT START
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ съезддан соң булган хәл-\nләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм"}
+  EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
 - Preserve line breaks exactly as shown in the crop.
@@ -300,6 +327,15 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Preserve visible superscript/subscript formatting.
 - Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.
 - Do not invent superscript/subscript where it is not clearly visible.
+- One-shot example (text-like crop):
+  EXAMPLE INPUT START
+  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең
+  анализын тәмам иттек; бу анализ съезддан соң булган хәл-
+  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм
+  EXAMPLE INPUT END
+  EXAMPLE OUTPUT START
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ съезддан соң булган хәл-\nләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм"}
+  EXAMPLE OUTPUT END
 - Keep content as literal footnote text.
 - Do not convert output to Markdown footnote syntax (for example: [^1] or [^1]: ...).
 OUTPUT FORMAT REQUIREMENTS:
@@ -386,6 +422,15 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Preserve visible superscript/subscript formatting.
 - Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.
 - Do not invent superscript/subscript where it is not clearly visible.
+- One-shot example (text-like crop):
+  EXAMPLE INPUT START
+  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең
+  анализын тәмам иттек; бу анализ съезддан соң булган хәл-
+  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм
+  EXAMPLE INPUT END
+  EXAMPLE OUTPUT START
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ съезддан соң булган хәл-\nләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм"}
+  EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
 - Preserve line breaks exactly as shown in the crop.
@@ -430,6 +475,15 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Preserve visible superscript/subscript formatting.
 - Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.
 - Do not invent superscript/subscript where it is not clearly visible.
+- One-shot example (text-like crop):
+  EXAMPLE INPUT START
+  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең
+  анализын тәмам иттек; бу анализ съезддан соң булган хәл-
+  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм
+  EXAMPLE INPUT END
+  EXAMPLE OUTPUT START
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ съезддан соң булган хәл-\nләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм"}
+  EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
 - Preserve line breaks exactly as shown in the crop.

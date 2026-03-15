@@ -102,7 +102,16 @@ CLASS_RULE_TEXT: Final[str] = (
     "- If formula notation is unclear, keep the visible text as-is.\n"
     "- Preserve visible superscript/subscript formatting.\n"
     "- Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.\n"
-    "- Do not invent superscript/subscript where it is not clearly visible."
+    "- Do not invent superscript/subscript where it is not clearly visible.\n"
+    "- One-shot example (text-like crop):\n"
+    "  EXAMPLE INPUT START\n"
+    "  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\n"
+    "  анализын тәмам иттек; бу анализ съезддан соң булган хәл-\n"
+    "  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм\n"
+    "  EXAMPLE INPUT END\n"
+    "  EXAMPLE OUTPUT START\n"
+    "  {\"content\":\"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\\nанализын тәмам иттек; бу анализ съезддан соң булган хәл-\\nләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм\"}\n"
+    "  EXAMPLE OUTPUT END"
 )
 
 CLASS_RULE_CAPTION: Final[str] = (
