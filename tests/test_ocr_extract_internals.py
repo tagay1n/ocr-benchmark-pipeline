@@ -72,6 +72,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
             prompt_template=prompt_template,
         )
         self.assertEqual(section_fmt, "markdown")
+        self.assertIn("Treat this crop as heading-like text.", section_prompt)
         self.assertIn("Keep text as normal Markdown paragraphs.", section_prompt)
         picture_text_prompt, picture_text_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "picture_text"},
@@ -91,6 +92,13 @@ class OcrExtractInternalsTests(unittest.TestCase):
         )
         self.assertEqual(page_footer_fmt, "markdown")
         self.assertIn("Keep text as normal Markdown paragraphs.", page_footer_prompt)
+        list_item_prompt, list_item_fmt = ocr_extract._prompt_for_layout(
+            {"class_name": "list_item"},
+            prompt_template=prompt_template,
+        )
+        self.assertEqual(list_item_fmt, "markdown")
+        self.assertIn("exactly one list item", list_item_prompt)
+        self.assertIn("do not invent marker symbols or numbering", list_item_prompt)
         footnote_prompt, footnote_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "footnote"},
             prompt_template=prompt_template,

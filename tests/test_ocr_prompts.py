@@ -12,6 +12,28 @@ class OcrPromptsTests(unittest.TestCase):
             "\n".join(ocr_prompts.DEFAULT_PROMPT_PARTS),
         )
 
+    def test_default_prompt_template_uses_explicit_priority_sections(self) -> None:
+        template = ocr_prompts.DEFAULT_PROMPT_TEMPLATE
+        hard_idx = template.find("HARD REQUIREMENTS:")
+        fidelity_idx = template.find("SOURCE FIDELITY:")
+        class_idx = template.find("CLASS-SPECIFIC REQUIREMENTS:")
+        format_idx = template.find("OUTPUT FORMAT REQUIREMENTS:")
+        unsure_idx = template.find("IF UNSURE:")
+        self.assertGreaterEqual(hard_idx, 0)
+        self.assertGreaterEqual(fidelity_idx, 0)
+        self.assertGreaterEqual(class_idx, 0)
+        self.assertGreaterEqual(format_idx, 0)
+        self.assertGreaterEqual(unsure_idx, 0)
+        self.assertLess(hard_idx, fidelity_idx)
+        self.assertLess(fidelity_idx, class_idx)
+        self.assertLess(class_idx, format_idx)
+        self.assertLess(format_idx, unsure_idx)
+        self.assertIn(
+            "preserve visible content semantics first, then source fidelity, then formatting",
+            template,
+        )
+        self.assertNotIn("Preserve line breaks exactly as shown in the crop.", ocr_prompts.PROMPT_BLOCK_SOURCE_FIDELITY)
+
     def test_format_rule_mapping(self) -> None:
         self.assertEqual(
             ocr_prompts.format_rule_for_output_format("markdown"),
@@ -26,6 +48,9 @@ class OcrPromptsTests(unittest.TestCase):
             ocr_prompts.FORMAT_RULE_LATEX,
         )
         self.assertEqual(ocr_prompts.format_rule_for_output_format("skip"), "")
+        self.assertIn("Preserve line breaks exactly as shown in the crop.", ocr_prompts.FORMAT_RULE_MARKDOWN)
+        self.assertIn("using <br> only when clearly visible", ocr_prompts.FORMAT_RULE_HTML)
+        self.assertIn("visible formula layout", ocr_prompts.FORMAT_RULE_LATEX)
 
     def test_class_rule_mapping(self) -> None:
         self.assertEqual(
@@ -34,7 +59,11 @@ class OcrPromptsTests(unittest.TestCase):
         )
         self.assertEqual(
             ocr_prompts.class_rule_for_layout_class("section_header"),
-            ocr_prompts.CLASS_RULE_TEXT,
+            ocr_prompts.CLASS_RULES_BY_LAYOUT_CLASS["section_header"],
+        )
+        self.assertEqual(
+            ocr_prompts.class_rule_for_layout_class("list_item"),
+            ocr_prompts.CLASS_RULE_LIST_ITEM,
         )
         self.assertEqual(
             ocr_prompts.class_rule_for_layout_class("picture_text"),
@@ -81,6 +110,13 @@ class OcrPromptsTests(unittest.TestCase):
             ocr_prompts.CLASS_RULE_TEXT,
         )
         self.assertIn("Do not convert output to Markdown footnote syntax", ocr_prompts.CLASS_RULE_FOOTNOTE)
+
+    def test_list_item_rule_constrains_single_item_and_marker_behavior(self) -> None:
+        rule = ocr_prompts.CLASS_RULE_LIST_ITEM
+        self.assertIn("exactly one list item", rule)
+        self.assertIn("Preserve the visible list marker exactly", rule)
+        self.assertIn("do not invent marker symbols or numbering", rule)
+        self.assertIn("downstream normalization may apply marker formatting", rule)
 
     def test_render_prompt_template_replaces_known_placeholders(self) -> None:
         rendered = ocr_prompts.render_prompt_template(
