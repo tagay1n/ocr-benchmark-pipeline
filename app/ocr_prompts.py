@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Final, Sequence
+from typing import Final
 
 PROMPT_BLOCK_TASK_CONTEXT: Final[str] = "You are given one cropped image region from a document page."
 PROMPT_BLOCK_RESPONSE_CONTRACT: Final[str] = (
@@ -19,7 +19,6 @@ PROMPT_BLOCK_GENERAL_RULES: Final[str] = (
     "Do not dehyphenate words split by line breaks.\n"
     "Preserve visible punctuation exactly."
 )
-PROMPT_BLOCK_CAPTION_CONTEXT: Final[str] = "{caption_context}"
 PROMPT_BLOCK_CLASS_RULES: Final[str] = "{class_rule}"
 PROMPT_BLOCK_OUTPUT_RULE: Final[str] = "{format_rule}"
 
@@ -27,7 +26,6 @@ DEFAULT_PROMPT_PARTS: Final[tuple[str, ...]] = (
     PROMPT_BLOCK_TASK_CONTEXT,
     PROMPT_BLOCK_RESPONSE_CONTRACT,
     PROMPT_BLOCK_GENERAL_RULES,
-    PROMPT_BLOCK_CAPTION_CONTEXT,
     PROMPT_BLOCK_CLASS_RULES,
     PROMPT_BLOCK_OUTPUT_RULE,
 )
@@ -47,7 +45,6 @@ FORMAT_RULES_BY_OUTPUT_FORMAT: Final[dict[str, str]] = {
 }
 
 CLASS_RULE_TEXT: Final[str] = (
-    "For text class:\n"
     "- Primary script is Tatar Cyrillic; preserve original characters exactly. Words from other languages may appear and must be preserved.\n"
     "- Keep text as normal Markdown paragraphs.\n"
     "- Do not convert into headings, lists, or tables unless those markers are clearly visible.\n"
@@ -64,7 +61,6 @@ CLASS_RULE_TEXT: Final[str] = (
 )
 
 CLASS_RULE_CAPTION: Final[str] = (
-    "For caption class:\n"
     "- Keep this content as caption text only.\n"
     "- Do not convert caption text into heading, list, or table.\n"
     "- Preserve caption labels/prefixes exactly when visible (for example: Figure, Fig., Table, Рис.).\n"
@@ -76,13 +72,11 @@ CLASS_RULE_CAPTION: Final[str] = (
 
 CLASS_RULE_FOOTNOTE: Final[str] = (
     f"{CLASS_RULE_TEXT}\n"
-    "For footnote class:\n"
     "- Keep content as literal footnote text.\n"
     "- Do not convert output to Markdown footnote syntax (for example: [^1] or [^1]: ...)."
 )
 
 CLASS_RULE_FORMULA: Final[str] = (
-    "For formula class:\n"
     "- Your task is to extract a standalone display formula from this crop.\n"
     "- The output must be LaTeX formula text only.\n"
     "- Represent the formula in LaTeX as faithfully as possible.\n"
@@ -95,7 +89,6 @@ CLASS_RULE_FORMULA: Final[str] = (
 )
 
 CLASS_RULE_TABLE: Final[str] = (
-    "For table class:\n"
     "- Treat this crop as a table extraction task.\n"
     "- Treat tabular alignment as table structure even when grid lines are faint, partial, or absent.\n"
     "- Infer rows and columns from alignment/spacing only when clearly supported by visual layout.\n"
@@ -125,24 +118,6 @@ CLASS_RULES_BY_LAYOUT_CLASS: Final[dict[str, str]] = {
 }
 
 
-def caption_line_for_layout(class_name: str, caption_targets: Sequence[str]) -> str:
-    if class_name != "caption":
-        return ""
-    targets = [str(value).strip() for value in caption_targets if str(value).strip()]
-    if not targets:
-        return ""
-    return f" Caption targets: {', '.join(targets)}."
-
-
-def caption_context_for_layout(class_name: str, caption_targets: Sequence[str]) -> str:
-    if class_name != "caption":
-        return ""
-    targets = [str(value).strip() for value in caption_targets if str(value).strip()]
-    if not targets:
-        return ""
-    return f"Caption targets: {', '.join(targets)}."
-
-
 def format_rule_for_output_format(output_format: str) -> str:
     return FORMAT_RULES_BY_OUTPUT_FORMAT.get(output_format, "")
 
@@ -154,17 +129,10 @@ def class_rule_for_layout_class(class_name: str) -> str:
 def render_prompt_template(
     prompt_template: str,
     *,
-    class_name: str,
-    caption_targets: Sequence[str],
     class_rule: str,
     format_rule: str,
 ) -> str:
-    normalized_targets = [str(value).strip() for value in caption_targets if str(value).strip()]
     prompt = str(prompt_template)
-    prompt = prompt.replace("{class_name}", class_name)
-    prompt = prompt.replace("{caption_context}", caption_context_for_layout(class_name, normalized_targets))
-    prompt = prompt.replace("{caption_line}", caption_line_for_layout(class_name, normalized_targets))
-    prompt = prompt.replace("{caption_targets}", ", ".join(normalized_targets))
     prompt = prompt.replace("{class_rule}", class_rule)
     prompt = prompt.replace("{format_rule}", format_rule)
     prompt = prompt.strip()

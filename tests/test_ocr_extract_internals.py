@@ -54,63 +54,54 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(len(pages), 1)
         return int(pages[0]["id"])
 
-    def test_prompt_for_layout_maps_output_formats_and_caption_targets(self) -> None:
+    def test_prompt_for_layout_maps_output_formats(self) -> None:
         prompt_template = (
-            "Layout class: {class_name}.{caption_line}\n"
-            "Targets: {caption_targets}\n"
             "{class_rule}\n"
             "{format_rule}"
         )
 
         markdown_prompt, markdown_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "text"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(markdown_fmt, "markdown")
         self.assertIn("valid Markdown", markdown_prompt)
-        self.assertIn("For text class:", markdown_prompt)
+        self.assertIn("Keep text as normal Markdown paragraphs.", markdown_prompt)
         section_prompt, section_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "section_header"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(section_fmt, "markdown")
-        self.assertIn("For text class:", section_prompt)
+        self.assertIn("Keep text as normal Markdown paragraphs.", section_prompt)
         picture_text_prompt, picture_text_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "picture_text"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(picture_text_fmt, "markdown")
-        self.assertIn("For text class:", picture_text_prompt)
+        self.assertIn("Keep text as normal Markdown paragraphs.", picture_text_prompt)
         page_header_prompt, page_header_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "page_header"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(page_header_fmt, "markdown")
-        self.assertIn("For text class:", page_header_prompt)
+        self.assertIn("Keep text as normal Markdown paragraphs.", page_header_prompt)
         page_footer_prompt, page_footer_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "page_footer"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(page_footer_fmt, "markdown")
-        self.assertIn("For text class:", page_footer_prompt)
+        self.assertIn("Keep text as normal Markdown paragraphs.", page_footer_prompt)
         footnote_prompt, footnote_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "footnote"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(footnote_fmt, "markdown")
-        self.assertIn("For text class:", footnote_prompt)
-        self.assertIn("For footnote class:", footnote_prompt)
+        self.assertIn("Keep text as normal Markdown paragraphs.", footnote_prompt)
+        self.assertIn("Keep content as literal footnote text.", footnote_prompt)
         self.assertIn("Do not convert output to Markdown footnote syntax", footnote_prompt)
 
         html_prompt, html_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "table"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(html_fmt, "html")
@@ -118,16 +109,14 @@ class OcrExtractInternalsTests(unittest.TestCase):
 
         latex_prompt, latex_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "formula"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(latex_fmt, "latex")
-        self.assertIn("For formula class:", latex_prompt)
+        self.assertIn("standalone display formula", latex_prompt)
         self.assertIn("LaTeX", latex_prompt)
 
         skip_prompt, skip_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "picture"},
-            [],
             prompt_template=prompt_template,
         )
         self.assertEqual(skip_fmt, "skip")
@@ -135,16 +124,13 @@ class OcrExtractInternalsTests(unittest.TestCase):
 
         caption_prompt, caption_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "caption"},
-            ["table [id:9]", "formula [id:11]"],
             prompt_template=prompt_template,
         )
         self.assertEqual(caption_fmt, "markdown")
-        self.assertIn("For caption class:", caption_prompt)
-        self.assertIn("Caption targets: table [id:9], formula [id:11].", caption_prompt)
-        self.assertIn("Targets: table [id:9], formula [id:11]", caption_prompt)
+        self.assertIn("caption text only", caption_prompt)
 
     def test_prompt_for_layout_class_matrix_regression(self) -> None:
-        template = "class={class_name}; targets={caption_targets}; rule={format_rule}{caption_line}"
+        template = "class_rule={class_rule}; rule={format_rule}"
         expected = {
             "text": "markdown",
             "section_header": "markdown",
@@ -162,14 +148,13 @@ class OcrExtractInternalsTests(unittest.TestCase):
         for class_name, output_format in expected.items():
             prompt, fmt = ocr_extract._prompt_for_layout(
                 {"class_name": class_name},
-                ["table [id:1]"] if class_name == "caption" else [],
                 prompt_template=template,
             )
             self.assertEqual(fmt, output_format)
             if output_format == "skip":
                 self.assertEqual(prompt, "")
             else:
-                self.assertIn(f"class={class_name}", prompt)
+                self.assertIn("rule=", prompt)
 
     def test_key_alias_short_and_long_keys(self) -> None:
         self.assertEqual(ocr_extract._key_alias("abcd1234"), "abcd1234")

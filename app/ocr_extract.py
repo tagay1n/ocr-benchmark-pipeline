@@ -24,7 +24,7 @@ from .layout_classes import (
     normalize_class_name,
 )
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
-from .models import CaptionBinding, Layout, OcrOutput, Page
+from .models import Layout, OcrOutput, Page
 from .ocr_prompts import (
     DEFAULT_PROMPT_TEMPLATE,
     class_rule_for_layout_class,
@@ -392,9 +392,7 @@ def _is_quota_error(message: str) -> bool:
     )
 
 
-def _prompt_for_layout(
-    layout: dict[str, Any], caption_targets: list[str], *, prompt_template: str
-) -> tuple[str, str]:
+def _prompt_for_layout(layout: dict[str, Any], *, prompt_template: str) -> tuple[str, str]:
     class_name = normalize_class_name(str(layout["class_name"]))
     if class_name in MARKDOWN_CLASSES:
         output_format = "markdown"
@@ -414,8 +412,6 @@ def _prompt_for_layout(
     class_rule = class_rule_for_layout_class(class_name)
     prompt = render_prompt_template(
         prompt_template,
-        class_name=class_name,
-        caption_targets=caption_targets,
         class_rule=class_rule,
         format_rule=format_rule,
     )
@@ -468,26 +464,6 @@ def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
             .order_by(Layout.reading_order.asc(), Layout.id.asc())
         ).scalars().all()
 
-        caption_layout_ids = [int(layout.id) for layout in layouts]
-        if caption_layout_ids:
-            binding_rows = session.execute(
-                select(CaptionBinding.caption_layout_id, CaptionBinding.target_layout_id, Layout.class_name)
-                .join(Layout, Layout.id == CaptionBinding.target_layout_id)
-                .where(CaptionBinding.caption_layout_id.in_(caption_layout_ids))
-                .where(Layout.page_id == page_id)
-                .order_by(CaptionBinding.caption_layout_id.asc(), CaptionBinding.target_layout_id.asc())
-            ).all()
-        else:
-            binding_rows = []
-
-    caption_targets_by_layout_id: dict[int, list[str]] = {}
-    for caption_layout_id_raw, target_layout_id_raw, target_class_name_raw in binding_rows:
-        caption_layout_id = int(caption_layout_id_raw)
-        target_layout_id = int(target_layout_id_raw)
-        target_class_name = normalize_class_name(str(target_class_name_raw))
-        label = f"{target_class_name} [id:{target_layout_id}]"
-        caption_targets_by_layout_id.setdefault(caption_layout_id, []).append(label)
-
     return [
         {
             "id": int(layout.id),
@@ -499,7 +475,6 @@ def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
                 "y2": float(layout.y2),
             },
             "reading_order": int(layout.reading_order),
-            "caption_targets": caption_targets_by_layout_id.get(int(layout.id), []),
         }
         for layout in layouts
     ]
@@ -586,7 +561,6 @@ def extract_ocr_for_page(
     for layout in layouts_to_process:
         prompt, output_format = _prompt_for_layout(
             layout,
-            layout["caption_targets"],
             prompt_template=resolved_prompt_template,
         )
         prompt_debug_rows.append(
@@ -596,7 +570,6 @@ def extract_ocr_for_page(
                 "class_name": str(layout["class_name"]),
                 "reading_order": int(layout["reading_order"]),
                 "output_format": output_format,
-                "caption_targets": list(layout["caption_targets"]),
                 "prompt": prompt,
             }
         )
