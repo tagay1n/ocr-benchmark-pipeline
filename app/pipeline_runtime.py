@@ -364,6 +364,25 @@ def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
     page_id = job["page_id"]
     if page_id is None:
         raise ValueError(f"{STAGE_OCR_EXTRACT} job requires page_id.")
+    payload = job.get("payload") or {}
+    trigger = str(payload.get("trigger", "")).strip().lower()
+    is_batch_ocr = trigger == "batch_ocr"
+    job_id = int(job.get("id", 0))
+    selected_layout_ids: list[int] | None = None
+    raw_layout_ids = payload.get("layout_ids")
+    if isinstance(raw_layout_ids, list):
+        deduplicated_ids: list[int] = []
+        seen_ids: set[int] = set()
+        for raw_layout_id in raw_layout_ids:
+            try:
+                layout_id = int(raw_layout_id)
+            except (TypeError, ValueError):
+                continue
+            if layout_id <= 0 or layout_id in seen_ids:
+                continue
+            seen_ids.add(layout_id)
+            deduplicated_ids.append(layout_id)
+        selected_layout_ids = deduplicated_ids
 
     with get_session() as session:
         page_row = session.get(Page, page_id)
@@ -379,8 +398,49 @@ def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
         page_row.status = "ocr_extracting"
         page_row.updated_at = _utc_now()
 
+    def _on_progress(progress_payload: dict[str, int]) -> None:
+        if not is_batch_ocr or job_id <= 0:
+            return
+        processed = int(progress_payload.get("processed_layouts", 0))
+        total = int(progress_payload.get("total_layouts", 0))
+        with get_session() as session:
+            session.execute(
+                update(PipelineJob)
+                .where(PipelineJob.id == job_id)
+                .where(PipelineJob.status == "running")
+                .values(
+                    result_json=_json_dumps(
+                        {
+                            "progress": {
+                                "processed_layouts": max(0, processed),
+                                "total_layouts": max(0, total),
+                            }
+                        }
+                    ),
+                    updated_at=_utc_now(),
+                )
+            )
+        emit_event(
+            stage=STAGE_OCR_EXTRACT,
+            event_type=EVENT_JOB_PROGRESS,
+            page_id=page_id,
+            message=f"Batch OCR progress {max(0, processed)}/{max(0, total)}.",
+            data={
+                "trigger": "batch_ocr",
+                "job_id": job_id,
+                "processed_layouts": max(0, processed),
+                "total_layouts": max(0, total),
+            },
+        )
+
     try:
-        return extract_ocr_for_page(page_id)
+        if selected_layout_ids is not None and len(selected_layout_ids) == 0:
+            return {"skipped": True, "reason": "no layout ids selected"}
+        return extract_ocr_for_page(
+            page_id,
+            layout_ids=selected_layout_ids,
+            progress_callback=_on_progress if is_batch_ocr else None,
+        )
     except Exception:
         with get_session() as session:
             page_row = session.get(Page, page_id)

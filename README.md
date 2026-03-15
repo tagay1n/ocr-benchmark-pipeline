@@ -16,6 +16,7 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
 
 - Dashboard (`/`):
   - Pipeline actions with live counters: `Scan(total) -> Review layouts(done/total) -> Review OCR(done/total) -> Export`.
+  - `Batch OCR` action to queue/stop global OCR extraction for all eligible pages (`layout_reviewed`/`ocr_failed`) that still have missing layout outputs.
   - `Benchmark` action opens dedicated benchmark page.
   - Live backend activity panel (SSE stream).
   - Duplicate-file warnings.
@@ -120,6 +121,9 @@ node --test frontend_tests/*.test.mjs
 - `GET /api/layout-benchmark/grid`
 - `POST /api/layout-benchmark/run`
 - `POST /api/layout-benchmark/stop`
+- `GET /api/ocr-batch/status`
+- `POST /api/ocr-batch/run`
+- `POST /api/ocr-batch/stop`
 
 ## OCR Prompt Debug Artifacts
 

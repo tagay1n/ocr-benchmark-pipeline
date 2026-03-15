@@ -29,6 +29,7 @@ const scanBtn = document.getElementById("scan-btn");
 const reviewLayoutsBtn = document.getElementById("review-layouts-btn");
 const reviewOcrBtn = document.getElementById("review-ocr-btn");
 const exportFinalBtn = document.getElementById("export-final-btn");
+const batchOcrBtn = document.getElementById("batch-ocr-btn");
 const layoutBenchmarkBtn = document.getElementById("layout-benchmark-btn");
 const wipeBtn = document.getElementById("wipe-btn");
 const wipeModal = document.getElementById("wipe-modal");
@@ -73,6 +74,9 @@ let streamRefreshTimer = null;
 let streamRefreshInFlight = false;
 let lastProcessedEventId = 0;
 let pendingRemovePageId = null;
+let batchOcrIsRunning = false;
+let batchOcrRequestInFlight = false;
+let batchOcrStopping = false;
 const DATE_LOCALE = "en-GB";
 const DATE_TIME_FORMAT = {
   year: "numeric",
@@ -423,6 +427,56 @@ function applyPagesSummary(summaryPayload) {
   exportFinalBtn.title = "No OCR-reviewed pages available for export.";
 }
 
+function setBatchOcrBusy(isBusy) {
+  batchOcrBtn.classList.toggle("is-busy", isBusy);
+}
+
+function applyBatchOcrStatus(payload) {
+  const isRunning = Boolean(payload?.is_running);
+  const pendingPages = Number.isInteger(payload?.pending_pages)
+    ? Number(payload.pending_pages)
+    : 0;
+  const pendingLayouts = Number.isInteger(payload?.pending_layouts)
+    ? Number(payload.pending_layouts)
+    : 0;
+  const progressCurrent = Number.isInteger(payload?.progress_current)
+    ? Number(payload.progress_current)
+    : 0;
+  const progressTotal = Number.isInteger(payload?.progress_total)
+    ? Number(payload.progress_total)
+    : 0;
+
+  batchOcrIsRunning = isRunning;
+  batchOcrBtn.classList.toggle("is-active", isRunning);
+  if (!isRunning) {
+    batchOcrStopping = false;
+  }
+  if (isRunning) {
+    if (batchOcrStopping) {
+      batchOcrBtn.textContent = "Stopping...";
+      batchOcrBtn.disabled = true;
+      batchOcrBtn.title = "Stopping Batch OCR gracefully after current extraction.";
+      return;
+    }
+    const shownTotal = progressTotal > 0 ? progressTotal : Math.max(0, pendingLayouts);
+    const shownCurrent = shownTotal > 0
+      ? Math.min(shownTotal, Math.max(1, progressCurrent))
+      : 0;
+    batchOcrBtn.textContent = `Processing ${shownCurrent}/${shownTotal}`;
+    batchOcrBtn.disabled = batchOcrRequestInFlight;
+    batchOcrBtn.title = "Click to stop Batch OCR gracefully.";
+    return;
+  }
+
+  batchOcrBtn.textContent = "Batch OCR";
+  batchOcrBtn.disabled = batchOcrRequestInFlight || pendingPages <= 0;
+  if (pendingPages <= 0) {
+    batchOcrBtn.title = "No pages require batch OCR extraction.";
+    return;
+  }
+  batchOcrBtn.title = `Queue batch OCR for ${pendingPages} page(s), ${pendingLayouts} layout(s).`;
+}
+
 function openLayoutBenchmarkPage() {
   window.location.href = "/static/layout_benchmark.html";
 }
@@ -439,6 +493,21 @@ async function refreshReviewActionState() {
 async function refreshPagesSummary() {
   const summaryPayload = await fetchJson("/api/pages/summary");
   applyPagesSummary(summaryPayload);
+}
+
+async function refreshBatchOcrStatus() {
+  const payload = await fetchJson("/api/ocr-batch/status");
+  applyBatchOcrStatus(payload);
+}
+
+async function refreshBatchOcrStatusSafe() {
+  try {
+    await refreshBatchOcrStatus();
+  } catch (error) {
+    console.error(`Failed to refresh Batch OCR status: ${error.message}`);
+    batchOcrBtn.disabled = false;
+    setBatchOcrBusy(false);
+  }
 }
 
 function renderDuplicates(duplicates) {
@@ -611,6 +680,7 @@ async function reloadDashboard() {
     loadCurrentPagesSlice(),
     refreshReviewActionState(),
     refreshPagesSummary(),
+    refreshBatchOcrStatus(),
   ]);
   renderDuplicates(duplicatesPayload.duplicates);
   renderActivity(activityPayload);
@@ -627,6 +697,7 @@ async function refreshDashboardFromStream() {
       loadCurrentPagesSlice(),
       refreshReviewActionState(),
       refreshPagesSummary(),
+      refreshBatchOcrStatus(),
     ]);
   } catch (error) {
     console.error(`Failed to refresh dashboard from stream: ${error.message}`);
@@ -699,6 +770,7 @@ async function runScan() {
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
   exportFinalBtn.disabled = true;
+  batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
   try {
     await fetchJson("/api/discovery/scan", { method: "POST" });
@@ -708,6 +780,7 @@ async function runScan() {
   } finally {
     scanBtn.disabled = false;
     wipeBtn.disabled = false;
+    await refreshBatchOcrStatusSafe();
   }
 }
 
@@ -750,6 +823,7 @@ async function runRemovePage() {
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
   exportFinalBtn.disabled = true;
+  batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
   try {
     await fetchJson(`/api/pages/${pageId}`, { method: "DELETE" });
@@ -759,6 +833,7 @@ async function runRemovePage() {
   } finally {
     scanBtn.disabled = false;
     wipeBtn.disabled = false;
+    await refreshBatchOcrStatusSafe();
   }
 }
 
@@ -768,6 +843,7 @@ async function runWipe() {
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
   exportFinalBtn.disabled = true;
+  batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
 
   try {
@@ -782,6 +858,7 @@ async function runWipe() {
   } finally {
     scanBtn.disabled = false;
     wipeBtn.disabled = false;
+    await refreshBatchOcrStatusSafe();
   }
 }
 
@@ -790,6 +867,7 @@ async function runFinalExport() {
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
   exportFinalBtn.disabled = true;
+  batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
   try {
     await fetchJson("/api/final/export", {
@@ -804,6 +882,43 @@ async function runFinalExport() {
     scanBtn.disabled = false;
     wipeBtn.disabled = false;
     updatePagesPaginationControls();
+    await refreshBatchOcrStatusSafe();
+  }
+}
+
+async function runBatchOcrToggle() {
+  if (batchOcrRequestInFlight) {
+    return;
+  }
+  batchOcrRequestInFlight = true;
+  batchOcrBtn.disabled = true;
+  try {
+    if (batchOcrIsRunning) {
+      batchOcrStopping = true;
+      batchOcrBtn.textContent = "Stopping...";
+      batchOcrBtn.title = "Stopping Batch OCR gracefully after current extraction.";
+      await fetchJson("/api/ocr-batch/stop", { method: "POST" });
+    } else {
+      setBatchOcrBusy(true);
+      await fetchJson("/api/ocr-batch/run", { method: "POST" });
+      setBatchOcrBusy(false);
+    }
+    await Promise.all([
+      refreshBatchOcrStatus(),
+      refreshReviewActionState(),
+      refreshPagesSummary(),
+    ]);
+  } catch (error) {
+    console.error(`Batch OCR action failed: ${error.message}`);
+  } finally {
+    batchOcrRequestInFlight = false;
+    setBatchOcrBusy(false);
+    try {
+      await refreshBatchOcrStatus();
+    } catch (error) {
+      console.error(`Failed to refresh Batch OCR status: ${error.message}`);
+      applyBatchOcrStatus({ is_running: false, pending_pages: 0, pending_layouts: 0 });
+    }
   }
 }
 
@@ -904,6 +1019,7 @@ pagesBody.addEventListener("click", (event) => {
   }
 });
 exportFinalBtn.addEventListener("click", runFinalExport);
+batchOcrBtn.addEventListener("click", runBatchOcrToggle);
 layoutBenchmarkBtn.addEventListener("click", openLayoutBenchmarkPage);
 wipeBtn.addEventListener("click", openWipeModal);
 wipeCancelBtn.addEventListener("click", closeWipeModal);

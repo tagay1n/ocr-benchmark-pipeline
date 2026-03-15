@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 import statistics
-from typing import Any
+from typing import Any, Callable
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -465,6 +465,7 @@ def extract_ocr_for_page(
     prompt_template: str | None = None,
     temperature: float | None = None,
     max_retries_per_layout: int | None = None,
+    progress_callback: Callable[[dict[str, int]], None] | None = None,
 ) -> dict[str, Any]:
     with get_session() as session:
         page = session.get(Page, page_id)
@@ -536,6 +537,8 @@ def extract_ocr_for_page(
     extracted_count = 0
     skipped_count = 0
     request_count = 0
+    processed_count = 0
+    total_selected = len(layouts_to_process)
     for layout in layouts_to_process:
         prompt, output_format = _prompt_for_layout(
             layout,
@@ -562,6 +565,14 @@ def extract_ocr_for_page(
                 }
             )
             skipped_count += 1
+            processed_count += 1
+            if callable(progress_callback):
+                progress_callback(
+                    {
+                        "processed_layouts": int(processed_count),
+                        "total_layouts": int(total_selected),
+                    }
+                )
             continue
 
         image_bytes = _crop_layout_png_bytes(image_path, layout["bbox"])
@@ -619,6 +630,14 @@ def extract_ocr_for_page(
             }
         )
         extracted_count += 1
+        processed_count += 1
+        if callable(progress_callback):
+            progress_callback(
+                {
+                    "processed_layouts": int(processed_count),
+                    "total_layouts": int(total_selected),
+                }
+            )
 
     now = _utc_now()
     with get_session() as session:

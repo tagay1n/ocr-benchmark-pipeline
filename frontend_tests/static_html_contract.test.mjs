@@ -19,6 +19,7 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
     'id="review-layouts-btn"',
     'id="review-ocr-btn"',
     'id="export-final-btn"',
+    'id="batch-ocr-btn"',
     'id="layout-benchmark-btn"',
     'id="wipe-btn"',
     'id="pages-body"',
@@ -37,6 +38,9 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(html.includes('src="/static/js/dashboard_page.mjs"'), true);
   assert.equal(pageModule.includes('"/api/pipeline/activity/stream?limit=30"'), true);
   assert.equal(pageModule.includes('"/api/final/export"'), true);
+  assert.equal(pageModule.includes('"/api/ocr-batch/status"'), true);
+  assert.equal(pageModule.includes('"/api/ocr-batch/run"'), true);
+  assert.equal(pageModule.includes('"/api/ocr-batch/stop"'), true);
   assert.equal(pageModule.includes('"/static/layout_benchmark.html"'), true);
   assert.equal(pageModule.includes('"/api/pages/summary"'), true);
   assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);

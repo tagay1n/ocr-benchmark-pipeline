@@ -18,7 +18,8 @@ from .pipeline_runtime import (
     register_default_handlers,
 )
 from .runtime_options import reset_runtime_options_from_settings
-from .api import benchmark_router, discovery_router, pipeline_router, review_router
+from .api import batch_ocr_router, benchmark_router, discovery_router, pipeline_router, review_router
+from .api.batch_ocr import batch_ocr_status, run_batch_ocr_job, stop_batch_ocr_job
 from .api.benchmark import (
     layout_benchmark_grid,
     rescore_layout_benchmark,
@@ -94,4 +95,5 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(discovery_router)
 app.include_router(review_router)
 app.include_router(pipeline_router)
+app.include_router(batch_ocr_router)
 app.include_router(benchmark_router)

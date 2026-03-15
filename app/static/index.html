@@ -73,19 +73,30 @@
         gap: 8px;
       }
 
-      #layout-benchmark-btn.is-busy {
+      #layout-benchmark-btn.is-busy,
+      #batch-ocr-btn.is-busy {
         position: relative;
         color: transparent;
       }
 
-      #layout-benchmark-btn.is-busy::after {
+      #batch-ocr-btn.is-active {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+        box-shadow: 0 0 0 2px rgba(11, 122, 117, 0.18);
+      }
+
+      #layout-benchmark-btn.is-busy::after,
+      #batch-ocr-btn.is-busy::after {
         content: "";
         position: absolute;
+        inset: 0;
+        margin: auto;
         width: 14px;
         height: 14px;
         border-radius: 999px;
-        border: 2px solid rgba(255, 255, 255, 0.45);
-        border-top-color: #ffffff;
+        border: 2px solid rgba(11, 122, 117, 0.24);
+        border-top-color: var(--accent);
         animation: layout-benchmark-spin 720ms linear infinite;
       }
 
@@ -527,6 +538,7 @@
         </div>
         <div class="header-top-actions">
           <div class="benchmark-controls" role="group" aria-label="Layout benchmark controls">
+            <button id="batch-ocr-btn" class="secondary" type="button">Batch OCR</button>
             <button id="layout-benchmark-btn" class="secondary" type="button">Benchmark</button>
           </div>
           <button id="wipe-btn" class="danger-btn" type="button">Wipe data</button>
