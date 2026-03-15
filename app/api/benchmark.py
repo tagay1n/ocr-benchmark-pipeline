@@ -37,12 +37,53 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _top_layout_detection_configs(
+    rows: list[dict[str, object]] | None,
+    *,
+    limit: int = 3,
+) -> list[dict[str, object]]:
+    top_rows = rows if isinstance(rows, list) else []
+    seen: set[tuple[str, int]] = set()
+    output: list[dict[str, object]] = []
+    for row in top_rows:
+        if not isinstance(row, dict):
+            continue
+        model_checkpoint = str(row.get("model_checkpoint") or "").strip()
+        try:
+            image_size = int(row.get("image_size"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        if not model_checkpoint or image_size <= 0:
+            continue
+        key = (model_checkpoint, image_size)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            mean_score = float(row.get("mean_score"))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            mean_score = 0.0
+        output.append(
+            {
+                "model_checkpoint": model_checkpoint,
+                "image_size": image_size,
+                "mean_score": mean_score,
+            }
+        )
+        if len(output) >= int(limit):
+            break
+    return output
+
+
 @router.get("/api/layout-detection/defaults")
 def layout_detection_defaults() -> dict[str, object]:
     defaults = get_layout_detection_defaults()
+    benchmark_grid = get_layout_benchmark_grid()
+    top_configs = _top_layout_detection_configs(benchmark_grid.get("rows"))  # type: ignore[arg-type]
     return {
         "defaults": defaults,
         "available_models": list(BENCHMARK_MODEL_CHECKPOINTS),
+        "top_configs": top_configs,
     }
 
 

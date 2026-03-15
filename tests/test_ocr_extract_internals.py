@@ -110,6 +110,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
             "page_header": "markdown",
             "page_footer": "markdown",
             "list_item": "markdown",
+            "picture_text": "markdown",
             "footnote": "markdown",
             "caption": "markdown",
             "table": "html",

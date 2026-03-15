@@ -16,6 +16,10 @@ export function fetchLayoutDetectionDefaults() {
   return fetchJson("/api/layout-detection/defaults");
 }
 
+export function fetchLayoutBenchmarkGrid() {
+  return fetchJson("/api/layout-benchmark/grid");
+}
+
 export function fetchNextLayoutReviewPage(pageId) {
   return fetchJson(`/api/pages/${pageId}/layout-review-next`);
 }

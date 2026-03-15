@@ -30,8 +30,6 @@ const reviewLayoutsBtn = document.getElementById("review-layouts-btn");
 const reviewOcrBtn = document.getElementById("review-ocr-btn");
 const exportFinalBtn = document.getElementById("export-final-btn");
 const layoutBenchmarkBtn = document.getElementById("layout-benchmark-btn");
-const autoDetectLayoutsToggle = document.getElementById("auto-detect-layouts-toggle");
-const autoExtractTextToggle = document.getElementById("auto-extract-text-toggle");
 const wipeBtn = document.getElementById("wipe-btn");
 const wipeModal = document.getElementById("wipe-modal");
 const wipeConfirmInput = document.getElementById("wipe-confirm-input");
@@ -75,11 +73,6 @@ let streamRefreshTimer = null;
 let streamRefreshInFlight = false;
 let lastProcessedEventId = 0;
 let pendingRemovePageId = null;
-let runtimeOptions = {
-  enable_background_jobs: true,
-  auto_detect_layouts_after_discovery: false,
-  auto_extract_text_after_layout_review: false,
-};
 const DATE_LOCALE = "en-GB";
 const DATE_TIME_FORMAT = {
   year: "numeric",
@@ -231,23 +224,6 @@ function updatePagesPaginationControls() {
   pagesPrevBtn.disabled = pagesLoading || pagesCursorIndex <= 0;
   pagesNextBtn.disabled = pagesLoading || !pagesHasMore || !pagesNextCursor;
   pagesSizeSelect.disabled = pagesLoading;
-}
-
-function applyRuntimeOptions(options) {
-  runtimeOptions = {
-    enable_background_jobs: Boolean(options?.enable_background_jobs),
-    auto_detect_layouts_after_discovery: Boolean(options?.auto_detect_layouts_after_discovery),
-    auto_extract_text_after_layout_review: Boolean(options?.auto_extract_text_after_layout_review),
-  };
-
-  autoDetectLayoutsToggle.checked = runtimeOptions.auto_detect_layouts_after_discovery;
-  autoExtractTextToggle.checked = runtimeOptions.auto_extract_text_after_layout_review;
-
-  const disabled = !runtimeOptions.enable_background_jobs;
-  autoDetectLayoutsToggle.disabled = disabled;
-  autoExtractTextToggle.disabled = disabled;
-  autoDetectLayoutsToggle.title = disabled ? "Background jobs are disabled in config." : "";
-  autoExtractTextToggle.title = disabled ? "Background jobs are disabled in config." : "";
 }
 
 function setPipelinePanelExpanded(expanded) {
@@ -627,10 +603,9 @@ function applyStatusUpdatesFromEvents(events) {
 }
 
 async function reloadDashboard() {
-  const [duplicatesPayload, activityPayload, runtimeOptionsPayload] = await Promise.all([
+  const [duplicatesPayload, activityPayload] = await Promise.all([
     fetchJson("/api/duplicates"),
     fetchJson("/api/pipeline/activity"),
-    fetchJson("/api/runtime-options"),
   ]);
   await Promise.all([
     loadCurrentPagesSlice(),
@@ -639,7 +614,6 @@ async function reloadDashboard() {
   ]);
   renderDuplicates(duplicatesPayload.duplicates);
   renderActivity(activityPayload);
-  applyRuntimeOptions(runtimeOptionsPayload);
   syncLastProcessedEventId(activityPayload.recent_events);
 }
 
@@ -833,27 +807,6 @@ async function runFinalExport() {
   }
 }
 
-function bindRuntimeOptionToggle(toggleElement, optionKey) {
-  toggleElement.addEventListener("change", async () => {
-    const previousValue = Boolean(runtimeOptions[optionKey]);
-    toggleElement.disabled = true;
-    try {
-      const payload = await fetchJson("/api/runtime-options", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          [optionKey]: toggleElement.checked,
-        }),
-      });
-      applyRuntimeOptions(payload);
-    } catch (error) {
-      console.error(`Failed to update runtime options: ${error.message}`);
-      toggleElement.checked = previousValue;
-      applyRuntimeOptions(runtimeOptions);
-    }
-  });
-}
-
 pipelineToggle.addEventListener("click", () => {
   setPipelinePanelExpanded(!pipelinePanelExpanded);
 });
@@ -950,8 +903,6 @@ pagesBody.addEventListener("click", (event) => {
     openRemoveModal(pageId);
   }
 });
-bindRuntimeOptionToggle(autoDetectLayoutsToggle, "auto_detect_layouts_after_discovery");
-bindRuntimeOptionToggle(autoExtractTextToggle, "auto_extract_text_after_layout_review");
 exportFinalBtn.addEventListener("click", runFinalExport);
 layoutBenchmarkBtn.addEventListener("click", openLayoutBenchmarkPage);
 wipeBtn.addEventListener("click", openWipeModal);

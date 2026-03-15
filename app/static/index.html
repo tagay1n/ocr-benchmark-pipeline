@@ -104,28 +104,6 @@
         gap: 8px;
       }
 
-      .runtime-options {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px 18px;
-        margin-top: 12px;
-      }
-
-      .runtime-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        color: var(--muted);
-        font-size: 14px;
-      }
-
-      .runtime-toggle input {
-        width: 16px;
-        height: 16px;
-        margin: 0;
-        accent-color: var(--accent);
-      }
-
       .pipeline-separator {
         width: 44px;
         height: 30px;
@@ -545,16 +523,6 @@
               </span>
               <button id="export-final-btn" type="button" disabled>Export</button>
             </div>
-          </div>
-          <div class="runtime-options" role="group" aria-label="Runtime automation options">
-            <label class="runtime-toggle" for="auto-detect-layouts-toggle">
-              <input id="auto-detect-layouts-toggle" type="checkbox" />
-              <span>Auto-detect layouts after discovery</span>
-            </label>
-            <label class="runtime-toggle" for="auto-extract-text-toggle">
-              <input id="auto-extract-text-toggle" type="checkbox" />
-              <span>Auto-extract text after layout review</span>
-            </label>
           </div>
         </div>
         <div class="header-top-actions">
