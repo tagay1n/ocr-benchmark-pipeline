@@ -142,12 +142,13 @@
       const lineReviewPanel = document.getElementById("line-review-panel");
       const lineReviewLayout = document.getElementById("line-review-layout");
       const lineReviewProgress = document.getElementById("line-review-progress");
-      const lineReviewPrevText = document.getElementById("line-review-prev-text");
+      const lineReviewBaselineText = document.getElementById("line-review-baseline-text");
       const lineReviewCurrentText = document.getElementById("line-review-current-text");
-      const lineReviewNextText = document.getElementById("line-review-next-text");
       const lineReviewPrevBtn = document.getElementById("line-review-prev-btn");
       const lineReviewApproveBtn = document.getElementById("line-review-approve-btn");
       const lineReviewNextBtn = document.getElementById("line-review-next-btn");
+      const lineReviewApproveBboxBtn = document.getElementById("line-review-approve-bbox-btn");
+      const lineReviewResetBboxBtn = document.getElementById("line-review-reset-bbox-btn");
       const historyBackBtn = document.getElementById("history-back-btn");
       const historyForthBtn = document.getElementById("history-forth-btn");
       const reextractModal = document.getElementById("reextract-modal");
@@ -2110,6 +2111,13 @@
         return content.split("\n");
       }
 
+      function serverLogicalLinesForLayout(layoutId) {
+        const key = String(Number(layoutId));
+        const serverOutput = state.serverOutputsByLayoutId[key];
+        const content = String(serverOutput?.content ?? "").replace(/\r\n/g, "\n");
+        return content.split("\n");
+      }
+
       function isTextLikeOutput(output) {
         const className = normalizeClassName(output?.class_name);
         return (
@@ -2674,19 +2682,22 @@
         lineReviewLayout.textContent = `${selectedOutput.reading_order}. ${formatClassLabel(selectedOutput.class_name)}`;
         lineReviewProgress.textContent = `Line ${currentIndex + 1}/${lineCount} • Approved ${approvedCount}/${lineCount}`;
 
-        const prevText = currentIndex > 0 ? lines[currentIndex - 1] : "";
         const currentText = lines[currentIndex] ?? "";
-        const nextText = currentIndex < lineCount - 1 ? lines[currentIndex + 1] : "";
-        lineReviewPrevText.textContent = prevText || " ";
+        const baselineLines = serverLogicalLinesForLayout(selectedLayoutId);
+        const baselineText = baselineLines[currentIndex] ?? "";
+        lineReviewBaselineText.textContent = baselineText || " ";
         lineReviewCurrentText.textContent = currentText || " ";
-        lineReviewNextText.textContent = nextText || " ";
+        lineReviewCurrentText.classList.toggle("is-changed", baselineText !== currentText);
 
         lineReviewPrevBtn.disabled = currentIndex <= 0 || state.reviewSubmitInProgress || state.reextractInProgress;
         lineReviewNextBtn.disabled =
           currentIndex >= lineCount - 1 || state.reviewSubmitInProgress || state.reextractInProgress;
-        lineReviewApproveBtn.disabled = state.reviewSubmitInProgress || state.reextractInProgress;
+        const lineActionDisabled = state.reviewSubmitInProgress || state.reextractInProgress;
+        lineReviewApproveBtn.disabled = lineActionDisabled;
+        lineReviewApproveBboxBtn.disabled = lineActionDisabled;
+        lineReviewResetBboxBtn.disabled = lineActionDisabled;
         lineReviewApproveBtn.classList.toggle("approved", isApproved);
-        lineReviewApproveBtn.textContent = isApproved ? "Unapprove line" : "Approve line";
+        lineReviewApproveBtn.textContent = isApproved ? "Next" : "Approve + next";
       }
 
       function lineReviewLockActive() {
@@ -2708,7 +2719,7 @@
         renderLineReviewPanel();
       }
 
-      function toggleCurrentLineApproval() {
+      function approveCurrentLineAndAdvance() {
         const selectedLayoutId = Number(state.selectedLayoutId);
         const output = outputByLayoutId(selectedLayoutId);
         if (!output || !lineReviewRequiredOutput(output)) {
@@ -2717,12 +2728,49 @@
         const lineIndex = currentLineReviewIndex(selectedLayoutId);
         const lineCount = logicalLinesForOutput(output).length;
         const approved = approvedLineSet(selectedLayoutId, lineCount);
-        const shouldApprove = !approved.has(lineIndex);
-        approveLine(selectedLayoutId, lineIndex, { approved: shouldApprove, persist: true });
-        if (shouldApprove && lineIndex < lineCount - 1) {
+        if (!approved.has(lineIndex)) {
+          approveLine(selectedLayoutId, lineIndex, { approved: true, persist: true });
+        }
+        if (lineIndex < lineCount - 1) {
           setLineReviewCursor(selectedLayoutId, lineIndex + 1, { persist: true });
           syncHoveredLineFromLineReviewCursor(selectedLayoutId);
         }
+        renderLineReviewPanel();
+      }
+
+      function unapproveCurrentLine() {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const lineIndex = currentLineReviewIndex(selectedLayoutId);
+        approveLine(selectedLayoutId, lineIndex, { approved: false, persist: true });
+        renderLineReviewPanel();
+      }
+
+      function approveAllLinesForSelectedBbox() {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const lines = logicalLinesForOutput(output);
+        updateApprovedLineIndexes(selectedLayoutId, Array.from({ length: lines.length }, (_, idx) => idx), {
+          persist: true,
+        });
+        renderLineReviewPanel();
+      }
+
+      function resetLineApprovalsForSelectedBbox() {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        updateApprovedLineIndexes(selectedLayoutId, [], { persist: true });
+        setLineReviewCursor(selectedLayoutId, 0, { persist: true });
+        syncHoveredLineFromLineReviewCursor(selectedLayoutId);
         renderLineReviewPanel();
       }
 
@@ -3982,7 +4030,13 @@
         moveLineReviewCursor(1);
       });
       lineReviewApproveBtn?.addEventListener("click", () => {
-        toggleCurrentLineApproval();
+        approveCurrentLineAndAdvance();
+      });
+      lineReviewApproveBboxBtn?.addEventListener("click", () => {
+        approveAllLinesForSelectedBbox();
+      });
+      lineReviewResetBboxBtn?.addEventListener("click", () => {
+        resetLineApprovalsForSelectedBbox();
       });
       reconstructedViewport.addEventListener("pointermove", () => {
         notifyReconstructedControlsActivity();
@@ -4143,7 +4197,11 @@
           !lineReviewPanel?.hidden
         ) {
           event.preventDefault();
-          toggleCurrentLineApproval();
+          if (event.shiftKey) {
+            unapproveCurrentLine();
+          } else {
+            approveCurrentLineAndAdvance();
+          }
           return;
         }
         if (event.key === "ArrowUp" || event.key === "ArrowDown") {
