@@ -68,6 +68,7 @@
       } from "./ocr_review_api.mjs";
       import {
         readStorage,
+        readStorageBool,
         removeStorage,
         writeStorage,
       } from "./state_event_utils.mjs";
@@ -106,6 +107,7 @@
         panelVisibility: "ocrReview.panelVisibility",
         zoomMode: "ocrReview.zoom.mode",
         zoomPercent: "ocrReview.zoom.percent",
+        magnifierEnabled: "ocrReview.magnifier.enabled",
         magnifierZoom: "ocrReview.magnifier.zoom",
         reconstructedRenderMode: "ocrReview.reconstructed.render_mode",
         reviewViewMode: "ocrReview.review.view_mode",
@@ -126,7 +128,7 @@
       const EDITOR_DRAWER_RESPONSIVE_BREAKPOINT = 1120;
       const FOCUSED_STRIP_PAD_RATIO = 0.02;
       const FOCUSED_STRIP_MIN_HEIGHT_RATIO = 0.08;
-      const LINE_REVIEW_SLOT_OFFSETS = [-1, 0, 1];
+      const LINE_REVIEW_SLOT_OFFSETS = [0];
       const LINE_REVIEW_CONTEXT_RATIO = 0.28;
       const LINE_REVIEW_TARGET_HEIGHT_PX = 44;
       const LINE_REVIEW_MIN_HEIGHT_PX = 30;
@@ -237,7 +239,7 @@
         history: [],
         historyIndex: -1,
         nextReviewPageId: null,
-        magnifierEnabled: true,
+        magnifierEnabled: readStorageBool(STORAGE_KEYS.magnifierEnabled, true),
         magnifierZoom: clampMagnifierZoom(readStorage(STORAGE_KEYS.magnifierZoom), {
           min: MAGNIFIER_ZOOM_MIN,
           max: MAGNIFIER_ZOOM_MAX,
@@ -306,6 +308,7 @@
           return;
         }
         state.magnifierEnabled = normalized;
+        writeStorage(STORAGE_KEYS.magnifierEnabled, normalized ? "1" : "0");
         sourceImageMagnifier.setEnabled(normalized);
         updateMagnifierToggleUi();
       }
@@ -2720,6 +2723,9 @@
         }
         state.hoveredLine = next;
         applyLineHoverHighlights();
+        if (state.viewMode === "line_by_line" && source === "line_review") {
+          ensureFocusedLineVisible(next.layoutId, next, 8);
+        }
         syncExpandedEditorCaretFromHoveredLine({ source });
       }
 
@@ -3619,11 +3625,44 @@
           return false;
         }
         const output = outputByLayoutId(layoutId);
-        if (!output || !output.bbox) {
+        return scrollViewportToBBox(output?.bbox, viewport, content, { preferVerticalCenter });
+      }
+
+      function lineBBoxForOutputBand(output, lineBand) {
+        const rect = normalizeBBoxRect(output?.bbox);
+        if (!rect || !lineBand) {
+          return null;
+        }
+        const topRatio = Math.max(0, Math.min(1, Number(lineBand.topRatio)));
+        const heightRatio = Math.max(0, Math.min(1 - topRatio, Number(lineBand.heightRatio)));
+        if (heightRatio <= 0) {
+          return null;
+        }
+        const bboxHeight = rect.bottom - rect.top;
+        if (!(bboxHeight > 0)) {
+          return null;
+        }
+        const y1 = rect.top + bboxHeight * topRatio;
+        const y2 = rect.top + bboxHeight * (topRatio + heightRatio);
+        return {
+          x1: rect.left,
+          y1,
+          x2: rect.right,
+          y2,
+        };
+      }
+
+      function scrollViewportToBBox(
+        bbox,
+        viewport,
+        content,
+        { preferVerticalCenter = false } = {},
+      ) {
+        if (!viewport || !content || !bbox) {
           return false;
         }
         const target = computeViewportAutoCenterTarget({
-          bbox: output.bbox,
+          bbox,
           contentWidth: content.clientWidth,
           contentHeight: content.clientHeight,
           viewportWidth: viewport.clientWidth,
@@ -3657,11 +3696,43 @@
         return changed;
       }
 
+      function scrollVisiblePreviewToFocusedLine(layoutId, lineBand, { preferVerticalCenter = true } = {}) {
+        const output = outputByLayoutId(layoutId);
+        const lineBBox = lineBBoxForOutputBand(output, lineBand);
+        if (!lineBBox) {
+          return false;
+        }
+        let changed = false;
+        if (state.panelVisibility.source) {
+          changed =
+            scrollViewportToBBox(lineBBox, sourceViewport, sourceWrap, { preferVerticalCenter }) || changed;
+        }
+        if (state.panelVisibility.reconstructed) {
+          changed =
+            scrollViewportToBBox(lineBBox, reconstructedViewport, reconstructedWrap, {
+              preferVerticalCenter,
+            }) || changed;
+        }
+        return changed;
+      }
+
       function ensureLayoutVisible(layoutId, retries = 8, { preferVerticalCenter = false } = {}) {
         if (scrollVisiblePreviewToLayout(layoutId, { preferVerticalCenter })) return;
         if (retries <= 0) return;
         requestAnimationFrame(() => {
           ensureLayoutVisible(layoutId, retries - 1, { preferVerticalCenter });
+        });
+      }
+
+      function ensureFocusedLineVisible(layoutId, lineBand, retries = 8, { preferVerticalCenter = true } = {}) {
+        if (scrollVisiblePreviewToFocusedLine(layoutId, lineBand, { preferVerticalCenter })) {
+          return;
+        }
+        if (retries <= 0) {
+          return;
+        }
+        requestAnimationFrame(() => {
+          ensureFocusedLineVisible(layoutId, lineBand, retries - 1, { preferVerticalCenter });
         });
       }
 

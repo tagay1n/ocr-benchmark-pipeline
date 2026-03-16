@@ -179,14 +179,13 @@
 
       .line-review-panel {
         margin-top: 8px;
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr);
-        gap: 10px;
-        align-items: stretch;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
         border: 1px solid var(--border);
         border-radius: 12px;
         background: #f4f1e9;
-        padding: 8px 10px;
+        padding: 6px 8px;
       }
 
       .line-review-panel[hidden] {
@@ -194,20 +193,22 @@
       }
 
       .line-review-sidebar {
-        display: flex;
-        flex-direction: column;
+        display: inline-flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
         gap: 10px;
         min-width: 0;
-        width: max-content;
-        max-width: 150px;
+        width: 100%;
       }
 
       .line-review-meta {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
+        display: inline-flex;
+        flex-direction: row;
+        align-items: baseline;
+        gap: 8px;
         min-width: 0;
-        width: 100%;
+        flex-wrap: wrap;
       }
 
       .line-review-layout {
@@ -229,10 +230,10 @@
       .line-review-reel {
         display: flex;
         flex-direction: column;
-        justify-content: center;
+        justify-content: flex-start;
         align-content: center;
         gap: 4px;
-        min-height: 210px;
+        min-height: 0;
         min-width: 0;
       }
 
@@ -242,7 +243,7 @@
         gap: 3px;
         min-width: 0;
         min-height: 0;
-        padding: 3px 4px;
+        padding: 2px 4px;
         border-radius: 9px;
         border: 1px solid #6aa7a2;
         background: transparent;
@@ -343,15 +344,17 @@
 
       .line-review-actions {
         display: inline-flex;
-        flex-direction: column;
+        flex-direction: row;
         gap: 6px;
-        align-items: stretch;
-        flex-wrap: nowrap;
-        width: max-content;
+        align-items: center;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+        min-width: 0;
       }
 
       .line-review-actions > button {
-        width: 100%;
+        width: auto;
+        white-space: nowrap;
       }
 
       .line-review-approve.approved {
@@ -1374,7 +1377,13 @@
         }
 
         .line-review-panel {
-          grid-template-columns: 1fr;
+          padding: 6px;
+          gap: 6px;
+        }
+
+        .line-review-sidebar {
+          flex-direction: column;
+          align-items: flex-start;
         }
 
         .line-review-actions {

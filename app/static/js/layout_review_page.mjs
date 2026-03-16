@@ -52,6 +52,7 @@
       } from "/static/js/layout_review_api.mjs";
       import {
         readStorage,
+        readStorageBool,
         removeStorage,
         writeStorage,
       } from "/static/js/state_event_utils.mjs";
@@ -104,6 +105,7 @@
         layoutDraftPrefix: "layout.draft.page",
         zoomMode: "layout.zoom.mode",
         zoomPercent: "layout.zoom.percent",
+        magnifierEnabled: "layout.magnifier.enabled",
         magnifierZoom: "layout.magnifier.zoom",
         reviewNavHistory: "layout.review_nav.history",
         reviewNavIndex: "layout.review_nav.index",
@@ -188,7 +190,7 @@
         detectTopConfigs: [],
         activeDetectHelpKey: null,
         layoutsLoaded: false,
-        magnifierEnabled: true,
+        magnifierEnabled: readStorageBool(STORAGE_KEYS.magnifierEnabled, true),
         magnifierZoom: clampMagnifierZoom(readStorage(STORAGE_KEYS.magnifierZoom), {
           min: MAGNIFIER_ZOOM_MIN,
           max: MAGNIFIER_ZOOM_MAX,
@@ -253,6 +255,7 @@
           return;
         }
         state.magnifierEnabled = normalized;
+        writeStorage(STORAGE_KEYS.magnifierEnabled, normalized ? "1" : "0");
         imageMagnifier.setEnabled(normalized);
         updateMagnifierToggleUi();
       }
