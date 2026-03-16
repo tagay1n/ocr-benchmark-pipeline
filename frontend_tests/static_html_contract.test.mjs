@@ -107,6 +107,8 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(pageModule.includes('"/static/js/state_event_utils.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/zoom_controller.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/review_shell_utils.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/review_history_controller.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/modal_controller.mjs"'), true);
   assert.equal(pageModule.includes("fetchLayoutDetectionDefaults"), true);
   assert.equal(apiModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
   assert.equal(apiModule.includes('"/api/layout-detection/defaults"'), true);
@@ -188,6 +190,8 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
   assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
   assert.equal(pageModule.includes('"./zoom_controller.mjs"'), true);
   assert.equal(pageModule.includes('"./review_shell_utils.mjs"'), true);
+  assert.equal(pageModule.includes('"./review_history_controller.mjs"'), true);
+  assert.equal(pageModule.includes('"./modal_controller.mjs"'), true);
   assert.equal(apiModule.includes("`/api/pages/${pageId}/ocr/reextract`"), true);
   assert.equal(apiModule.includes("`/api/ocr-outputs/${layoutId}`"), true);
 });

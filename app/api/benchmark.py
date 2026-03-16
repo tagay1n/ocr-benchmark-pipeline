@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy import select, update
 
-from ..db import get_session
 from ..layout_benchmark import (
     BENCHMARK_MODEL_CHECKPOINTS,
     get_latest_benchmark_status,
@@ -12,7 +10,6 @@ from ..layout_benchmark import (
     request_layout_benchmark_stop,
 )
 from ..layout_detection_defaults import get_layout_detection_defaults
-from ..models import PipelineJob
 from ..pipeline_constants import (
     EVENT_JOB_ENQUEUED,
     EVENT_JOB_ENQUEUE_SKIPPED,
@@ -20,7 +17,8 @@ from ..pipeline_constants import (
     STAGE_LAYOUT_BENCHMARK,
 )
 from ..pipeline_runtime import emit_event, enqueue_job as _enqueue_job, register_default_handlers
-from .job_control_utils import coerce_int, resolve_main_callable, utc_now_iso
+from .event_lifecycle_utils import emit_lifecycle_completed, emit_lifecycle_failed, emit_lifecycle_started
+from .job_control_utils import coerce_int, resolve_main_callable, stop_stage_jobs, utc_now_iso
 from .schemas import RunLayoutBenchmarkRequest
 
 router = APIRouter()
@@ -116,36 +114,13 @@ def run_layout_benchmark_job(payload: RunLayoutBenchmarkRequest | None = None) -
 @router.post("/api/layout-benchmark/stop")
 def stop_layout_benchmark_job() -> dict[str, object]:
     register_default_handlers()
-    queued_cancelled = 0
-    running_found = False
-    now = utc_now_iso()
-    with get_session() as session:
-        running_found = (
-            session.execute(
-                select(PipelineJob.id)
-                .where(PipelineJob.stage == STAGE_LAYOUT_BENCHMARK)
-                .where(PipelineJob.status == "running")
-                .limit(1)
-            ).scalar_one_or_none()
-            is not None
-        )
-        queued_ids = session.execute(
-            select(PipelineJob.id)
-            .where(PipelineJob.stage == STAGE_LAYOUT_BENCHMARK)
-            .where(PipelineJob.status == "queued")
-        ).scalars().all()
-        queued_cancelled = len(queued_ids)
-        if queued_cancelled > 0:
-            session.execute(
-                update(PipelineJob)
-                .where(PipelineJob.id.in_(queued_ids))
-                .values(
-                    status="failed",
-                    error="Stopped by user request.",
-                    finished_at=now,
-                    updated_at=now,
-                )
-            )
+    stop_result = stop_stage_jobs(
+        STAGE_LAYOUT_BENCHMARK,
+        now_iso=utc_now_iso(),
+        stop_error="Stopped by user request.",
+    )
+    queued_cancelled = int(stop_result["queued_cancelled"])
+    running_found = bool(stop_result["running_found"])
     if running_found:
         request_layout_benchmark_stop()
 
@@ -175,13 +150,22 @@ def rescore_layout_benchmark() -> dict[str, object]:
     if bool(status.get("is_running")):
         raise HTTPException(status_code=409, detail="Cannot recalculate scores while benchmark is running.")
 
-    emit_event(
+    emit_lifecycle_started(
         stage=STAGE_LAYOUT_BENCHMARK,
         event_type=EVENT_JOB_PROGRESS,
         message="Layout benchmark score recalculation started.",
     )
-    result = recalculate_layout_benchmark_scores()
-    emit_event(
+    try:
+        result = recalculate_layout_benchmark_scores()
+    except ValueError as error:
+        emit_lifecycle_failed(
+            stage=STAGE_LAYOUT_BENCHMARK,
+            event_type=EVENT_JOB_PROGRESS,
+            message_prefix="Layout benchmark score recalculation failed",
+            error=error,
+        )
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    emit_lifecycle_completed(
         stage=STAGE_LAYOUT_BENCHMARK,
         event_type=EVENT_JOB_PROGRESS,
         message=(

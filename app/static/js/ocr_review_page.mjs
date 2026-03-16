@@ -84,6 +84,18 @@
         updateHistoryNavigationButtons,
         updateReviewStateBadge,
       } from "./review_shell_utils.mjs";
+      import {
+        historyNavigationTargets,
+        loadReviewHistoryState,
+        persistReviewHistoryState,
+        registerCurrentPageVisit,
+        sanitizeReviewHistoryFromPages,
+      } from "./review_history_controller.mjs";
+      import {
+        closeModal,
+        openModal,
+        shouldCloseOnBackdropPointerDown,
+      } from "./modal_controller.mjs";
 
       const STORAGE_KEYS = {
         draftPrefix: "ocrReview.drafts",
@@ -1880,15 +1892,17 @@
         state.reextractProgressCurrent = 0;
         state.reextractProgressTotal = 0;
         renderReextractLayoutOptions();
-        reextractModal.hidden = false;
+        openModal(reextractModal);
       }
 
       function closeReextractModal(force = false) {
-        if (state.reextractInProgress && !force) {
-          return;
-        }
-        setReextractHoveredLayout(null);
-        reextractModal.hidden = true;
+        closeModal(reextractModal, {
+          force,
+          isBusy: () => state.reextractInProgress,
+          onClose: () => {
+            setReextractHoveredLayout(null);
+          },
+        });
       }
 
       function parseReextractPayload() {
@@ -4319,15 +4333,19 @@
       }
 
       function updateHistoryControls() {
-        const prevPageId = previousHistoryPageId(state.history, state.historyIndex);
-        const forwardPageId = nextHistoryPageId(state.history, state.historyIndex);
-        const queueTarget = Number(state.nextReviewPageId);
+        const targets = historyNavigationTargets({
+          history: state.history,
+          historyIndex: state.historyIndex,
+          nextReviewPageId: state.nextReviewPageId,
+          previousHistoryPageId,
+          nextHistoryPageId,
+        });
         updateHistoryNavigationButtons({
           historyBackButton: historyBackBtn,
           historyForwardButton: historyForthBtn,
-          backTarget: Number.isInteger(prevPageId) && prevPageId > 0 ? prevPageId : null,
-          forwardHistoryTarget: Number.isInteger(forwardPageId) && forwardPageId > 0 ? forwardPageId : null,
-          queueTarget: Number.isInteger(queueTarget) && queueTarget > 0 ? queueTarget : null,
+          backTarget: targets.backTarget,
+          forwardHistoryTarget: targets.forwardHistoryTarget,
+          queueTarget: targets.queueTarget,
           labels: {
             noBackTitle: "No previous reviewed page in history.",
             backTitle: "Open previous reviewed page",
@@ -4339,22 +4357,22 @@
       }
 
       function storeHistoryState() {
-        writeStorage(STORAGE_KEYS.history, JSON.stringify(state.history));
-        writeStorage(STORAGE_KEYS.historyIndex, String(state.historyIndex));
+        persistReviewHistoryState({
+          writeStorage,
+          historyKey: STORAGE_KEYS.history,
+          historyIndexKey: STORAGE_KEYS.historyIndex,
+          history: state.history,
+          historyIndex: state.historyIndex,
+        });
       }
 
       function loadHistoryState() {
-        let parsedHistory = [];
-        const rawHistory = readStorage(STORAGE_KEYS.history);
-        if (rawHistory) {
-          try {
-            parsedHistory = JSON.parse(rawHistory);
-          } catch {
-            parsedHistory = [];
-          }
-        }
-        const rawIndex = readStorage(STORAGE_KEYS.historyIndex);
-        const normalized = normalizeReviewHistory(parsedHistory, rawIndex);
+        const normalized = loadReviewHistoryState({
+          readStorage,
+          historyKey: STORAGE_KEYS.history,
+          historyIndexKey: STORAGE_KEYS.historyIndex,
+          normalizeReviewHistory,
+        });
         state.history = normalized.history;
         state.historyIndex = normalized.index;
       }
@@ -4362,14 +4380,13 @@
       async function sanitizeHistoryAgainstServer() {
         try {
           const payload = await fetchPages();
-          const validPageIds = new Set(
-            (Array.isArray(payload?.pages) ? payload.pages : [])
-              .filter((page) => !Boolean(page?.is_missing))
-              .map((page) => Number(page?.id))
-              .filter((id) => Number.isInteger(id) && id > 0),
-          );
-          validPageIds.add(state.pageId);
-          const filtered = filterReviewHistory(state.history, state.historyIndex, validPageIds);
+          const filtered = sanitizeReviewHistoryFromPages({
+            history: state.history,
+            historyIndex: state.historyIndex,
+            pages: payload?.pages,
+            currentPageId: state.pageId,
+            filterReviewHistory,
+          });
           state.history = filtered.history;
           state.historyIndex = filtered.index;
           storeHistoryState();
@@ -4380,7 +4397,12 @@
       }
 
       function updateHistoryOnVisit() {
-        const next = updateReviewHistoryOnVisit(state.history, state.historyIndex, state.pageId);
+        const next = registerCurrentPageVisit({
+          history: state.history,
+          historyIndex: state.historyIndex,
+          currentPageId: state.pageId,
+          updateReviewHistoryOnVisit,
+        });
         state.history = next.history;
         state.historyIndex = next.index;
         storeHistoryState();
@@ -4967,7 +4989,7 @@
         closeReextractModal();
       });
       reextractModal.addEventListener("pointerdown", (event) => {
-        if (event.target === reextractModal) {
+        if (shouldCloseOnBackdropPointerDown(event, reextractModal)) {
           closeReextractModal();
         }
       });

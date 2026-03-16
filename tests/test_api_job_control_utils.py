@@ -6,8 +6,16 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from sqlalchemy import select
+
 from app import config, db, discovery, final_export, layouts, main, ocr_extract, runtime_options
-from app.api.job_control_utils import coerce_int, parse_json_object, resolve_main_callable, utc_now_iso
+from app.api.job_control_utils import (
+    coerce_int,
+    parse_json_object,
+    resolve_main_callable,
+    stop_stage_jobs,
+    utc_now_iso,
+)
 from app.config import DEFAULT_EXTENSIONS, Settings
 
 
@@ -84,6 +92,79 @@ class ApiJobControlUtilsTests(unittest.TestCase):
         value = utc_now_iso()
         self.assertIn("T", value)
         self.assertTrue(value.endswith("+00:00"))
+
+    def test_stop_stage_jobs_cancels_only_matching_queued_and_flags_running(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add_all(
+                [
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="queued",
+                        payload_json='{"trigger":"batch_ocr"}',
+                        result_json=None,
+                        error=None,
+                        attempts=0,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=None,
+                        finished_at=None,
+                    ),
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="queued",
+                        payload_json='{"trigger":"manual"}',
+                        result_json=None,
+                        error=None,
+                        attempts=0,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=None,
+                        finished_at=None,
+                    ),
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="running",
+                        payload_json='{"trigger":"batch_ocr"}',
+                        result_json=None,
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                ]
+            )
+
+        result = stop_stage_jobs(
+            "ocr_extract",
+            payload_matcher=lambda payload: str(payload.get("trigger")) == "batch_ocr",
+            now_iso=now,
+        )
+        self.assertEqual(result, {"running_found": True, "queued_cancelled": 1})
+
+        with db.get_session() as session:
+            rows = session.execute(
+                select(main.PipelineJob.status, main.PipelineJob.error)
+                .where(main.PipelineJob.stage == "ocr_extract")
+                .order_by(main.PipelineJob.id.asc())
+            ).all()
+        self.assertEqual(str(rows[0][0]), "failed")
+        self.assertIn("Stopped by user request", str(rows[0][1]))
+        self.assertEqual(str(rows[1][0]), "queued")
+        self.assertEqual(str(rows[2][0]), "running")
+
+    def test_stop_stage_jobs_handles_no_matching_rows(self) -> None:
+        result = stop_stage_jobs(
+            "ocr_extract",
+            payload_matcher=lambda _payload: False,
+            now_iso=main._utc_now(),
+        )
+        self.assertEqual(result, {"running_found": False, "queued_cancelled": 0})
 
 
 if __name__ == "__main__":

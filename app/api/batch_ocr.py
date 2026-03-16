@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from ..db import get_session
 from ..models import Layout, OcrOutput, Page, PipelineJob
@@ -14,7 +14,13 @@ from ..pipeline_constants import (
     STAGE_OCR_EXTRACT,
 )
 from ..pipeline_runtime import emit_event, enqueue_job as _enqueue_job, register_default_handlers
-from .job_control_utils import coerce_int, parse_json_object, resolve_main_callable, utc_now_iso
+from .job_control_utils import (
+    coerce_int,
+    parse_json_object,
+    resolve_main_callable,
+    stop_stage_jobs,
+    utc_now_iso,
+)
 
 router = APIRouter()
 
@@ -279,53 +285,30 @@ def run_batch_ocr_job() -> dict[str, object]:
 @router.post("/api/ocr-batch/stop")
 def stop_batch_ocr_job() -> dict[str, object]:
     register_default_handlers()
-    now = utc_now_iso()
-    queued_ids: list[int] = []
-    running_found = False
-
-    with get_session() as session:
-        rows = session.execute(
-            select(PipelineJob.id, PipelineJob.status, PipelineJob.payload_json)
-            .where(PipelineJob.stage == STAGE_OCR_EXTRACT)
-            .where(PipelineJob.status.in_(("queued", "running")))
-        ).all()
-
-        for row_id, status, payload_json in rows:
-            payload = _load_job_payload(payload_json)
-            if not _is_batch_ocr_payload(payload):
-                continue
-            if str(status) == "queued":
-                queued_ids.append(int(row_id))
-            elif str(status) == "running":
-                running_found = True
-
-        if queued_ids:
-            session.execute(
-                update(PipelineJob)
-                .where(PipelineJob.id.in_(queued_ids))
-                .values(
-                    status="failed",
-                    error="Stopped by user request.",
-                    finished_at=now,
-                    updated_at=now,
-                )
-            )
+    stop_result = stop_stage_jobs(
+        STAGE_OCR_EXTRACT,
+        payload_matcher=_is_batch_ocr_payload,
+        now_iso=utc_now_iso(),
+        stop_error="Stopped by user request.",
+    )
+    running_found = bool(stop_result["running_found"])
+    queued_cancelled = int(stop_result["queued_cancelled"])
 
     emit_event(
         stage=STAGE_OCR_EXTRACT,
         event_type=EVENT_JOB_PROGRESS,
         message=(
             "Batch OCR stop requested."
-            if running_found or bool(queued_ids)
+            if running_found or queued_cancelled > 0
             else "No active Batch OCR job to stop."
         ),
         data={
             "trigger": BATCH_OCR_TRIGGER,
             "running_stop_requested": bool(running_found),
-            "queued_cancelled": len(queued_ids),
+            "queued_cancelled": queued_cancelled,
         },
     )
     return {
         "running_stop_requested": bool(running_found),
-        "queued_cancelled": len(queued_ids),
+        "queued_cancelled": queued_cancelled,
     }

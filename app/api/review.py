@@ -39,6 +39,7 @@ from ..pipeline_constants import (
 )
 from ..pipeline_runtime import emit_event
 from ..db import get_session
+from .event_lifecycle_utils import emit_lifecycle_completed, emit_lifecycle_failed, emit_lifecycle_started
 from .job_control_utils import resolve_main_callable
 from .schemas import (
     CreateLayoutRequest,
@@ -79,7 +80,7 @@ def _http_exception_from_value_error(
 
 
 def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
-    emit_event(
+    emit_lifecycle_started(
         stage=STAGE_LAYOUT_DETECT,
         event_type=EVENT_MANUAL_DETECT_STARTED,
         page_id=page_id,
@@ -97,14 +98,15 @@ def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) ->
             agnostic_nms=payload.agnostic_nms,
         )
     except ValueError as error:
-        emit_event(
+        emit_lifecycle_failed(
             stage=STAGE_LAYOUT_DETECT,
             event_type=EVENT_MANUAL_DETECT_FAILED,
             page_id=page_id,
-            message=f"Manual layout detection failed: {error}",
+            message_prefix="Manual layout detection failed",
+            error=error,
         )
         raise HTTPException(status_code=400, detail=str(error)) from error
-    emit_event(
+    emit_lifecycle_completed(
         stage=STAGE_LAYOUT_DETECT,
         event_type=EVENT_MANUAL_DETECT_COMPLETED,
         page_id=page_id,
@@ -329,7 +331,7 @@ def remove_layout(layout_id: int) -> dict[str, object]:
 
 @router.post("/api/pages/{page_id}/layouts/review-complete")
 def complete_layout_review(page_id: int) -> dict[str, object]:
-    emit_event(
+    emit_lifecycle_started(
         stage=STAGE_LAYOUT_REVIEW,
         event_type=EVENT_MANUAL_REVIEW_COMPLETE_STARTED,
         page_id=page_id,
@@ -338,14 +340,15 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
     try:
         result = mark_layout_reviewed(page_id)
     except ValueError as error:
-        emit_event(
+        emit_lifecycle_failed(
             stage=STAGE_LAYOUT_REVIEW,
             event_type=EVENT_MANUAL_REVIEW_COMPLETE_FAILED,
             page_id=page_id,
-            message=f"Layout review completion failed: {error}",
+            message_prefix="Layout review completion failed",
+            error=error,
         )
         raise _http_exception_from_value_error(error) from error
-    emit_event(
+    emit_lifecycle_completed(
         stage=STAGE_LAYOUT_REVIEW,
         event_type=EVENT_MANUAL_REVIEW_COMPLETED,
         page_id=page_id,
@@ -381,7 +384,7 @@ def patch_ocr_output(layout_id: int, payload: UpdateOcrOutputRequest) -> dict[st
 
 @router.post("/api/pages/{page_id}/ocr/review-complete")
 def complete_ocr_review(page_id: int) -> dict[str, object]:
-    emit_event(
+    emit_lifecycle_started(
         stage=STAGE_OCR_REVIEW,
         event_type=EVENT_MANUAL_REVIEW_COMPLETE_STARTED,
         page_id=page_id,
@@ -390,14 +393,15 @@ def complete_ocr_review(page_id: int) -> dict[str, object]:
     try:
         result = mark_ocr_reviewed(page_id)
     except ValueError as error:
-        emit_event(
+        emit_lifecycle_failed(
             stage=STAGE_OCR_REVIEW,
             event_type=EVENT_MANUAL_REVIEW_COMPLETE_FAILED,
             page_id=page_id,
-            message=f"OCR review completion failed: {error}",
+            message_prefix="OCR review completion failed",
+            error=error,
         )
         raise _http_exception_from_value_error(error) from error
-    emit_event(
+    emit_lifecycle_completed(
         stage=STAGE_OCR_REVIEW,
         event_type=EVENT_MANUAL_REVIEW_COMPLETED,
         page_id=page_id,
@@ -417,7 +421,7 @@ def reextract_ocr(page_id: int, payload: ReextractOcrRequest | None = None) -> d
 def run_final_export(payload: FinalExportRequest) -> dict[str, object]:
     if not payload.confirm:
         raise HTTPException(status_code=400, detail="Final export not confirmed.")
-    emit_event(
+    emit_lifecycle_started(
         stage=STAGE_FINALIZATION,
         event_type=EVENT_EXPORT_STARTED,
         message="Final dataset export started.",
@@ -425,14 +429,15 @@ def run_final_export(payload: FinalExportRequest) -> dict[str, object]:
     try:
         result = export_final_dataset()
     except ValueError as error:
-        emit_event(
+        emit_lifecycle_failed(
             stage=STAGE_FINALIZATION,
             event_type=EVENT_EXPORT_FAILED,
-            message=f"Final dataset export failed: {error}",
+            message_prefix="Final dataset export failed",
+            error=error,
         )
         raise _http_exception_from_value_error(error) from error
 
-    emit_event(
+    emit_lifecycle_completed(
         stage=STAGE_FINALIZATION,
         event_type=EVENT_EXPORT_COMPLETED,
         message=(
