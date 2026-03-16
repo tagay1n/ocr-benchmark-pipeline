@@ -100,6 +100,10 @@
       const FOCUSED_STRIP_PAD_RATIO = 0.02;
       const FOCUSED_STRIP_MIN_HEIGHT_RATIO = 0.08;
       const LINE_REVIEW_SLOT_OFFSETS = [-1, 0, 1];
+      const LINE_REVIEW_CONTEXT_RATIO = 0.28;
+      const LINE_REVIEW_MIN_HEIGHT_PX = 24;
+      const LINE_REVIEW_MAX_HEIGHT_PX = 72;
+      const LINE_REVIEW_DEFAULT_HEIGHT_PX = 32;
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -2791,37 +2795,81 @@
         return { x1, y1, x2, y2 };
       }
 
-      function renderLineReviewSourceLine(node, output, lineBand) {
-        if (!(node instanceof Element)) {
-          return;
-        }
+      function resolveLineReviewSourceCrop(output, lineBand) {
         const normalizedRect = normalizeBBoxRect(output?.bbox);
         if (!normalizedRect || !lineBand) {
-          return;
+          return null;
         }
         const contentWidth = normalizedRect.x2 - normalizedRect.x1;
         const contentHeight = normalizedRect.y2 - normalizedRect.y1;
         if (contentWidth <= 0 || contentHeight <= 0) {
+          return null;
+        }
+        const rawTop = contentHeight * Number(lineBand.topRatio);
+        const rawHeight = Math.max(1e-6, contentHeight * Number(lineBand.heightRatio));
+        if (!Number.isFinite(rawTop) || !Number.isFinite(rawHeight)) {
+          return null;
+        }
+        const context = rawHeight * LINE_REVIEW_CONTEXT_RATIO;
+        const localTop = Math.max(0, rawTop - context);
+        const localBottom = Math.min(contentHeight, rawTop + rawHeight + context);
+        const sourceHeight = Math.max(1e-6, localBottom - localTop);
+        const sourceTop = normalizedRect.y1 + localTop;
+        if (!Number.isFinite(sourceTop) || !Number.isFinite(sourceHeight)) {
+          return null;
+        }
+        return {
+          normalizedRect,
+          contentWidth,
+          sourceTop,
+          sourceHeight,
+        };
+      }
+
+      function applyLineReviewLaneHeights(sourceLane, geminiLane, crop) {
+        const lanes = [sourceLane, geminiLane];
+        for (const lane of lanes) {
+          if (lane instanceof HTMLElement) {
+            lane.style.height = `${LINE_REVIEW_DEFAULT_HEIGHT_PX}px`;
+          }
+        }
+        if (!crop || !(lineReviewReel instanceof HTMLElement)) {
           return;
         }
-        const sourceTop = normalizedRect.y1 + contentHeight * Number(lineBand.topRatio);
-        const sourceHeight = Math.max(1e-4, contentHeight * Number(lineBand.heightRatio));
-        if (!Number.isFinite(sourceTop) || !Number.isFinite(sourceHeight) || sourceHeight <= 0) {
+        const reelWidth = Number(lineReviewReel.clientWidth);
+        const imageWidth = Number(pageImage.naturalWidth || pageImage.width || 0);
+        const imageHeight = Number(pageImage.naturalHeight || pageImage.height || 0);
+        if (reelWidth <= 0 || imageWidth <= 0 || imageHeight <= 0) {
+          return;
+        }
+        const rawHeightPx = reelWidth * crop.sourceHeight * (imageHeight / imageWidth);
+        const heightPx = Math.max(
+          LINE_REVIEW_MIN_HEIGHT_PX,
+          Math.min(LINE_REVIEW_MAX_HEIGHT_PX, rawHeightPx),
+        );
+        for (const lane of lanes) {
+          if (lane instanceof HTMLElement) {
+            lane.style.height = `${heightPx}px`;
+          }
+        }
+      }
+
+      function renderLineReviewSourceLine(node, crop) {
+        if (!(node instanceof Element) || !crop) {
           return;
         }
         const imageUrl = String(pageImage.currentSrc || pageImage.src || "");
         if (!imageUrl) {
           return;
         }
-
         const image = document.createElement("img");
         image.src = imageUrl;
         image.alt = "";
         image.draggable = false;
-        image.style.width = `${100 / contentWidth}%`;
-        image.style.height = `${100 / sourceHeight}%`;
-        image.style.left = `${(-normalizedRect.x1 / contentWidth) * 100}%`;
-        image.style.top = `${(-sourceTop / sourceHeight) * 100}%`;
+        image.style.width = `${100 / crop.contentWidth}%`;
+        image.style.height = `${100 / crop.sourceHeight}%`;
+        image.style.left = `${(-crop.normalizedRect.x1 / crop.contentWidth) * 100}%`;
+        image.style.top = `${(-crop.sourceTop / crop.sourceHeight) * 100}%`;
         node.appendChild(image);
       }
 
@@ -2838,6 +2886,79 @@
         const width = Math.max(0, normalizedRect.x2 - normalizedRect.x1);
         node.style.left = `${normalizedRect.x1 * 100}%`;
         node.style.width = `${width * 100}%`;
+      }
+
+      function fitLineReviewGeminiText(lineNode, text) {
+        if (!(lineNode instanceof HTMLElement)) {
+          return;
+        }
+        const rawText = String(text ?? "");
+        lineNode.style.wordSpacing = "0px";
+        lineNode.style.letterSpacing = "0px";
+        if (!rawText) {
+          return;
+        }
+        const availableWidth = Math.max(1, lineNode.clientWidth - 2);
+        if (availableWidth <= 2) {
+          return;
+        }
+        const measuredWidth = Number(lineNode.scrollWidth);
+        if (!Number.isFinite(measuredWidth) || measuredWidth <= 0 || measuredWidth >= availableWidth) {
+          return;
+        }
+        const spacesCount = countStretchableSpaces(rawText);
+        const maxWordSpacing = reconstructionWordSpacing({
+          measuredContentWidth: measuredWidth,
+          availableWidth,
+          spacesCount,
+          maxWordSpacing: 2.8,
+          minGainRatio: 0.01,
+        });
+        if (maxWordSpacing > 0) {
+          let low = 0;
+          let high = maxWordSpacing;
+          let best = 0;
+          for (let idx = 0; idx < 8; idx += 1) {
+            const mid = (low + high) / 2;
+            lineNode.style.wordSpacing = `${mid}px`;
+            if (lineNode.scrollWidth <= availableWidth + 1) {
+              best = mid;
+              low = mid;
+            } else {
+              high = mid;
+            }
+          }
+          lineNode.style.wordSpacing = `${best}px`;
+        }
+        const adjustedWidth = Number(lineNode.scrollWidth);
+        if (!Number.isFinite(adjustedWidth) || adjustedWidth >= availableWidth) {
+          return;
+        }
+        const glyphsCount = countStretchableGlyphs(rawText);
+        const maxLetterSpacing = reconstructionLetterSpacing({
+          measuredContentWidth: adjustedWidth,
+          availableWidth,
+          glyphsCount,
+          maxLetterSpacing: 0.55,
+          minGainRatio: 0.004,
+        });
+        if (maxLetterSpacing <= 0) {
+          return;
+        }
+        let low = 0;
+        let high = maxLetterSpacing;
+        let best = 0;
+        for (let idx = 0; idx < 8; idx += 1) {
+          const mid = (low + high) / 2;
+          lineNode.style.letterSpacing = `${mid}px`;
+          if (lineNode.scrollWidth <= availableWidth + 1) {
+            best = mid;
+            low = mid;
+          } else {
+            high = mid;
+          }
+        }
+        lineNode.style.letterSpacing = `${best}px`;
       }
 
       function openEditorForLine(layoutId, lineIndex) {
@@ -2906,11 +3027,11 @@
         sourceLine.className = "line-review-source-line";
         sourceLane.appendChild(sourceLine);
         slot.appendChild(sourceLane);
-        applyLineReviewHorizontalGeometry(sourceLine, output);
         const lineBand =
           resolveLineBandForLayout(output.layout_id, lineIndex) ||
           lineBandFromLineIndex(lineIndex, lineCount);
-        renderLineReviewSourceLine(sourceLine, output, lineBand);
+        const sourceCrop = resolveLineReviewSourceCrop(output, lineBand);
+        applyLineReviewHorizontalGeometry(sourceLine, output);
 
         const geminiLane = document.createElement("div");
         geminiLane.className = "line-review-gemini-lane";
@@ -2918,16 +3039,28 @@
         geminiLine.className = "line-review-gemini-line";
         geminiLane.appendChild(geminiLine);
         slot.appendChild(geminiLane);
+        applyLineReviewLaneHeights(sourceLane, geminiLane, sourceCrop);
+        renderLineReviewSourceLine(sourceLine, sourceCrop);
         applyLineReviewHorizontalGeometry(geminiLine, output);
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
         geminiLine.textContent = currentText || " ";
+        geminiLine.dataset.rawText = currentText;
         geminiLine.classList.toggle("is-changed", baselineText !== currentText);
         if (isCurrent) {
           geminiLine.classList.add("is-editable");
           geminiLine.title = "Double-click to edit this line";
         }
         return slot;
+      }
+
+      function refitLineReviewGeminiLines() {
+        if (!(lineReviewReel instanceof HTMLElement)) {
+          return;
+        }
+        for (const lineNode of lineReviewReel.querySelectorAll(".line-review-gemini-line[data-raw-text]")) {
+          fitLineReviewGeminiText(lineNode, lineNode.dataset.rawText || "");
+        }
       }
 
       function renderLineReviewReel({
@@ -2961,6 +3094,9 @@
             lineReviewReel.appendChild(slot);
           }
         }
+        requestAnimationFrame(() => {
+          refitLineReviewGeminiLines();
+        });
       }
 
       function renderLineReviewPanel() {
@@ -4816,6 +4952,7 @@
           }
           updateReconstructedFloatingControlsPosition();
           applyFocusedStripOverlay();
+          renderLineReviewPanel();
         });
         viewportResizeObserver.observe(sourceViewport);
         viewportResizeObserver.observe(reconstructedViewport);
@@ -4826,11 +4963,13 @@
           }
           updateReconstructedFloatingControlsPosition();
           applyFocusedStripOverlay();
+          renderLineReviewPanel();
         });
       }
       window.addEventListener("resize", () => {
         applyExpandedEditorDrawerWidth({ persist: false });
         applyFocusedStripOverlay();
+        renderLineReviewPanel();
       });
       window.addEventListener("beforeunload", () => {
         clearReconstructedControlsIdleTimer();
