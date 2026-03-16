@@ -39,6 +39,7 @@ from ..pipeline_constants import (
 )
 from ..pipeline_runtime import emit_event
 from ..db import get_session
+from .job_control_utils import resolve_main_callable
 from .schemas import (
     CreateLayoutRequest,
     DetectLayoutsRequest,
@@ -63,9 +64,7 @@ router = APIRouter()
 
 
 def _extract_ocr_for_page_dynamic():
-    from .. import main as main_module
-
-    return getattr(main_module, "extract_ocr_for_page", _extract_ocr_for_page)
+    return resolve_main_callable("extract_ocr_for_page", _extract_ocr_for_page)
 
 
 def _http_exception_from_value_error(
