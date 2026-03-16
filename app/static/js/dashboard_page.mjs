@@ -410,8 +410,10 @@ function applyReviewActionAvailability(actionKey, nextPageId, nextPageRelPath) {
 function applyPipelineProgressLabels(summaryPayload) {
   const progress = pipelineProgressFromSummary(summaryPayload);
   scanBtn.textContent = `Scan(${progress.total})`;
-  reviewLayoutsBtn.textContent = `Review layouts(${progress.layoutReviewed}/${progress.total})`;
-  reviewOcrBtn.textContent = `Review OCR(${progress.ocrReady}/${progress.total})`;
+  reviewLayoutsBtn.textContent =
+    `Review layouts(${progress.layoutDetected}/${progress.layoutReviewed}/${progress.total})`;
+  reviewOcrBtn.textContent =
+    `Review OCR(${progress.ocrExtracted}/${progress.ocrReviewed}/${progress.total})`;
   return progress;
 }
 

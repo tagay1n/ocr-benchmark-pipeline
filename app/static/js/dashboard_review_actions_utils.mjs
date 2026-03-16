@@ -56,6 +56,15 @@ export function pipelineProgressFromSummary(summaryPayload) {
     byStatus[key] = (byStatus[key] || 0) + toNonNegativeInt(rawCount);
   }
 
+  const layoutDetected = [
+    "layout_detected",
+    "layout_reviewed",
+    "ocr_extracting",
+    "ocr_done",
+    "ocr_failed",
+    "ocr_reviewed",
+  ].reduce((sum, statusKey) => sum + toNonNegativeInt(byStatus[statusKey]), 0);
+
   const layoutReviewed = [
     "layout_reviewed",
     "ocr_extracting",
@@ -65,12 +74,13 @@ export function pipelineProgressFromSummary(summaryPayload) {
   ].reduce((sum, statusKey) => sum + toNonNegativeInt(byStatus[statusKey]), 0);
 
   const ocrReviewed = toNonNegativeInt(byStatus.ocr_reviewed);
-  const ocrReady = toNonNegativeInt(byStatus.ocr_done) + ocrReviewed;
+  const ocrExtracted = toNonNegativeInt(byStatus.ocr_done) + ocrReviewed;
 
   return {
     total,
+    layoutDetected: Math.min(total, layoutDetected),
     layoutReviewed: Math.min(total, layoutReviewed),
-    ocrReady: Math.min(total, ocrReady),
+    ocrExtracted: Math.min(total, ocrExtracted),
     ocrReviewed: Math.min(total, ocrReviewed),
   };
 }
