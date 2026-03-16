@@ -526,31 +526,7 @@
       }
 
       function applyFocusedStripOverlay() {
-        if (state.viewMode !== "line_by_line") {
-          clearFocusedStripOverlay();
-          return;
-        }
-        const bounds = focusedStripBoundsForSelectedLayout();
-        if (!bounds) {
-          clearFocusedStripOverlay();
-          return;
-        }
-        applyFocusedStripOverlayToNodes(
-          sourceStripOverlay,
-          sourceStripTopMask,
-          sourceStripBottomMask,
-          sourceStripTopBoundary,
-          sourceStripBottomBoundary,
-          bounds,
-        );
-        applyFocusedStripOverlayToNodes(
-          reconstructedStripOverlay,
-          reconstructedStripTopMask,
-          reconstructedStripBottomMask,
-          reconstructedStripTopBoundary,
-          reconstructedStripBottomBoundary,
-          bounds,
-        );
+        clearFocusedStripOverlay();
       }
 
       function applyViewModeControls() {
@@ -2883,8 +2859,9 @@
           node.style.width = "100%";
           return;
         }
-        const width = Math.max(0, normalizedRect.x2 - normalizedRect.x1);
-        node.style.left = `${normalizedRect.x1 * 100}%`;
+        const width = Math.max(0, Math.min(1, normalizedRect.x2 - normalizedRect.x1));
+        const centeredLeft = Math.max(0, (1 - width) / 2);
+        node.style.left = `${centeredLeft * 100}%`;
         node.style.width = `${width * 100}%`;
       }
 
