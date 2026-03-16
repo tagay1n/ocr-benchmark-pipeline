@@ -239,6 +239,44 @@ class OcrReviewLookalikesTests(unittest.TestCase):
         self.assertEqual(reviewed["output_count"], 1)
         self.assertEqual(main.page_details(page_id)["page"]["status"], "ocr_reviewed")
 
+    def test_mark_ocr_reviewed_allows_layout_reviewed_when_outputs_exist(self) -> None:
+        self._write_image("review/layout-reviewed-status-review.png")
+        main.scan_images()
+        page_id = int(main.list_pages()["pages"][0]["id"])
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=int(layout["id"]),
+                    page_id=page_id,
+                    class_name="text",
+                    output_format="markdown",
+                    content="Reviewed OCR text",
+                    model_name="test",
+                    key_alias="k",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "layout_reviewed"
+            page.updated_at = now
+
+        reviewed = main.complete_ocr_review(page_id)
+        self.assertEqual(reviewed["status"], "ocr_reviewed")
+        self.assertEqual(reviewed["output_count"], 1)
+        self.assertEqual(main.page_details(page_id)["page"]["status"], "ocr_reviewed")
+
 
 if __name__ == "__main__":
     unittest.main()
