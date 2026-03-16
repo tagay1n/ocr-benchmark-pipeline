@@ -602,6 +602,9 @@
         if (Number.isInteger(selectedLayoutId) && selectedLayoutId > 0) {
           if (state.viewMode === "line_by_line") {
             syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+            requestAnimationFrame(() => {
+              syncFocusedLineVisibilityAfterLayoutReady({ retries: 24 });
+            });
           }
           ensureLayoutVisible(selectedLayoutId, 8, {
             preferVerticalCenter: state.viewMode === "line_by_line",
@@ -2745,6 +2748,23 @@
         setHoveredLine(normalizedLayoutId, lineBand, { source: "line_review" });
       }
 
+      function syncFocusedLineVisibilityAfterLayoutReady({ retries = 24 } = {}) {
+        if (state.viewMode !== "line_by_line") {
+          return;
+        }
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const selectedOutput = outputByLayoutId(selectedLayoutId);
+        if (!selectedOutput || !lineReviewRequiredOutput(selectedOutput)) {
+          return;
+        }
+        syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+        const focusedBand = resolveLineBandForLayout(selectedLayoutId, currentLineReviewIndex(selectedLayoutId));
+        if (!focusedBand) {
+          return;
+        }
+        ensureFocusedLineVisible(selectedLayoutId, focusedBand, retries, { preferVerticalCenter: false });
+      }
+
       function normalizeBBoxRect(bbox) {
         const rawX1 = Number(bbox?.x1);
         const rawY1 = Number(bbox?.y1);
@@ -3267,6 +3287,10 @@
           baselineLines,
           approved,
         });
+        const focusedBand = resolveLineBandForLayout(selectedLayoutId, currentIndex);
+        if (focusedBand) {
+          ensureFocusedLineVisible(selectedLayoutId, focusedBand, 8, { preferVerticalCenter: false });
+        }
 
         lineReviewPrevBtn.disabled = currentIndex <= 0 || state.reviewSubmitInProgress || state.reextractInProgress;
         const nextPendingOutput = nextPendingLineReviewOutputAfter(selectedLayoutId);
@@ -3697,23 +3721,42 @@
       }
 
       function scrollVisiblePreviewToFocusedLine(layoutId, lineBand, { preferVerticalCenter = true } = {}) {
+        void preferVerticalCenter;
         const output = outputByLayoutId(layoutId);
         const lineBBox = lineBBoxForOutputBand(output, lineBand);
-        if (!lineBBox) {
-          return false;
-        }
+        const markers = focusedLineMarkers(layoutId);
         let changed = false;
+        let pending = false;
+        let attempted = false;
         if (state.panelVisibility.source) {
-          changed =
-            scrollViewportToBBox(lineBBox, sourceViewport, sourceWrap, { preferVerticalCenter }) || changed;
+          attempted = true;
+          if (markers.sourceMarker) {
+            changed =
+              ensureElementVisibleInViewport(markers.sourceMarker, sourceViewport, { paddingPx: 24 }) || changed;
+          } else if (lineBBox) {
+            changed = ensureViewportBBoxVisible(lineBBox, sourceViewport, sourceWrap) || changed;
+            pending = true;
+          } else {
+            pending = true;
+          }
         }
         if (state.panelVisibility.reconstructed) {
-          changed =
-            scrollViewportToBBox(lineBBox, reconstructedViewport, reconstructedWrap, {
-              preferVerticalCenter,
-            }) || changed;
+          attempted = true;
+          if (markers.reconMarker) {
+            changed =
+              ensureElementVisibleInViewport(markers.reconMarker, reconstructedViewport, { paddingPx: 24 }) ||
+              changed;
+          } else if (lineBBox) {
+            changed = ensureViewportBBoxVisible(lineBBox, reconstructedViewport, reconstructedWrap) || changed;
+            pending = true;
+          } else {
+            pending = true;
+          }
         }
-        return changed;
+        if (!attempted) {
+          return { changed: false, pending: false };
+        }
+        return { changed, pending };
       }
 
       function ensureLayoutVisible(layoutId, retries = 8, { preferVerticalCenter = false } = {}) {
@@ -3725,7 +3768,8 @@
       }
 
       function ensureFocusedLineVisible(layoutId, lineBand, retries = 8, { preferVerticalCenter = true } = {}) {
-        if (scrollVisiblePreviewToFocusedLine(layoutId, lineBand, { preferVerticalCenter })) {
+        const syncResult = scrollVisiblePreviewToFocusedLine(layoutId, lineBand, { preferVerticalCenter });
+        if (syncResult && !syncResult.pending) {
           return;
         }
         if (retries <= 0) {
@@ -3734,6 +3778,135 @@
         requestAnimationFrame(() => {
           ensureFocusedLineVisible(layoutId, lineBand, retries - 1, { preferVerticalCenter });
         });
+      }
+
+      function focusedLineMarkers(layoutId) {
+        const normalizedId = Number(layoutId);
+        if (!Number.isInteger(normalizedId) || normalizedId <= 0) {
+          return { sourceMarker: null, reconMarker: null };
+        }
+        const sourceBox = sourceOverlay?.querySelector(`.box[data-layout-id="${normalizedId}"]`);
+        const reconItem = reconstructionSurface?.querySelector(`.recon-item[data-layout-id="${normalizedId}"]`);
+        return {
+          sourceMarker: sourceBox?.querySelector(".box-line-highlight") ?? null,
+          reconMarker: reconItem?.querySelector(".recon-line-highlight") ?? null,
+        };
+      }
+
+      function ensureElementVisibleInViewport(element, viewport, { paddingPx = 20 } = {}) {
+        if (!(element instanceof HTMLElement) || !(viewport instanceof HTMLElement)) {
+          return false;
+        }
+        const elementRect = element.getBoundingClientRect();
+        const viewportRect = viewport.getBoundingClientRect();
+        if (
+          !(elementRect.width > 0) ||
+          !(elementRect.height > 0) ||
+          !(viewportRect.width > 0) ||
+          !(viewportRect.height > 0)
+        ) {
+          return false;
+        }
+
+        const maxLeft = Math.max(0, Number(viewport.scrollWidth) - Number(viewport.clientWidth));
+        const maxTop = Math.max(0, Number(viewport.scrollHeight) - Number(viewport.clientHeight));
+        const currentLeft = Math.max(0, Math.min(maxLeft, Number(viewport.scrollLeft) || 0));
+        const currentTop = Math.max(0, Math.min(maxTop, Number(viewport.scrollTop) || 0));
+        const padding = Math.max(0, Number(paddingPx) || 0);
+
+        let nextLeft = currentLeft;
+        let nextTop = currentTop;
+
+        const topLimit = viewportRect.top + padding;
+        const bottomLimit = viewportRect.bottom - padding;
+        const leftLimit = viewportRect.left + padding;
+        const rightLimit = viewportRect.right - padding;
+
+        if (elementRect.top < topLimit) {
+          nextTop -= topLimit - elementRect.top;
+        } else if (elementRect.bottom > bottomLimit) {
+          nextTop += elementRect.bottom - bottomLimit;
+        }
+
+        if (elementRect.left < leftLimit) {
+          nextLeft -= leftLimit - elementRect.left;
+        } else if (elementRect.right > rightLimit) {
+          nextLeft += elementRect.right - rightLimit;
+        }
+
+        const clampedLeft = Math.round(Math.max(0, Math.min(maxLeft, nextLeft)));
+        const clampedTop = Math.round(Math.max(0, Math.min(maxTop, nextTop)));
+        const currentLeftRounded = Math.round(currentLeft);
+        const currentTopRounded = Math.round(currentTop);
+        if (clampedLeft === currentLeftRounded && clampedTop === currentTopRounded) {
+          return false;
+        }
+        viewport.scrollLeft = clampedLeft;
+        viewport.scrollTop = clampedTop;
+        return true;
+      }
+
+      function ensureViewportBBoxVisible(
+        bbox,
+        viewport,
+        content,
+        { paddingPx = 20 } = {},
+      ) {
+        if (!viewport || !content || !bbox) {
+          return false;
+        }
+        const width = Number(content.clientWidth);
+        const height = Number(content.clientHeight);
+        const viewportW = Number(viewport.clientWidth);
+        const viewportH = Number(viewport.clientHeight);
+        if (!(width > 0) || !(height > 0) || !(viewportW > 0) || !(viewportH > 0)) {
+          return false;
+        }
+
+        const x1 = Math.max(0, Math.min(width, Number(bbox.x1) * width));
+        const x2 = Math.max(0, Math.min(width, Number(bbox.x2) * width));
+        const y1 = Math.max(0, Math.min(height, Number(bbox.y1) * height));
+        const y2 = Math.max(0, Math.min(height, Number(bbox.y2) * height));
+        if (!(x2 > x1) || !(y2 > y1)) {
+          return false;
+        }
+
+        const maxLeft = Math.max(0, width - viewportW);
+        const maxTop = Math.max(0, height - viewportH);
+        const currentLeft = Math.max(0, Math.min(maxLeft, Number(viewport.scrollLeft) || 0));
+        const currentTop = Math.max(0, Math.min(maxTop, Number(viewport.scrollTop) || 0));
+        const padding = Math.max(0, Number(paddingPx) || 0);
+
+        let nextLeft = currentLeft;
+        let nextTop = currentTop;
+
+        const visibleLeft = currentLeft + padding;
+        const visibleRight = currentLeft + viewportW - padding;
+        const visibleTop = currentTop + padding;
+        const visibleBottom = currentTop + viewportH - padding;
+
+        if (x1 < visibleLeft) {
+          nextLeft = x1 - padding;
+        } else if (x2 > visibleRight) {
+          nextLeft = x2 + padding - viewportW;
+        }
+
+        if (y1 < visibleTop) {
+          nextTop = y1 - padding;
+        } else if (y2 > visibleBottom) {
+          nextTop = y2 + padding - viewportH;
+        }
+
+        const clampedLeft = Math.round(Math.max(0, Math.min(maxLeft, nextLeft)));
+        const clampedTop = Math.round(Math.max(0, Math.min(maxTop, nextTop)));
+        const currentLeftRounded = Math.round(currentLeft);
+        const currentTopRounded = Math.round(currentTop);
+        if (clampedLeft === currentLeftRounded && clampedTop === currentTopRounded) {
+          return false;
+        }
+        viewport.scrollLeft = clampedLeft;
+        viewport.scrollTop = clampedTop;
+        return true;
       }
 
       function selectOutput(layoutId, { scrollImageToLayout = false, isUserSelection = false } = {}) {
@@ -4683,6 +4856,11 @@
         updateReviewUiState();
         notifyReconstructedControlsActivity();
         updateReconstructedFloatingControlsPosition();
+        if (pageImage.complete) {
+          requestAnimationFrame(() => {
+            syncFocusedLineVisibilityAfterLayoutReady({ retries: 24 });
+          });
+        }
         setStatus("Ready.");
         await loadForthAvailability();
       }
@@ -5149,6 +5327,9 @@
             preferVerticalCenter: state.viewMode === "line_by_line",
           });
         }
+        requestAnimationFrame(() => {
+          syncFocusedLineVisibilityAfterLayoutReady({ retries: 24 });
+        });
       });
 
       if (typeof ResizeObserver !== "undefined") {
