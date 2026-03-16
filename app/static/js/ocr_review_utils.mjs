@@ -6,6 +6,14 @@ export function normalizeReconstructedRenderMode(rawValue) {
   return "markdown";
 }
 
+export function normalizeReviewViewMode(rawValue) {
+  const value = String(rawValue || "").trim().toLowerCase();
+  if (value === "focused_strip") {
+    return "focused_strip";
+  }
+  return "side_by_side";
+}
+
 export function isLineSyncEnabledOutputFormat(outputFormat) {
   return String(outputFormat || "").trim().toLowerCase() === "markdown";
 }
@@ -35,6 +43,113 @@ export function resolveViewportScrollSyncUpdate({
     left: nextLeft,
     top: nextTop,
   };
+}
+
+function clampNumber(value, min, max) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return min;
+  }
+  return Math.max(min, Math.min(max, numeric));
+}
+
+export function computeViewportAutoCenterTarget({
+  bbox,
+  contentWidth,
+  contentHeight,
+  viewportWidth,
+  viewportHeight,
+  currentLeft = 0,
+  currentTop = 0,
+  horizontalMarginRatio = 0.2,
+  verticalMarginRatio = 0.25,
+  maxMarginPx = 220,
+  preferVerticalCenter = false,
+  centerThresholdPx = 8,
+} = {}) {
+  const width = Number(contentWidth);
+  const height = Number(contentHeight);
+  const viewportW = Number(viewportWidth);
+  const viewportH = Number(viewportHeight);
+  if (
+    !bbox ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    !Number.isFinite(viewportW) ||
+    !Number.isFinite(viewportH) ||
+    width <= 0 ||
+    height <= 0 ||
+    viewportW <= 0 ||
+    viewportH <= 0
+  ) {
+    return null;
+  }
+
+  const x1 = Number(bbox.x1);
+  const y1 = Number(bbox.y1);
+  const x2 = Number(bbox.x2);
+  const y2 = Number(bbox.y2);
+  if (![x1, y1, x2, y2].every((value) => Number.isFinite(value))) {
+    return null;
+  }
+
+  const leftRatio = Math.max(0, Math.min(1, Math.min(x1, x2)));
+  const rightRatio = Math.max(0, Math.min(1, Math.max(x1, x2)));
+  const topRatio = Math.max(0, Math.min(1, Math.min(y1, y2)));
+  const bottomRatio = Math.max(0, Math.min(1, Math.max(y1, y2)));
+  if (rightRatio <= leftRatio || bottomRatio <= topRatio) {
+    return null;
+  }
+
+  const boxLeft = leftRatio * width;
+  const boxRight = rightRatio * width;
+  const boxTop = topRatio * height;
+  const boxBottom = bottomRatio * height;
+  const boxCenterX = (boxLeft + boxRight) / 2;
+  const boxCenterY = (boxTop + boxBottom) / 2;
+
+  const maxLeft = Math.max(0, width - viewportW);
+  const maxTop = Math.max(0, height - viewportH);
+  const currentX = clampNumber(currentLeft, 0, maxLeft);
+  const currentY = clampNumber(currentTop, 0, maxTop);
+
+  const marginCap = Math.max(0, Number(maxMarginPx) || 0);
+  const marginRatioX = Math.max(0, Number(horizontalMarginRatio) || 0);
+  const marginRatioY = Math.max(0, Number(verticalMarginRatio) || 0);
+  const marginX = Math.min(marginCap, Math.max(0, viewportW * marginRatioX), Math.max(0, viewportW / 2 - 1));
+  const marginY = Math.min(marginCap, Math.max(0, viewportH * marginRatioY), Math.max(0, viewportH / 2 - 1));
+
+  let nextLeft = currentX;
+  let nextTop = currentY;
+
+  const safeLeft = currentX + marginX;
+  const safeRight = currentX + viewportW - marginX;
+  const safeTop = currentY + marginY;
+  const safeBottom = currentY + viewportH - marginY;
+
+  if (boxLeft < safeLeft) {
+    nextLeft = boxLeft - marginX;
+  } else if (boxRight > safeRight) {
+    nextLeft = boxRight + marginX - viewportW;
+  }
+
+  if (preferVerticalCenter) {
+    const centeredTop = boxCenterY - viewportH / 2;
+    if (Math.abs(centeredTop - currentY) > Math.max(0, Number(centerThresholdPx) || 0)) {
+      nextTop = centeredTop;
+    }
+  } else if (boxTop < safeTop) {
+    nextTop = boxTop - marginY;
+  } else if (boxBottom > safeBottom) {
+    nextTop = boxBottom + marginY - viewportH;
+  }
+
+  const clampedLeft = Math.round(clampNumber(nextLeft, 0, maxLeft));
+  const clampedTop = Math.round(clampNumber(nextTop, 0, maxTop));
+  if (clampedLeft === Math.round(currentX) && clampedTop === Math.round(currentY)) {
+    return null;
+  }
+  return { left: clampedLeft, top: clampedTop };
 }
 
 export function computeEditorToolbarState({ editorHidden, outputFormat } = {}) {

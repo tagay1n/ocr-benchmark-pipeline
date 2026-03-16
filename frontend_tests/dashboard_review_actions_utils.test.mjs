@@ -82,6 +82,7 @@ test("pipelineProgressFromSummary computes stage counters across mixed status ke
   assert.deepEqual(progress, {
     total: 100,
     layoutReviewed: 92,
+    ocrReady: 47,
     ocrReviewed: 27,
   });
 });
@@ -97,6 +98,7 @@ test("pipelineProgressFromSummary clamps malformed values to safe non-negative c
   assert.deepEqual(progress, {
     total: 0,
     layoutReviewed: 0,
+    ocrReady: 0,
     ocrReviewed: 0,
   });
 });

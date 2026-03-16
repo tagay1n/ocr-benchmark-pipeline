@@ -5,7 +5,6 @@
         computeApproxLineBandByIndex,
         computeZoomScale,
         computeOverlayBadgeScale,
-        computeViewportScrollTargetForLayoutId,
         countStretchableSpaces,
         filterReviewHistory,
         findMaxFittingFontSize,
@@ -28,6 +27,7 @@
       import {
         applyInlineMarkdownWrapper,
         applyLinePrefixMarkdown,
+        computeViewportAutoCenterTarget,
         computeEditorToolbarState,
         computeReconstructedImageCropStyle,
         computeFloatingControlPlacement,
@@ -95,6 +95,8 @@
       const EDITOR_DRAWER_WIDTH_MIN = 420;
       const EDITOR_DRAWER_WIDTH_MAX_RATIO = 0.9;
       const EDITOR_DRAWER_RESPONSIVE_BREAKPOINT = 1120;
+      const FOCUSED_STRIP_PAD_RATIO = 0.02;
+      const FOCUSED_STRIP_MIN_HEIGHT_RATIO = 0.08;
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -117,12 +119,31 @@
       const sourceLabelLayer = document.getElementById("source-label-layer");
       const sourceSelectedLabelLayer = document.getElementById("source-label-layer-selected");
       const sourceOverlay = document.getElementById("source-overlay");
+      const sourceStripOverlay = document.getElementById("source-strip-overlay");
+      const sourceStripTopMask = document.getElementById("source-strip-top-mask");
+      const sourceStripBottomMask = document.getElementById("source-strip-bottom-mask");
+      const sourceStripTopBoundary = document.getElementById("source-strip-top-boundary");
+      const sourceStripBottomBoundary = document.getElementById("source-strip-bottom-boundary");
       const sourceViewport = document.getElementById("source-viewport");
       const reconstructedViewport = document.getElementById("reconstructed-viewport");
       const sourceWrap = document.getElementById("source-wrap");
       const reconstructedWrap = document.getElementById("reconstructed-wrap");
+      const reconstructedStripOverlay = document.getElementById("reconstructed-strip-overlay");
+      const reconstructedStripTopMask = document.getElementById("reconstructed-strip-top-mask");
+      const reconstructedStripBottomMask = document.getElementById("reconstructed-strip-bottom-mask");
+      const reconstructedStripTopBoundary = document.getElementById("reconstructed-strip-top-boundary");
+      const reconstructedStripBottomBoundary = document.getElementById("reconstructed-strip-bottom-boundary");
       const pageMeta = document.getElementById("page-meta");
       const reviewStateBadge = document.getElementById("review-state-badge");
+      const lineReviewPanel = document.getElementById("line-review-panel");
+      const lineReviewLayout = document.getElementById("line-review-layout");
+      const lineReviewProgress = document.getElementById("line-review-progress");
+      const lineReviewPrevText = document.getElementById("line-review-prev-text");
+      const lineReviewCurrentText = document.getElementById("line-review-current-text");
+      const lineReviewNextText = document.getElementById("line-review-next-text");
+      const lineReviewPrevBtn = document.getElementById("line-review-prev-btn");
+      const lineReviewApproveBtn = document.getElementById("line-review-approve-btn");
+      const lineReviewNextBtn = document.getElementById("line-review-next-btn");
       const historyBackBtn = document.getElementById("history-back-btn");
       const historyForthBtn = document.getElementById("history-forth-btn");
       const reextractModal = document.getElementById("reextract-modal");
@@ -159,6 +180,8 @@
         outputs: [],
         serverOutputsByLayoutId: {},
         localEditsByLayoutId: {},
+        approvedLineIndexesByLayoutId: {},
+        lineCursorByLayoutId: {},
         selectedLayoutId: null,
         explicitSelectedLayoutId: null,
         reextractHoverLayoutId: null,
@@ -185,6 +208,7 @@
           source: true,
           reconstructed: true,
         },
+        viewMode: "focused_strip",
         editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
         editorDrawerWidth: null,
       };
@@ -429,6 +453,103 @@
         return order.map(() => "minmax(0, 1fr)").join(" ");
       }
 
+      function clearFocusedStripOverlay() {
+        const overlays = [sourceStripOverlay, reconstructedStripOverlay];
+        for (const overlay of overlays) {
+          if (overlay) {
+            overlay.hidden = true;
+          }
+        }
+      }
+
+      function focusedStripBoundsForSelectedLayout() {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        if (!Number.isInteger(selectedLayoutId) || selectedLayoutId <= 0) {
+          return null;
+        }
+        const selectedOutput =
+          state.outputs.find((output) => Number(output.layout_id) === selectedLayoutId) || null;
+        if (!selectedOutput || !selectedOutput.bbox) {
+          return null;
+        }
+        const rawTop = Number(selectedOutput.bbox.y1);
+        const rawBottom = Number(selectedOutput.bbox.y2);
+        if (!Number.isFinite(rawTop) || !Number.isFinite(rawBottom)) {
+          return null;
+        }
+        let top = Math.max(0, Math.min(1, Math.min(rawTop, rawBottom)));
+        let bottom = Math.max(0, Math.min(1, Math.max(rawTop, rawBottom)));
+        if (bottom - top <= 0) {
+          return null;
+        }
+        top = Math.max(0, top - FOCUSED_STRIP_PAD_RATIO);
+        bottom = Math.min(1, bottom + FOCUSED_STRIP_PAD_RATIO);
+        const minHeight = Math.max(0.01, FOCUSED_STRIP_MIN_HEIGHT_RATIO);
+        if (bottom - top < minHeight) {
+          const center = (top + bottom) / 2;
+          top = Math.max(0, center - minHeight / 2);
+          bottom = Math.min(1, top + minHeight);
+          top = Math.max(0, bottom - minHeight);
+        }
+        return { top, bottom };
+      }
+
+      function applyFocusedStripOverlayToNodes(
+        overlay,
+        topMask,
+        bottomMask,
+        topBoundary,
+        bottomBoundary,
+        bounds,
+      ) {
+        if (!overlay || !topMask || !bottomMask || !topBoundary || !bottomBoundary || !bounds) {
+          return;
+        }
+        const top = Math.max(0, Math.min(1, Number(bounds.top)));
+        const bottom = Math.max(top, Math.min(1, Number(bounds.bottom)));
+        topMask.style.top = "0";
+        topMask.style.height = `${top * 100}%`;
+        bottomMask.style.top = `${bottom * 100}%`;
+        bottomMask.style.height = `${Math.max(0, 1 - bottom) * 100}%`;
+        topBoundary.style.top = `${top * 100}%`;
+        bottomBoundary.style.top = `${bottom * 100}%`;
+        overlay.hidden = false;
+      }
+
+      function applyFocusedStripOverlay() {
+        if (state.viewMode !== "focused_strip") {
+          clearFocusedStripOverlay();
+          return;
+        }
+        const bounds = focusedStripBoundsForSelectedLayout();
+        if (!bounds) {
+          clearFocusedStripOverlay();
+          return;
+        }
+        applyFocusedStripOverlayToNodes(
+          sourceStripOverlay,
+          sourceStripTopMask,
+          sourceStripBottomMask,
+          sourceStripTopBoundary,
+          sourceStripBottomBoundary,
+          bounds,
+        );
+        applyFocusedStripOverlayToNodes(
+          reconstructedStripOverlay,
+          reconstructedStripTopMask,
+          reconstructedStripBottomMask,
+          reconstructedStripTopBoundary,
+          reconstructedStripBottomBoundary,
+          bounds,
+        );
+      }
+
+      function applyViewModeControls() {
+        state.viewMode = "focused_strip";
+        grid.classList.add("view-mode-focused-strip");
+        applyFocusedStripOverlay();
+      }
+
       function applyPanelVisibility() {
         sourcePanel.classList.toggle("panel-hidden", !state.panelVisibility.source);
         reconstructedPanel.classList.toggle("panel-hidden", !state.panelVisibility.reconstructed);
@@ -438,6 +559,7 @@
         toggleReconstructedBtn.classList.toggle("active", state.panelVisibility.reconstructed);
         toggleReconstructedBtn.setAttribute("aria-pressed", state.panelVisibility.reconstructed ? "true" : "false");
 
+        applyViewModeControls();
         grid.style.gridTemplateColumns = gridTemplateColumnsForVisiblePanels();
         if (state.panelVisibility.reconstructed) {
           notifyReconstructedControlsActivity();
@@ -643,6 +765,7 @@
         state.zoomAppliedPercent = Math.round(scale * 1000) / 10;
         setZoomInputFromApplied();
         updateZoomMenuSelection();
+        applyFocusedStripOverlay();
 
         requestAnimationFrame(() => {
           refitReconstructedContent();
@@ -653,6 +776,7 @@
           if (state.panelVisibility.reconstructed) {
             centerPreviewInViewport(reconstructedViewport, reconstructedWrap, { alignTop });
           }
+          applyFocusedStripOverlay();
         });
       }
 
@@ -1311,6 +1435,10 @@
             if (Number.isInteger(layoutId) && layoutId > 0) {
               const content = update.state.doc.toString();
               updateOutputContent(layoutId, content, { source: "codemirror" });
+              const currentLineIndex = Math.max(0, Number(update.state.doc.lineAt(update.state.selection.main.head).number) - 1);
+              approveLine(layoutId, currentLineIndex, { approved: true, persist: false });
+              setLineReviewCursor(layoutId, currentLineIndex, { persist: false });
+              persistDraftState();
             }
           }
           if (!update.docChanged && !update.selectionSet) {
@@ -1533,6 +1661,7 @@
 
       function updateReviewButtonState() {
         const alreadyReviewed = state.page?.status === "ocr_reviewed";
+        const lineProgress = reviewProgressSummary();
         if (state.reviewSubmitInProgress) {
           reviewBtn.textContent = "Saving...";
           reviewBtn.disabled = true;
@@ -1545,6 +1674,11 @@
         }
         if (alreadyReviewed && !hasDraftChanges()) {
           reviewBtn.textContent = "REVIEWED";
+          reviewBtn.disabled = true;
+          return;
+        }
+        if (!lineProgress.complete) {
+          reviewBtn.textContent = `Review lines (${lineProgress.missingTotal})`;
           reviewBtn.disabled = true;
           return;
         }
@@ -1566,6 +1700,7 @@
         updateReviewBadge();
         updateReviewButtonState();
         updateReextractButtonState();
+        renderLineReviewPanel();
       }
 
       function setReextractModalBusy(busy) {
@@ -1789,6 +1924,8 @@
 
       function loadDraftState() {
         state.localEditsByLayoutId = {};
+        state.approvedLineIndexesByLayoutId = {};
+        state.lineCursorByLayoutId = {};
         const raw = readStorage(draftStorageKey());
         if (!raw) {
           return;
@@ -1810,16 +1947,53 @@
             content: String(value.content ?? ""),
           };
         }
+        const approvals = parsed.approvals;
+        if (approvals && typeof approvals === "object") {
+          for (const [layoutIdRaw, indexesRaw] of Object.entries(approvals)) {
+            const layoutId = Number(layoutIdRaw);
+            if (!Number.isInteger(layoutId) || layoutId <= 0 || !Array.isArray(indexesRaw)) {
+              continue;
+            }
+            const unique = [];
+            const seen = new Set();
+            for (const rawIndex of indexesRaw) {
+              const index = Number(rawIndex);
+              if (!Number.isInteger(index) || index < 0 || seen.has(index)) {
+                continue;
+              }
+              seen.add(index);
+              unique.push(index);
+            }
+            state.approvedLineIndexesByLayoutId[String(layoutId)] = unique.sort((a, b) => a - b);
+          }
+        }
+        const cursors = parsed.cursors;
+        if (cursors && typeof cursors === "object") {
+          for (const [layoutIdRaw, cursorRaw] of Object.entries(cursors)) {
+            const layoutId = Number(layoutIdRaw);
+            const cursor = Number(cursorRaw);
+            if (!Number.isInteger(layoutId) || layoutId <= 0 || !Number.isInteger(cursor) || cursor < 0) {
+              continue;
+            }
+            state.lineCursorByLayoutId[String(layoutId)] = cursor;
+          }
+        }
       }
 
       function persistDraftState() {
-        const payload = { edits: state.localEditsByLayoutId };
+        const payload = {
+          edits: state.localEditsByLayoutId,
+          approvals: state.approvedLineIndexesByLayoutId,
+          cursors: state.lineCursorByLayoutId,
+        };
         writeStorage(draftStorageKey(), JSON.stringify(payload));
         updateReviewUiState();
       }
 
       function clearDraftState() {
         state.localEditsByLayoutId = {};
+        state.approvedLineIndexesByLayoutId = {};
+        state.lineCursorByLayoutId = {};
         removeStorage(draftStorageKey());
         updateReviewUiState();
       }
@@ -1832,6 +2006,39 @@
         });
       }
 
+      function reconcileLineReviewState() {
+        const validLayoutIds = new Set(state.outputs.map((output) => String(output.layout_id)));
+        for (const key of Object.keys(state.approvedLineIndexesByLayoutId)) {
+          if (!validLayoutIds.has(key)) {
+            delete state.approvedLineIndexesByLayoutId[key];
+            continue;
+          }
+          const output = outputByLayoutId(Number(key));
+          if (!output || !lineReviewRequiredOutput(output)) {
+            delete state.approvedLineIndexesByLayoutId[key];
+            continue;
+          }
+          const lineCount = logicalLinesForOutput(output).length;
+          state.approvedLineIndexesByLayoutId[key] = normalizeApprovedLineIndexes(key, lineCount);
+        }
+        for (const key of Object.keys(state.lineCursorByLayoutId)) {
+          if (!validLayoutIds.has(key)) {
+            delete state.lineCursorByLayoutId[key];
+            continue;
+          }
+          const output = outputByLayoutId(Number(key));
+          if (!output || !lineReviewRequiredOutput(output)) {
+            delete state.lineCursorByLayoutId[key];
+            continue;
+          }
+          const lineCount = logicalLinesForOutput(output).length;
+          const cursor = Number(state.lineCursorByLayoutId[key]);
+          if (!Number.isInteger(cursor) || cursor < 0 || cursor >= lineCount) {
+            state.lineCursorByLayoutId[key] = Math.max(0, Math.min(lineCount - 1, firstUnapprovedLineIndex(key)));
+          }
+        }
+      }
+
       function sortOutputsInPlace() {
         state.outputs.sort((a, b) => {
           const orderCmp = Number(a.reading_order) - Number(b.reading_order);
@@ -1842,6 +2049,168 @@
 
       function outputByLayoutId(layoutId) {
         return state.outputs.find((output) => Number(output.layout_id) === Number(layoutId)) || null;
+      }
+
+      function logicalLinesForOutput(output) {
+        const content = String(output?.content ?? "").replace(/\r\n/g, "\n");
+        return content.split("\n");
+      }
+
+      function isTextLikeOutput(output) {
+        const className = normalizeClassName(output?.class_name);
+        return (
+          className === "text" ||
+          className === "section_header" ||
+          className === "list_item" ||
+          className === "caption" ||
+          className === "footnote" ||
+          className === "page_header" ||
+          className === "page_footer" ||
+          className === "picture_text"
+        );
+      }
+
+      function lineReviewRequiredOutput(output) {
+        return isTextLikeOutput(output) && String(output?.output_format || "").toLowerCase() !== "skip";
+      }
+
+      function normalizeApprovedLineIndexes(layoutId, lineCount) {
+        const rawIndexes = state.approvedLineIndexesByLayoutId[String(layoutId)];
+        if (!Array.isArray(rawIndexes) || lineCount <= 0) {
+          return [];
+        }
+        const unique = [];
+        const seen = new Set();
+        for (const rawIndex of rawIndexes) {
+          const index = Number(rawIndex);
+          if (!Number.isInteger(index) || index < 0 || index >= lineCount || seen.has(index)) {
+            continue;
+          }
+          seen.add(index);
+          unique.push(index);
+        }
+        unique.sort((a, b) => a - b);
+        return unique;
+      }
+
+      function approvedLineSet(layoutId, lineCount) {
+        return new Set(normalizeApprovedLineIndexes(layoutId, lineCount));
+      }
+
+      function updateApprovedLineIndexes(layoutId, indexes, { persist = true } = {}) {
+        const normalizedLayoutId = Number(layoutId);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return;
+        }
+        const output = outputByLayoutId(normalizedLayoutId);
+        if (!output) {
+          return;
+        }
+        const lineCount = logicalLinesForOutput(output).length;
+        const normalizedIndexes = Array.isArray(indexes)
+          ? indexes
+              .map((value) => Number(value))
+              .filter((value) => Number.isInteger(value) && value >= 0 && value < lineCount)
+              .filter((value, index, values) => values.indexOf(value) === index)
+              .sort((a, b) => a - b)
+          : [];
+        if (normalizedIndexes.length > 0) {
+          state.approvedLineIndexesByLayoutId[String(normalizedLayoutId)] = normalizedIndexes;
+        } else {
+          delete state.approvedLineIndexesByLayoutId[String(normalizedLayoutId)];
+        }
+        if (persist) {
+          persistDraftState();
+        }
+      }
+
+      function firstUnapprovedLineIndex(layoutId) {
+        const output = outputByLayoutId(layoutId);
+        if (!output) {
+          return 0;
+        }
+        const lines = logicalLinesForOutput(output);
+        const approved = approvedLineSet(layoutId, lines.length);
+        for (let index = 0; index < lines.length; index += 1) {
+          if (!approved.has(index)) {
+            return index;
+          }
+        }
+        return Math.max(0, lines.length - 1);
+      }
+
+      function setLineReviewCursor(layoutId, lineIndex, { persist = true } = {}) {
+        const normalizedLayoutId = Number(layoutId);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return;
+        }
+        const output = outputByLayoutId(normalizedLayoutId);
+        if (!output) {
+          return;
+        }
+        const lines = logicalLinesForOutput(output);
+        const safeLineIndex = Math.max(0, Math.min(lines.length - 1, Number(lineIndex) || 0));
+        state.lineCursorByLayoutId[String(normalizedLayoutId)] = safeLineIndex;
+        if (persist) {
+          persistDraftState();
+        }
+      }
+
+      function currentLineReviewIndex(layoutId) {
+        const output = outputByLayoutId(layoutId);
+        if (!output) {
+          return 0;
+        }
+        const lines = logicalLinesForOutput(output);
+        const stored = Number(state.lineCursorByLayoutId[String(layoutId)]);
+        if (!Number.isInteger(stored)) {
+          return Math.max(0, Math.min(lines.length - 1, firstUnapprovedLineIndex(layoutId)));
+        }
+        return Math.max(0, Math.min(lines.length - 1, stored));
+      }
+
+      function reviewProgressSummary() {
+        let requiredTotal = 0;
+        let approvedTotal = 0;
+        for (const output of state.outputs) {
+          if (!lineReviewRequiredOutput(output)) {
+            continue;
+          }
+          const lines = logicalLinesForOutput(output);
+          requiredTotal += lines.length;
+          approvedTotal += normalizeApprovedLineIndexes(output.layout_id, lines.length).length;
+        }
+        const missingTotal = Math.max(0, requiredTotal - approvedTotal);
+        return {
+          requiredTotal,
+          approvedTotal,
+          missingTotal,
+          complete: requiredTotal === 0 || missingTotal === 0,
+        };
+      }
+
+      function preferredInitialOutput() {
+        const firstRequired = state.outputs.find((output) => lineReviewRequiredOutput(output));
+        if (firstRequired) {
+          return firstRequired;
+        }
+        return state.outputs[0] || null;
+      }
+
+      function approveLine(layoutId, lineIndex, { approved = true, persist = true } = {}) {
+        const output = outputByLayoutId(layoutId);
+        if (!output) {
+          return;
+        }
+        const lines = logicalLinesForOutput(output);
+        const safeIndex = Math.max(0, Math.min(lines.length - 1, Number(lineIndex) || 0));
+        const next = approvedLineSet(layoutId, lines.length);
+        if (approved) {
+          next.add(safeIndex);
+        } else {
+          next.delete(safeIndex);
+        }
+        updateApprovedLineIndexes(layoutId, Array.from(next), { persist });
       }
 
       function outputLineCount(layoutId) {
@@ -2209,6 +2578,96 @@
         syncExpandedEditorCaretFromHoveredLine({ source });
       }
 
+      function syncHoveredLineFromLineReviewCursor(layoutId) {
+        const normalizedLayoutId = Number(layoutId);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          setHoveredLine(null, null, { source: "line_review" });
+          return;
+        }
+        const output = outputByLayoutId(normalizedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          setHoveredLine(null, null, { source: "line_review" });
+          return;
+        }
+        const lineIndex = currentLineReviewIndex(normalizedLayoutId);
+        const lineBand = resolveLineBandForLayout(normalizedLayoutId, lineIndex);
+        setHoveredLine(normalizedLayoutId, lineBand, { source: "line_review" });
+      }
+
+      function renderLineReviewPanel() {
+        if (!lineReviewPanel) {
+          return;
+        }
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const selectedOutput = outputByLayoutId(selectedLayoutId);
+        if (!selectedOutput || !lineReviewRequiredOutput(selectedOutput)) {
+          lineReviewPanel.hidden = true;
+          return;
+        }
+
+        const lines = logicalLinesForOutput(selectedOutput);
+        const lineCount = lines.length;
+        const currentIndex = currentLineReviewIndex(selectedLayoutId);
+        const approved = approvedLineSet(selectedLayoutId, lineCount);
+        const approvedCount = approved.size;
+        const isApproved = approved.has(currentIndex);
+
+        lineReviewPanel.hidden = false;
+        lineReviewLayout.textContent = `${selectedOutput.reading_order}. ${formatClassLabel(selectedOutput.class_name)}`;
+        lineReviewProgress.textContent = `Line ${currentIndex + 1}/${lineCount} • Approved ${approvedCount}/${lineCount}`;
+
+        const prevText = currentIndex > 0 ? lines[currentIndex - 1] : "";
+        const currentText = lines[currentIndex] ?? "";
+        const nextText = currentIndex < lineCount - 1 ? lines[currentIndex + 1] : "";
+        lineReviewPrevText.textContent = prevText || " ";
+        lineReviewCurrentText.textContent = currentText || " ";
+        lineReviewNextText.textContent = nextText || " ";
+
+        lineReviewPrevBtn.disabled = currentIndex <= 0 || state.reviewSubmitInProgress || state.reextractInProgress;
+        lineReviewNextBtn.disabled =
+          currentIndex >= lineCount - 1 || state.reviewSubmitInProgress || state.reextractInProgress;
+        lineReviewApproveBtn.disabled = state.reviewSubmitInProgress || state.reextractInProgress;
+        lineReviewApproveBtn.classList.toggle("approved", isApproved);
+        lineReviewApproveBtn.textContent = isApproved ? "Unapprove line" : "Approve line";
+      }
+
+      function lineReviewLockActive() {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        return Boolean(output && lineReviewRequiredOutput(output) && !lineReviewPanel?.hidden);
+      }
+
+      function moveLineReviewCursor(delta) {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const lines = logicalLinesForOutput(output);
+        const nextIndex = Math.max(0, Math.min(lines.length - 1, currentLineReviewIndex(selectedLayoutId) + delta));
+        setLineReviewCursor(selectedLayoutId, nextIndex, { persist: true });
+        syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+        renderLineReviewPanel();
+      }
+
+      function toggleCurrentLineApproval() {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const lineIndex = currentLineReviewIndex(selectedLayoutId);
+        const lineCount = logicalLinesForOutput(output).length;
+        const approved = approvedLineSet(selectedLayoutId, lineCount);
+        const shouldApprove = !approved.has(lineIndex);
+        approveLine(selectedLayoutId, lineIndex, { approved: shouldApprove, persist: true });
+        if (shouldApprove && lineIndex < lineCount - 1) {
+          setLineReviewCursor(selectedLayoutId, lineIndex + 1, { persist: true });
+          syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+        }
+        renderLineReviewPanel();
+      }
+
       function applyReextractHoverStyles() {
         const hoveredId = Number(state.reextractHoverLayoutId);
         for (const box of sourceOverlay.querySelectorAll(".box[data-layout-id]")) {
@@ -2375,6 +2834,9 @@
         updateSourceLabelVisibilityForOverlap();
         applyReextractHoverStyles();
         applyLineHoverHighlights();
+        applyFocusedStripOverlay();
+        syncHoveredLineFromLineReviewCursor(state.selectedLayoutId);
+        renderLineReviewPanel();
       }
 
       function rectsIntersect(a, b) {
@@ -2415,17 +2877,32 @@
         }
       }
 
-      function scrollViewportToLayout(layoutId, viewport, content) {
+      function scrollViewportToLayout(
+        layoutId,
+        viewport,
+        content,
+        { preferVerticalCenter = false } = {},
+      ) {
         if (!viewport || !content) {
           return false;
         }
-        const target = computeViewportScrollTargetForLayoutId({
-          layoutId,
-          layouts: state.outputs.map((output) => ({ id: output.layout_id, bbox: output.bbox })),
+        const output = outputByLayoutId(layoutId);
+        if (!output || !output.bbox) {
+          return false;
+        }
+        const target = computeViewportAutoCenterTarget({
+          bbox: output.bbox,
           contentWidth: content.clientWidth,
           contentHeight: content.clientHeight,
           viewportWidth: viewport.clientWidth,
           viewportHeight: viewport.clientHeight,
+          currentLeft: viewport.scrollLeft,
+          currentTop: viewport.scrollTop,
+          horizontalMarginRatio: 0.2,
+          verticalMarginRatio: preferVerticalCenter ? 0.3 : 0.22,
+          maxMarginPx: 240,
+          preferVerticalCenter,
+          centerThresholdPx: 10,
         });
         if (!target) return false;
         viewport.scrollLeft = target.left;
@@ -2433,36 +2910,46 @@
         return true;
       }
 
-      function scrollVisiblePreviewToLayout(layoutId) {
+      function scrollVisiblePreviewToLayout(layoutId, { preferVerticalCenter = false } = {}) {
         let changed = false;
         if (state.panelVisibility.source) {
-          changed = scrollViewportToLayout(layoutId, sourceViewport, sourceWrap) || changed;
+          changed =
+            scrollViewportToLayout(layoutId, sourceViewport, sourceWrap, { preferVerticalCenter }) || changed;
         }
         if (state.panelVisibility.reconstructed) {
-          changed = scrollViewportToLayout(layoutId, reconstructedViewport, reconstructedWrap) || changed;
+          changed =
+            scrollViewportToLayout(layoutId, reconstructedViewport, reconstructedWrap, {
+              preferVerticalCenter,
+            }) || changed;
         }
         return changed;
       }
 
-      function ensureLayoutVisible(layoutId, retries = 8) {
-        if (scrollVisiblePreviewToLayout(layoutId)) return;
+      function ensureLayoutVisible(layoutId, retries = 8, { preferVerticalCenter = false } = {}) {
+        if (scrollVisiblePreviewToLayout(layoutId, { preferVerticalCenter })) return;
         if (retries <= 0) return;
         requestAnimationFrame(() => {
-          ensureLayoutVisible(layoutId, retries - 1);
+          ensureLayoutVisible(layoutId, retries - 1, { preferVerticalCenter });
         });
       }
 
       function selectOutput(layoutId, { scrollImageToLayout = false, isUserSelection = false } = {}) {
         const normalized = Number(layoutId);
         if (!Number.isInteger(normalized) || normalized <= 0) return;
-        if (!outputByLayoutId(normalized)) return;
+        const output = outputByLayoutId(normalized);
+        if (!output) return;
         state.selectedLayoutId = normalized;
         if (isUserSelection) {
           state.explicitSelectedLayoutId = normalized;
         }
+        if (lineReviewRequiredOutput(output) && !Number.isInteger(Number(state.lineCursorByLayoutId[String(normalized)]))) {
+          setLineReviewCursor(normalized, firstUnapprovedLineIndex(normalized), { persist: false });
+        }
         applySelectedStyles();
-        if (scrollImageToLayout) {
-          ensureLayoutVisible(normalized);
+        const preferVerticalCenter = state.viewMode === "focused_strip";
+        const shouldAutoCenter = scrollImageToLayout || (isUserSelection && preferVerticalCenter);
+        if (shouldAutoCenter) {
+          ensureLayoutVisible(normalized, 8, { preferVerticalCenter });
         }
       }
 
@@ -2908,16 +3395,28 @@
           }
           if (isLineSyncEnabledOutputFormat(output.output_format)) {
             contentNode.addEventListener("pointermove", (event) => {
+              if (lineReviewLockActive()) {
+                return;
+              }
               updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
             });
             contentNode.addEventListener("pointerleave", () => {
+              if (lineReviewLockActive()) {
+                return;
+              }
               setHoveredLine(null, null, { source: "reconstructed" });
             });
           } else {
             contentNode.addEventListener("pointermove", () => {
+              if (lineReviewLockActive()) {
+                return;
+              }
               setHoveredLine(null, null, { source: "reconstructed" });
             });
             contentNode.addEventListener("pointerleave", () => {
+              if (lineReviewLockActive()) {
+                return;
+              }
               setHoveredLine(null, null, { source: "reconstructed" });
             });
           }
@@ -2969,6 +3468,9 @@
             openExpandedEditor(output.layout_id);
           });
           box.addEventListener("pointermove", (event) => {
+            if (lineReviewLockActive()) {
+              return;
+            }
             if (!isLineSyncEnabledOutputFormat(output.output_format)) {
               setHoveredLine(null, null, { source: "source" });
               return;
@@ -2984,6 +3486,9 @@
             setHoveredLine(output.layout_id, band, { source: "source" });
           });
           box.addEventListener("pointerleave", () => {
+            if (lineReviewLockActive()) {
+              return;
+            }
             setHoveredLine(null, null, { source: "source" });
           });
 
@@ -3063,7 +3568,14 @@
       }
 
       function updateOutputFromInput(layoutId, textarea) {
-        updateOutputContent(layoutId, textarea?.value ?? "", { source: textarea });
+        const content = textarea?.value ?? "";
+        updateOutputContent(layoutId, content, { source: textarea });
+        const text = String(content);
+        const caretOffset = Number.isInteger(textarea?.selectionStart) ? textarea.selectionStart : text.length;
+        const lineIndex = lineIndexFromTextOffset(text, caretOffset);
+        approveLine(layoutId, lineIndex, { approved: true, persist: false });
+        setLineReviewCursor(layoutId, lineIndex, { persist: false });
+        persistDraftState();
       }
 
       function restoreOutputByLayoutId(layoutId) {
@@ -3166,6 +3678,7 @@
         );
         loadDraftState();
         applyDraftsToOutputs();
+        reconcileLineReviewState();
       }
 
       async function loadForthAvailability() {
@@ -3184,6 +3697,7 @@
       async function markReviewed() {
         if (state.reviewSubmitInProgress) return;
         if (state.reextractInProgress) return;
+        if (!reviewProgressSummary().complete) return;
         state.reviewSubmitInProgress = true;
         updateReviewUiState();
         try {
@@ -3273,8 +3787,11 @@
             state.outputs.some((output) => Number(output.layout_id) === selectedLayoutId)
           ) {
             selectOutput(selectedLayoutId, { scrollImageToLayout: true });
-          } else if (state.outputs.length > 0) {
-            selectOutput(state.outputs[0].layout_id, { scrollImageToLayout: true });
+          } else {
+            const preferredOutput = preferredInitialOutput();
+            if (preferredOutput) {
+              selectOutput(preferredOutput.layout_id, { scrollImageToLayout: true });
+            }
           }
           updateReviewUiState();
           await loadForthAvailability();
@@ -3343,8 +3860,9 @@
 
         renderHeaderMeta();
         renderOverlay();
-        if (state.outputs.length > 0) {
-          selectOutput(state.outputs[0].layout_id, { scrollImageToLayout: false });
+        const preferredOutput = preferredInitialOutput();
+        if (preferredOutput) {
+          selectOutput(preferredOutput.layout_id, { scrollImageToLayout: false });
         }
         updateReviewUiState();
         notifyReconstructedControlsActivity();
@@ -3388,6 +3906,15 @@
 
       toggleSourceBtn.addEventListener("click", () => togglePanel("source"));
       toggleReconstructedBtn.addEventListener("click", () => togglePanel("reconstructed"));
+      lineReviewPrevBtn?.addEventListener("click", () => {
+        moveLineReviewCursor(-1);
+      });
+      lineReviewNextBtn?.addEventListener("click", () => {
+        moveLineReviewCursor(1);
+      });
+      lineReviewApproveBtn?.addEventListener("click", () => {
+        toggleCurrentLineApproval();
+      });
       reconstructedViewport.addEventListener("pointermove", () => {
         notifyReconstructedControlsActivity();
       });
@@ -3437,6 +3964,7 @@
         "scroll",
         () => {
           updateReconstructedFloatingControlsPosition();
+          applyFocusedStripOverlay();
           if (state.panelVisibility.reconstructed) {
             notifyReconstructedControlsActivity();
           }
@@ -3507,6 +4035,47 @@
         }
         if (state.panelVisibility.reconstructed) {
           notifyReconstructedControlsActivity();
+        }
+        if (
+          event.key === "ArrowUp" &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          !isInteractiveTextTarget(event.target) &&
+          !lineReviewPanel?.hidden
+        ) {
+          event.preventDefault();
+          moveLineReviewCursor(-1);
+          return;
+        }
+        if (
+          event.key === "ArrowDown" &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          !isInteractiveTextTarget(event.target) &&
+          !lineReviewPanel?.hidden
+        ) {
+          event.preventDefault();
+          moveLineReviewCursor(1);
+          return;
+        }
+        if (
+          (event.key === "a" || event.key === "A") &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          !isInteractiveTextTarget(event.target) &&
+          !lineReviewPanel?.hidden
+        ) {
+          event.preventDefault();
+          toggleCurrentLineApproval();
+          return;
         }
         if (event.key === "ArrowUp" || event.key === "ArrowDown") {
           if (!reextractModal.hidden) {
@@ -3680,7 +4249,9 @@
         updateReconstructedFloatingControlsPosition();
         sourceImageMagnifier.refresh();
         if (state.selectedLayoutId !== null) {
-          ensureLayoutVisible(state.selectedLayoutId);
+          ensureLayoutVisible(state.selectedLayoutId, 8, {
+            preferVerticalCenter: state.viewMode === "focused_strip",
+          });
         }
       });
 
@@ -3690,6 +4261,7 @@
             applyZoom();
           }
           updateReconstructedFloatingControlsPosition();
+          applyFocusedStripOverlay();
         });
         viewportResizeObserver.observe(sourceViewport);
         viewportResizeObserver.observe(reconstructedViewport);
@@ -3699,10 +4271,12 @@
             applyZoom();
           }
           updateReconstructedFloatingControlsPosition();
+          applyFocusedStripOverlay();
         });
       }
       window.addEventListener("resize", () => {
         applyExpandedEditorDrawerWidth({ persist: false });
+        applyFocusedStripOverlay();
       });
       window.addEventListener("beforeunload", () => {
         clearReconstructedControlsIdleTimer();

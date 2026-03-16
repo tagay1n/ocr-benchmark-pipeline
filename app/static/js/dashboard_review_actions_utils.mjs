@@ -65,10 +65,12 @@ export function pipelineProgressFromSummary(summaryPayload) {
   ].reduce((sum, statusKey) => sum + toNonNegativeInt(byStatus[statusKey]), 0);
 
   const ocrReviewed = toNonNegativeInt(byStatus.ocr_reviewed);
+  const ocrReady = toNonNegativeInt(byStatus.ocr_done) + ocrReviewed;
 
   return {
     total,
     layoutReviewed: Math.min(total, layoutReviewed),
+    ocrReady: Math.min(total, ocrReady),
     ocrReviewed: Math.min(total, ocrReviewed),
   };
 }

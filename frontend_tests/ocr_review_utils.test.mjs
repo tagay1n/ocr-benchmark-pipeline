@@ -5,6 +5,7 @@ import {
   applyInlineMarkdownWrapper,
   applyLinePrefixMarkdown,
   computeReconstructedImageCropStyle,
+  computeViewportAutoCenterTarget,
   computeEditorToolbarState,
   countTextLines,
   computeFloatingControlPlacement,
@@ -16,6 +17,7 @@ import {
   isLineSyncEnabledOutputFormat,
   lineBandFromLineIndex,
   lineIndexFromTextOffset,
+  normalizeReviewViewMode,
   normalizeReconstructedRenderMode,
   resolveViewportScrollSyncUpdate,
   resolveEditorDrawerLayout,
@@ -76,6 +78,16 @@ test("normalizeReconstructedRenderMode defaults to markdown and accepts raw", ()
   assert.equal(normalizeReconstructedRenderMode("something-else"), "markdown");
 });
 
+test("normalizeReviewViewMode defaults to side_by_side and accepts supported comparison modes", () => {
+  assert.equal(normalizeReviewViewMode(undefined), "side_by_side");
+  assert.equal(normalizeReviewViewMode(null), "side_by_side");
+  assert.equal(normalizeReviewViewMode(""), "side_by_side");
+  assert.equal(normalizeReviewViewMode("focused_strip"), "focused_strip");
+  assert.equal(normalizeReviewViewMode(" FOCUSED_STRIP "), "focused_strip");
+  assert.equal(normalizeReviewViewMode("side_by_side"), "side_by_side");
+  assert.equal(normalizeReviewViewMode("anything-else"), "side_by_side");
+});
+
 test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs", () => {
   assert.equal(isLineSyncEnabledOutputFormat("markdown"), true);
   assert.equal(isLineSyncEnabledOutputFormat(" MARKDOWN "), true);
@@ -113,6 +125,51 @@ test("resolveViewportScrollSyncUpdate returns null for already synced scroll and
     }),
     { left: 0, top: 0 },
   );
+});
+
+test("computeViewportAutoCenterTarget keeps viewport when box stays within context window", () => {
+  const target = computeViewportAutoCenterTarget({
+    bbox: { x1: 0.2, y1: 0.3, x2: 0.3, y2: 0.4 },
+    contentWidth: 1000,
+    contentHeight: 2000,
+    viewportWidth: 500,
+    viewportHeight: 600,
+    currentLeft: 100,
+    currentTop: 400,
+    horizontalMarginRatio: 0.1,
+    verticalMarginRatio: 0.1,
+  });
+  assert.equal(target, null);
+});
+
+test("computeViewportAutoCenterTarget nudges when target escapes context margins", () => {
+  const target = computeViewportAutoCenterTarget({
+    bbox: { x1: 0.7, y1: 0.8, x2: 0.82, y2: 0.9 },
+    contentWidth: 1000,
+    contentHeight: 2000,
+    viewportWidth: 500,
+    viewportHeight: 600,
+    currentLeft: 100,
+    currentTop: 400,
+    horizontalMarginRatio: 0.2,
+    verticalMarginRatio: 0.2,
+  });
+  assert.deepEqual(target, { left: 420, top: 1320 });
+});
+
+test("computeViewportAutoCenterTarget supports preferred vertical centering mode", () => {
+  const target = computeViewportAutoCenterTarget({
+    bbox: { x1: 0.15, y1: 0.55, x2: 0.35, y2: 0.62 },
+    contentWidth: 1200,
+    contentHeight: 2400,
+    viewportWidth: 600,
+    viewportHeight: 800,
+    currentLeft: 0,
+    currentTop: 200,
+    preferVerticalCenter: true,
+    centerThresholdPx: 4,
+  });
+  assert.deepEqual(target, { left: 0, top: 1004 });
 });
 
 test("hasLocalDraftForLayout checks layout id normalization and map presence", () => {

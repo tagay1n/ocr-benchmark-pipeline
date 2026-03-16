@@ -411,7 +411,7 @@ function applyPipelineProgressLabels(summaryPayload) {
   const progress = pipelineProgressFromSummary(summaryPayload);
   scanBtn.textContent = `Scan(${progress.total})`;
   reviewLayoutsBtn.textContent = `Review layouts(${progress.layoutReviewed}/${progress.total})`;
-  reviewOcrBtn.textContent = `Review OCR(${progress.ocrReviewed}/${progress.total})`;
+  reviewOcrBtn.textContent = `Review OCR(${progress.ocrReady}/${progress.total})`;
   return progress;
 }
 

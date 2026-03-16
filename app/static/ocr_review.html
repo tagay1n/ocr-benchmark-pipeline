@@ -177,6 +177,83 @@
         flex-wrap: wrap;
       }
 
+      .line-review-panel {
+        margin-top: 8px;
+        display: grid;
+        grid-template-columns: minmax(220px, auto) minmax(0, 1fr) auto;
+        gap: 10px;
+        align-items: stretch;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #f4f1e9;
+        padding: 10px;
+      }
+
+      .line-review-panel[hidden] {
+        display: none;
+      }
+
+      .line-review-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .line-review-layout {
+        font-weight: 600;
+        color: var(--ink);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .line-review-progress {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .line-review-context {
+        display: grid;
+        grid-template-rows: auto auto auto;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .line-review-line {
+        border: 1px solid #d6d0c4;
+        border-radius: 8px;
+        background: #fbf9f4;
+        padding: 4px 8px;
+        min-height: 28px;
+        font-size: 13px;
+        line-height: 1.35;
+        color: #2a2c2f;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .line-review-line.is-context {
+        color: #6f746e;
+        background: #f8f6f0;
+      }
+
+      .line-review-line.is-current {
+        border-color: #6aa7a2;
+        background: #eef8f6;
+      }
+
+      .line-review-actions {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .line-review-approve.approved {
+        border-color: #1b8d77;
+        background: #1b8d77;
+      }
+
       .zoom-control {
         position: relative;
       }
@@ -549,6 +626,10 @@
         min-height: 0;
       }
 
+      .grid.view-mode-focused-strip {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      }
+
       .panel {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -808,6 +889,32 @@
         position: absolute;
         inset: 0;
         z-index: 1;
+      }
+
+      .focused-strip-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      .focused-strip-mask {
+        position: absolute;
+        left: 0;
+        right: 0;
+        background: rgba(247, 245, 239, 0.62);
+      }
+
+      .focused-strip-boundary {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: rgba(11, 122, 117, 0.72);
+      }
+
+      #reconstructed-strip-overlay .focused-strip-mask {
+        background: rgba(247, 245, 239, 0.52);
       }
 
       #source-label-layer {
@@ -1126,6 +1233,14 @@
           flex-direction: column;
           align-items: flex-start;
         }
+
+        .line-review-panel {
+          grid-template-columns: 1fr;
+        }
+
+        .line-review-actions {
+          justify-content: flex-start;
+        }
       }
     </style>
   </head>
@@ -1189,6 +1304,23 @@
         </div>
       </section>
 
+      <section id="line-review-panel" class="line-review-panel" hidden>
+        <div class="line-review-meta">
+          <div id="line-review-layout" class="line-review-layout"></div>
+          <div id="line-review-progress" class="line-review-progress"></div>
+        </div>
+        <div class="line-review-context">
+          <div id="line-review-prev-text" class="line-review-line is-context"></div>
+          <div id="line-review-current-text" class="line-review-line is-current"></div>
+          <div id="line-review-next-text" class="line-review-line is-context"></div>
+        </div>
+        <div class="line-review-actions">
+          <button id="line-review-prev-btn" class="secondary" type="button">↑</button>
+          <button id="line-review-approve-btn" class="line-review-approve" type="button">Approve line</button>
+          <button id="line-review-next-btn" class="secondary" type="button">↓</button>
+        </div>
+      </section>
+
       <section class="grid">
         <section id="source-panel" class="panel image-panel">
           <div id="source-viewport" class="preview-viewport">
@@ -1198,6 +1330,12 @@
               <div id="source-label-layer"></div>
               <div id="source-label-layer-selected"></div>
               <div id="source-overlay"></div>
+              <div id="source-strip-overlay" class="focused-strip-overlay" hidden>
+                <div id="source-strip-top-mask" class="focused-strip-mask"></div>
+                <div id="source-strip-top-boundary" class="focused-strip-boundary"></div>
+                <div id="source-strip-bottom-mask" class="focused-strip-mask"></div>
+                <div id="source-strip-bottom-boundary" class="focused-strip-boundary"></div>
+              </div>
             </div>
           </div>
         </section>
@@ -1212,6 +1350,12 @@
           <div id="reconstructed-viewport" class="preview-viewport">
             <div id="reconstructed-wrap" class="preview-wrap">
               <div id="reconstruction-surface"></div>
+              <div id="reconstructed-strip-overlay" class="focused-strip-overlay" hidden>
+                <div id="reconstructed-strip-top-mask" class="focused-strip-mask"></div>
+                <div id="reconstructed-strip-top-boundary" class="focused-strip-boundary"></div>
+                <div id="reconstructed-strip-bottom-mask" class="focused-strip-mask"></div>
+                <div id="reconstructed-strip-bottom-boundary" class="focused-strip-boundary"></div>
+              </div>
             </div>
           </div>
         </section>
