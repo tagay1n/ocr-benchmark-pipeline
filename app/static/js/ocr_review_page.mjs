@@ -2323,6 +2323,70 @@
         }
       }
 
+      function clearLineStatusHighlights() {
+        for (const marker of reconstructionSurface.querySelectorAll(".recon-line-status")) {
+          marker.remove();
+        }
+        for (const marker of sourceOverlay.querySelectorAll(".box-line-status")) {
+          marker.remove();
+        }
+      }
+
+      function appendLineStatusMarker(container, markerClassName, band) {
+        if (!container || !markerClassName || !band) {
+          return;
+        }
+        const top = Math.max(0, Math.min(1, Number(band.topRatio)));
+        const height = Math.max(0, Math.min(1 - top, Number(band.heightRatio)));
+        if (height <= 0) {
+          return;
+        }
+        const marker = document.createElement("div");
+        marker.className = markerClassName;
+        marker.style.top = `${top * 100}%`;
+        marker.style.height = `${height * 100}%`;
+        container.appendChild(marker);
+      }
+
+      function applyLineStatusHighlights() {
+        clearLineStatusHighlights();
+        if (state.viewMode !== "line_by_line") {
+          return;
+        }
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const lineCount = logicalLinesForOutput(output).length;
+        if (lineCount <= 0) {
+          return;
+        }
+        const approved = approvedLineSet(selectedLayoutId, lineCount);
+        const currentIndex = currentLineReviewIndex(selectedLayoutId);
+        const reconItem = reconstructionSurface.querySelector(`.recon-item[data-layout-id="${selectedLayoutId}"]`);
+        const sourceBox = sourceOverlay.querySelector(`.box[data-layout-id="${selectedLayoutId}"]`);
+        if (!reconItem && !sourceBox) {
+          return;
+        }
+        for (let index = 0; index < lineCount; index += 1) {
+          let statusClass = "";
+          if (index === currentIndex) {
+            statusClass = "current";
+          } else if (approved.has(index)) {
+            statusClass = "approved";
+          } else {
+            continue;
+          }
+          const band = resolveLineBandForLayout(selectedLayoutId, index);
+          if (!band) {
+            continue;
+          }
+          appendLineStatusMarker(reconItem, `recon-line-status ${statusClass}`, band);
+          appendLineStatusMarker(sourceBox, `box-line-status ${statusClass}`, band);
+        }
+      }
+
       function applyLineHoverHighlights() {
         clearLineHoverHighlights();
         const hovered = state.hoveredLine;
@@ -2662,12 +2726,14 @@
         }
         if (state.viewMode !== "line_by_line") {
           lineReviewPanel.hidden = true;
+          clearLineStatusHighlights();
           return;
         }
         const selectedLayoutId = Number(state.selectedLayoutId);
         const selectedOutput = outputByLayoutId(selectedLayoutId);
         if (!selectedOutput || !lineReviewRequiredOutput(selectedOutput)) {
           lineReviewPanel.hidden = true;
+          clearLineStatusHighlights();
           return;
         }
 
@@ -2697,7 +2763,8 @@
         lineReviewApproveBboxBtn.disabled = lineActionDisabled;
         lineReviewResetBboxBtn.disabled = lineActionDisabled;
         lineReviewApproveBtn.classList.toggle("approved", isApproved);
-        lineReviewApproveBtn.textContent = isApproved ? "Next" : "Approve + next";
+        lineReviewApproveBtn.textContent = isApproved ? "Next (A)" : "Approve + next (A)";
+        applyLineStatusHighlights();
       }
 
       function lineReviewLockActive() {
@@ -2939,6 +3006,7 @@
         }
         updateSourceLabelVisibilityForOverlap();
         applyReextractHoverStyles();
+        applyLineStatusHighlights();
         applyLineHoverHighlights();
         applyFocusedStripOverlay();
         if (state.viewMode === "line_by_line") {
