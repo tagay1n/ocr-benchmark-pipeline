@@ -63,6 +63,29 @@ class ReviewApiEventContractsTests(unittest.TestCase):
         main.complete_layout_review(page_id)
         return page_id, int(layout["id"])
 
+    def _prepare_ocr_done_page(self) -> tuple[int, int]:
+        page_id, layout_id = self._prepare_layout_reviewed_page()
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=layout_id,
+                    page_id=page_id,
+                    class_name="text",
+                    output_format="markdown",
+                    content="ready",
+                    model_name="test-model",
+                    key_alias="k",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "ocr_done"
+            page.updated_at = now
+        return page_id, layout_id
+
     def _events_for_page(self, page_id: int, event_type: str) -> list[main.PipelineEvent]:
         with db.get_session() as session:
             return list(
@@ -136,6 +159,80 @@ class ReviewApiEventContractsTests(unittest.TestCase):
         completed_payload = json.loads(str(completed_events[-1].data_json or "{}"))
         self.assertEqual(completed_payload["trigger"], "manual_reextract")
         self.assertEqual(completed_payload["result"]["requests_count"], 3)
+
+    def test_complete_layout_review_emits_started_and_completed_events(self) -> None:
+        self._write_image("review/layout-review-complete-events.png")
+        main.scan_images()
+        page_id = int(main.list_pages()["pages"][0]["id"])
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.3),
+            ),
+        )
+
+        payload = main.complete_layout_review(page_id)
+        self.assertEqual(payload["status"], "layout_reviewed")
+
+        started_events = self._events_for_page(page_id, "manual_review_complete_started")
+        completed_events = self._events_for_page(page_id, "manual_review_completed")
+        self.assertGreaterEqual(len(started_events), 1)
+        self.assertGreaterEqual(len(completed_events), 1)
+        self.assertIn("requested", str(started_events[-1].message).lower())
+        self.assertIn("completed", str(completed_events[-1].message).lower())
+
+    def test_complete_ocr_review_emits_started_and_completed_events(self) -> None:
+        page_id, _layout_id = self._prepare_ocr_done_page()
+
+        payload = main.complete_ocr_review(page_id)
+        self.assertEqual(payload["status"], "ocr_reviewed")
+        self.assertEqual(int(payload["output_count"]), 1)
+
+        started_events = self._events_for_page(page_id, "manual_review_complete_started")
+        completed_events = self._events_for_page(page_id, "manual_review_completed")
+        self.assertGreaterEqual(len(started_events), 1)
+        self.assertGreaterEqual(len(completed_events), 1)
+        self.assertIn("ocr review completion requested", str(started_events[-1].message).lower())
+        self.assertIn("ocr review completed", str(completed_events[-1].message).lower())
+
+    def test_complete_layout_review_emits_failed_event_when_page_has_no_layouts(self) -> None:
+        self._write_image("review/layout-review-no-layouts.png")
+        main.scan_images()
+        page_id = int(main.list_pages()["pages"][0]["id"])
+
+        with self.assertRaises(main.HTTPException) as error:
+            main.complete_layout_review(page_id)
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("no layouts found", str(error.exception.detail).lower())
+
+        started_events = self._events_for_page(page_id, "manual_review_complete_started")
+        failed_events = self._events_for_page(page_id, "manual_review_complete_failed")
+        self.assertGreaterEqual(len(started_events), 1)
+        self.assertGreaterEqual(len(failed_events), 1)
+        self.assertIn("requested", str(started_events[-1].message).lower())
+        self.assertIn("failed", str(failed_events[-1].message).lower())
+
+    def test_complete_ocr_review_emits_failed_event_when_outputs_missing(self) -> None:
+        page_id, _layout_id = self._prepare_layout_reviewed_page()
+        with db.get_session() as session:
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "ocr_done"
+            page.updated_at = main._utc_now()
+
+        with self.assertRaises(main.HTTPException) as error:
+            main.complete_ocr_review(page_id)
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("no ocr outputs found", str(error.exception.detail).lower())
+
+        started_events = self._events_for_page(page_id, "manual_review_complete_started")
+        failed_events = self._events_for_page(page_id, "manual_review_complete_failed")
+        self.assertGreaterEqual(len(started_events), 1)
+        self.assertGreaterEqual(len(failed_events), 1)
+        self.assertIn("ocr review completion requested", str(started_events[-1].message).lower())
+        self.assertIn("failed", str(failed_events[-1].message).lower())
 
     def test_final_export_emits_started_and_completed_events(self) -> None:
         fake_export = {

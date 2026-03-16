@@ -65,6 +65,9 @@
       } from "/static/js/zoom_controller.mjs";
       import {
         formatStatusLabel,
+        isInteractiveShortcutTarget,
+        resolveViewportBottomLeftDockCorner,
+        setToggleButtonActiveState,
         updateHistoryNavigationButtons,
         updateReviewStateBadge,
       } from "/static/js/review_shell_utils.mjs";
@@ -197,31 +200,11 @@
       let cursorGuideVertical = null;
 
       function updateMagnifierToggleUi() {
-        if (!(magnifierToggleBtn instanceof HTMLButtonElement)) {
-          return;
-        }
-        const enabled = Boolean(state.magnifierEnabled);
-        magnifierToggleBtn.classList.toggle("active", enabled);
-        magnifierToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
-      }
-
-      function isInteractiveShortcutTarget(target) {
-        if (!(target instanceof Element)) {
-          return false;
-        }
-        if (target.closest("input, textarea, select, button, [contenteditable='true']")) {
-          return true;
-        }
-        return target instanceof HTMLElement && target.isContentEditable;
+        setToggleButtonActiveState(magnifierToggleBtn, state.magnifierEnabled);
       }
 
       function resolveMagnifierDockCorner() {
-        const maxScrollTop = Math.max(0, imageViewport.scrollHeight - imageViewport.clientHeight);
-        if (maxScrollTop <= 0) {
-          return "bottom-left";
-        }
-        const distanceToBottom = Math.max(0, maxScrollTop - imageViewport.scrollTop);
-        return distanceToBottom <= MAGNIFIER_NEAR_BOTTOM_THRESHOLD ? "top-left" : "bottom-left";
+        return resolveViewportBottomLeftDockCorner(imageViewport, MAGNIFIER_NEAR_BOTTOM_THRESHOLD);
       }
 
       const imageMagnifier = createImageMagnifier({

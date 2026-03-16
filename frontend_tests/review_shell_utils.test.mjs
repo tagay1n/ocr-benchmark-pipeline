@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 
 import {
   formatStatusLabel,
+  isInteractiveShortcutTarget,
+  resolveViewportBottomLeftDockCorner,
+  setToggleButtonActiveState,
   updateHistoryNavigationButtons,
   updateReviewStateBadge,
 } from "../app/static/js/review_shell_utils.mjs";
@@ -145,4 +148,58 @@ test("updateHistoryNavigationButtons uses queue fallback and disables when no ta
   assert.equal(back.title, "noback");
   assert.equal(forward.disabled, true);
   assert.equal(forward.title, "nof");
+});
+
+test("setToggleButtonActiveState toggles active class and aria attribute", () => {
+  const classes = new Set();
+  const button = {
+    classList: {
+      toggle(name, enabled) {
+        if (enabled) {
+          classes.add(name);
+        } else {
+          classes.delete(name);
+        }
+      },
+    },
+    attributes: {},
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    },
+  };
+  setToggleButtonActiveState(button, true);
+  assert.equal(classes.has("active"), true);
+  assert.equal(button.attributes["aria-pressed"], "true");
+  setToggleButtonActiveState(button, false);
+  assert.equal(classes.has("active"), false);
+  assert.equal(button.attributes["aria-pressed"], "false");
+});
+
+test("resolveViewportBottomLeftDockCorner flips near bottom", () => {
+  const viewport = {
+    scrollHeight: 1000,
+    clientHeight: 400,
+    scrollTop: 200,
+  };
+  assert.equal(resolveViewportBottomLeftDockCorner(viewport, 10), "bottom-left");
+  viewport.scrollTop = 595;
+  assert.equal(resolveViewportBottomLeftDockCorner(viewport, 10), "top-left");
+});
+
+test("isInteractiveShortcutTarget detects editable inputs and contenteditable", () => {
+  const inputTarget = {
+    closest(selector) {
+      return selector.includes("input") ? {} : null;
+    },
+    isContentEditable: false,
+  };
+  assert.equal(isInteractiveShortcutTarget(inputTarget), true);
+
+  const contentEditableTarget = {
+    closest() {
+      return null;
+    },
+    isContentEditable: true,
+  };
+  assert.equal(isInteractiveShortcutTarget(contentEditableTarget), true);
 });

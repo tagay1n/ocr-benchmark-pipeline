@@ -5,6 +5,63 @@ export function formatStatusLabel(value) {
     .toUpperCase();
 }
 
+export function setToggleButtonActiveState(button, enabled) {
+  if (typeof HTMLButtonElement !== "undefined") {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+  } else if (!button || typeof button !== "object") {
+    return;
+  }
+  const active = Boolean(enabled);
+  button.classList.toggle("active", active);
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+}
+
+export function resolveViewportBottomLeftDockCorner(
+  viewport,
+  nearBottomThreshold,
+  {
+    defaultCorner = "bottom-left",
+    nearBottomCorner = "top-left",
+  } = {},
+) {
+  if (
+    !viewport ||
+    typeof viewport !== "object" ||
+    typeof viewport.scrollHeight !== "number" ||
+    typeof viewport.clientHeight !== "number" ||
+    typeof viewport.scrollTop !== "number"
+  ) {
+    return String(defaultCorner);
+  }
+  const maxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+  if (maxScrollTop <= 0) {
+    return String(defaultCorner);
+  }
+  const distanceToBottom = Math.max(0, maxScrollTop - viewport.scrollTop);
+  return distanceToBottom <= Number(nearBottomThreshold)
+    ? String(nearBottomCorner)
+    : String(defaultCorner);
+}
+
+export function isInteractiveShortcutTarget(target) {
+  if (typeof Element !== "undefined") {
+    if (!(target instanceof Element)) {
+      return false;
+    }
+  } else if (!target || typeof target !== "object") {
+    return false;
+  }
+  if (target.closest("input, textarea, select, button, [contenteditable='true']")) {
+    return true;
+  }
+  if (typeof HTMLElement !== "undefined") {
+    return target instanceof HTMLElement && target.isContentEditable;
+  }
+  return Boolean(target.isContentEditable);
+}
+
 function setBadgeTitle(badge, value) {
   if (!badge || typeof badge !== "object") {
     return;

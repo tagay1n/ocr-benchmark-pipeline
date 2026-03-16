@@ -474,6 +474,61 @@ class LayoutBenchmarkTests(unittest.TestCase):
             self.assertEqual(job.status, "failed")
             self.assertIn("Stopped by user request", str(job.error))
 
+    def test_layout_benchmark_stop_endpoint_requests_running_stop_when_running_exists(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add_all(
+                [
+                    main.PipelineJob(
+                        stage=STAGE_LAYOUT_BENCHMARK,
+                        page_id=None,
+                        status="running",
+                        payload_json=None,
+                        result_json=None,
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                    main.PipelineJob(
+                        stage=STAGE_LAYOUT_BENCHMARK,
+                        page_id=None,
+                        status="queued",
+                        payload_json=None,
+                        result_json=None,
+                        error=None,
+                        attempts=0,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=None,
+                        finished_at=None,
+                    ),
+                ]
+            )
+
+        with patch("app.api.benchmark.request_layout_benchmark_stop") as stop_mock:
+            payload = main.stop_layout_benchmark_job()
+        self.assertEqual(payload["running_stop_requested"], True)
+        self.assertEqual(payload["queued_cancelled"], 1)
+        stop_mock.assert_called_once()
+
+    def test_layout_benchmark_stop_endpoint_reports_no_active_job(self) -> None:
+        payload = main.stop_layout_benchmark_job()
+        self.assertEqual(payload["running_stop_requested"], False)
+        self.assertEqual(payload["queued_cancelled"], 0)
+
+        with db.get_session() as session:
+            event = session.execute(
+                select(main.PipelineEvent)
+                .where(main.PipelineEvent.stage == STAGE_LAYOUT_BENCHMARK)
+                .where(main.PipelineEvent.event_type == "job_progress")
+                .order_by(main.PipelineEvent.id.desc())
+                .limit(1)
+            ).scalar_one()
+        self.assertIn("no active layout benchmark job", str(event.message).lower())
+
     def test_run_layout_benchmark_stops_when_stop_requested(self) -> None:
         self._seed_reviewed_pages(1)
         layout_detection_defaults.update_layout_detection_defaults(
@@ -633,6 +688,24 @@ class LayoutBenchmarkTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             main.rescore_layout_benchmark()
         self.assertEqual(error.exception.status_code, 409)
+
+    def test_rescore_endpoint_emits_failed_progress_event_on_value_error(self) -> None:
+        with patch("app.api.benchmark.recalculate_layout_benchmark_scores", side_effect=ValueError("rescore failed")):
+            with self.assertRaises(HTTPException) as error:
+                main.rescore_layout_benchmark()
+
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("rescore failed", str(error.exception.detail))
+
+        with db.get_session() as session:
+            failed_event = session.execute(
+                select(main.PipelineEvent)
+                .where(main.PipelineEvent.stage == STAGE_LAYOUT_BENCHMARK)
+                .where(main.PipelineEvent.event_type == "job_progress")
+                .order_by(main.PipelineEvent.id.desc())
+                .limit(1)
+            ).scalar_one()
+        self.assertIn("failed", str(failed_event.message).lower())
 
     def test_benchmark_scoring_uses_map50_95(self) -> None:
         gt = (

@@ -81,6 +81,8 @@
       } from "./zoom_controller.mjs";
       import {
         formatStatusLabel,
+        resolveViewportBottomLeftDockCorner,
+        setToggleButtonActiveState,
         updateHistoryNavigationButtons,
         updateReviewStateBadge,
       } from "./review_shell_utils.mjs";
@@ -263,21 +265,11 @@
       let lineReviewTextMeasureNode = null;
 
       function updateMagnifierToggleUi() {
-        if (!(magnifierToggleBtn instanceof HTMLButtonElement)) {
-          return;
-        }
-        const enabled = Boolean(state.magnifierEnabled);
-        magnifierToggleBtn.classList.toggle("active", enabled);
-        magnifierToggleBtn.setAttribute("aria-pressed", enabled ? "true" : "false");
+        setToggleButtonActiveState(magnifierToggleBtn, state.magnifierEnabled);
       }
 
       function resolveMagnifierDockCorner() {
-        const maxScrollTop = Math.max(0, sourceViewport.scrollHeight - sourceViewport.clientHeight);
-        if (maxScrollTop <= 0) {
-          return "bottom-left";
-        }
-        const distanceToBottom = Math.max(0, maxScrollTop - sourceViewport.scrollTop);
-        return distanceToBottom <= MAGNIFIER_NEAR_BOTTOM_THRESHOLD ? "top-left" : "bottom-left";
+        return resolveViewportBottomLeftDockCorner(sourceViewport, MAGNIFIER_NEAR_BOTTOM_THRESHOLD);
       }
 
       const sourceImageMagnifier = createImageMagnifier({

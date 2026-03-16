@@ -1,242 +1,57 @@
 from __future__ import annotations
 
-import base64
 from datetime import UTC, datetime
 from io import BytesIO
 import json
 from pathlib import Path
-import re
-import statistics
 from typing import Any, Callable
-from urllib import error as urllib_error
-from urllib import parse as urllib_parse
-from urllib import request as urllib_request
 
 from sqlalchemy import delete, select
 
 from .config import settings
 from .db import get_session
-from .layout_classes import (
-    MARKDOWN_LAYOUT_CLASSES as MARKDOWN_CLASSES,
-    normalize_class_name,
-)
+from .layout_classes import normalize_class_name
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import Layout, OcrOutput, Page
+from .ocr_content_postprocess import (
+    SECTION_HEADER_LEVEL_H3,
+    apply_section_header_heading_level,
+    list_item_indent_level_from_x1,
+    list_item_indent_levels_by_layout_id,
+    normalize_formula_latex_content,
+    normalize_list_item_line,
+    section_header_levels_by_layout_id,
+)
+from .ocr_gemini_client import (
+    DEFAULT_GEMINI_TEMPERATURE,
+    GEMINI_MODEL,
+    extract_content_from_json_response,
+    extract_text_from_response,
+    gemini_generate_content,
+    is_gemini_server_error,
+    is_quota_error,
+    key_alias,
+)
+from .ocr_key_store import (
+    GeminiQuotaExhaustedError,
+)
 from .ocr_prompts import (
     DEFAULT_PROMPT_TEMPLATE,
     render_prompt_for_layout_class,
 )
 
-GEMINI_MODEL = "gemini-3-flash-preview"
 MAX_RETRIES_PER_LAYOUT = 3
-DEFAULT_GEMINI_TEMPERATURE = 0.0
-
-class GeminiQuotaExhaustedError(RuntimeError):
-    pass
-
-
-_SECTION_HEADER_LEVEL_H2 = 2
-_SECTION_HEADER_LEVEL_H3 = 3
-_SECTION_HEADER_LEVEL_H4 = 4
-_LIST_INDENT_EPSILON = 0.03
-_ORDERED_LIST_PREFIX_RE = re.compile(r"^\s*((?:\d+|[A-Za-zА-Яа-яЁё])[.)])\s+")
-_UNORDERED_LIST_PREFIX_RE = re.compile(r"^\s*([-*•‣▪◦])\s+")
-
-
-def _layout_height_ratio(layout: dict[str, Any]) -> float:
-    bbox = layout.get("bbox")
-    if not isinstance(bbox, dict):
-        return 0.0
-    try:
-        y1 = float(bbox.get("y1", 0.0))
-        y2 = float(bbox.get("y2", 0.0))
-    except (TypeError, ValueError):
-        return 0.0
-    return max(0.0, y2 - y1)
-
-
-def _median(values: list[float]) -> float:
-    cleaned = [float(value) for value in values if float(value) > 0.0]
-    if not cleaned:
-        return 0.0
-    return float(statistics.median(cleaned))
-
-
-def _section_header_baseline_text_height(layouts: list[dict[str, Any]]) -> float:
-    text_heights = [
-        _layout_height_ratio(layout)
-        for layout in layouts
-        if normalize_class_name(str(layout.get("class_name", ""))) == "text"
-    ]
-    baseline = _median(text_heights)
-    if baseline > 0:
-        return baseline
-
-    fallback_heights = [
-        _layout_height_ratio(layout)
-        for layout in layouts
-        if normalize_class_name(str(layout.get("class_name", ""))) in {"list_item", "footnote", "picture_text"}
-    ]
-    baseline = _median(fallback_heights)
-    if baseline > 0:
-        return baseline
-
-    any_markdown_heights = [
-        _layout_height_ratio(layout)
-        for layout in layouts
-        if normalize_class_name(str(layout.get("class_name", ""))) in MARKDOWN_CLASSES
-        and normalize_class_name(str(layout.get("class_name", ""))) != "section_header"
-    ]
-    return _median(any_markdown_heights)
-
-
-def _section_header_level_from_ratio(height_ratio: float, baseline_text_height: float) -> int:
-    if baseline_text_height <= 0:
-        return _SECTION_HEADER_LEVEL_H3
-    ratio = float(height_ratio) / float(baseline_text_height)
-    if ratio >= 2.2:
-        return _SECTION_HEADER_LEVEL_H2
-    if ratio >= 1.6:
-        return _SECTION_HEADER_LEVEL_H3
-    return _SECTION_HEADER_LEVEL_H4
-
-
-def _section_header_levels_by_layout_id(layouts: list[dict[str, Any]]) -> dict[int, int]:
-    baseline_text_height = _section_header_baseline_text_height(layouts)
-    levels: dict[int, int] = {}
-    for layout in layouts:
-        class_name = normalize_class_name(str(layout.get("class_name", "")))
-        if class_name != "section_header":
-            continue
-        layout_id_raw = layout.get("id")
-        try:
-            layout_id = int(layout_id_raw)
-        except (TypeError, ValueError):
-            continue
-        levels[layout_id] = _section_header_level_from_ratio(
-            _layout_height_ratio(layout),
-            baseline_text_height,
-        )
-    return levels
-
-
-def _strip_markdown_heading_prefix(line: str) -> str:
-    return re.sub(r"^\s{0,3}#{1,6}\s*", "", str(line)).strip()
-
-
-def _apply_section_header_heading_level(content: str, level: int) -> str:
-    text = str(content).strip()
-    if not text:
-        return text
-    safe_level = max(1, min(6, int(level)))
-    lines = text.splitlines()
-    first_content_idx = -1
-    for idx, line in enumerate(lines):
-        if line.strip():
-            first_content_idx = idx
-            break
-    if first_content_idx < 0:
-        return text
-    heading_text = _strip_markdown_heading_prefix(lines[first_content_idx])
-    if not heading_text:
-        heading_text = lines[first_content_idx].strip()
-    lines[first_content_idx] = f"{'#' * safe_level} {heading_text}".strip()
-    return "\n".join(lines).strip()
-
-
-def _normalize_formula_latex_content(content: str) -> str:
-    text = str(content).strip()
-    if not text:
-        return text
-
-    lines = text.splitlines()
-    if len(lines) >= 2:
-        opening = lines[0].strip()
-        closing = lines[-1].strip()
-        if (
-            (opening.startswith("```") and closing == "```")
-            or (opening.startswith("~~~") and closing == "~~~")
-        ):
-            text = "\n".join(lines[1:-1]).strip()
-            lines = text.splitlines()
-
-    if text.startswith("\\[") and text.endswith("\\]") and len(text) > 4:
-        text = text[2:-2].strip()
-    if text.startswith("$$") and text.endswith("$$") and len(text) > 4:
-        text = text[2:-2].strip()
-    if text.startswith("$") and text.endswith("$") and len(text) > 2:
-        text = text[1:-1].strip()
-    return text
-
-
-def _list_item_indent_level_from_x1(x1: float, baseline_x1: float) -> int:
-    delta = max(0.0, float(x1) - float(baseline_x1))
-    return int(delta / _LIST_INDENT_EPSILON)
-
-
-def _normalize_list_item_line(
-    content: str,
-    *,
-    indent_level: int,
-    fallback_marker: str = "-",
-) -> str:
-    text = str(content).strip()
-    if not text:
-        return text
-    ordered_match = _ORDERED_LIST_PREFIX_RE.match(text)
-    unordered_match = _UNORDERED_LIST_PREFIX_RE.match(text)
-    marker = ""
-    body = text
-    if ordered_match is not None:
-        marker = ordered_match.group(1).strip()
-        body = text[ordered_match.end() :].strip()
-    elif unordered_match is not None:
-        marker = fallback_marker
-        body = text[unordered_match.end() :].strip()
-    else:
-        marker = fallback_marker
-        body = text
-    if not body:
-        body = text
-    indent = "  " * max(0, int(indent_level))
-    return f"{indent}{marker} {body}".rstrip()
-
-
-def _list_item_indent_levels_by_layout_id(layouts: list[dict[str, Any]]) -> dict[int, int]:
-    list_items: list[tuple[int, float]] = []
-    for layout in layouts:
-        if normalize_class_name(str(layout.get("class_name", ""))) != "list_item":
-            continue
-        try:
-            layout_id = int(layout.get("id"))
-            x1 = float(layout.get("bbox", {}).get("x1", 0.0))
-        except (TypeError, ValueError, AttributeError):
-            continue
-        list_items.append((layout_id, x1))
-    if not list_items:
-        return {}
-    baseline_x1 = min(x1 for _, x1 in list_items)
-    return {
-        layout_id: _list_item_indent_level_from_x1(x1, baseline_x1)
-        for layout_id, x1 in list_items
-    }
 
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _key_alias(api_key: str) -> str:
-    if len(api_key) <= 8:
-        return api_key
-    return f"{api_key[:4]}...{api_key[-4:]}"
-
-
 def _usage_path() -> Path:
-    usage_path = settings.gemini_usage_path
-    if usage_path is None:
+    configured = settings.gemini_usage_path
+    if configured is None:
         return (settings.project_root / "_artifacts" / "gemini_usage.json").resolve()
-    return usage_path
+    return configured
 
 
 def _load_usage_state() -> list[str]:
@@ -247,7 +62,6 @@ def _load_usage_state() -> list[str]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return []
-
     if not isinstance(payload, list):
         return []
 
@@ -272,7 +86,6 @@ def _next_available_key(exhausted_keys: list[str]) -> str:
     configured = list(settings.gemini_keys)
     if not configured:
         raise GeminiQuotaExhaustedError("No Gemini API keys configured.")
-
     exhausted_set = set(exhausted_keys)
     candidates = [key for key in configured if key not in exhausted_set]
     if not candidates:
@@ -281,132 +94,26 @@ def _next_available_key(exhausted_keys: list[str]) -> str:
 
 
 def _mark_key_exhausted(exhausted_keys: list[str], key: str) -> None:
-    if key not in exhausted_keys:
-        exhausted_keys.append(key)
-        _save_usage_state(exhausted_keys)
+    if key in exhausted_keys:
+        return
+    exhausted_keys.append(key)
+    _save_usage_state(exhausted_keys)
 
 
-def _extract_text_from_response(payload: dict[str, Any]) -> str:
-    candidates = payload.get("candidates")
-    if not isinstance(candidates, list):
-        return ""
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        content = candidate.get("content")
-        if not isinstance(content, dict):
-            continue
-        parts = content.get("parts")
-        if not isinstance(parts, list):
-            continue
-        fragments: list[str] = []
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-            text = part.get("text")
-            if isinstance(text, str):
-                fragments.append(text)
-        joined = "".join(fragments).strip()
-        if joined:
-            return joined
-    return ""
-
-
-def _extract_content_from_json_response(raw_text: str) -> str:
-    text = str(raw_text).strip()
-    if not text:
-        raise RuntimeError("Gemini response text is empty.")
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise RuntimeError(f"Gemini response is not valid JSON: {error.msg}.") from error
-    if not isinstance(payload, dict):
-        raise RuntimeError("Gemini response JSON must be an object.")
-    if set(payload.keys()) != {"content"}:
-        raise RuntimeError('Gemini response JSON must contain exactly one key: "content".')
-    content = payload.get("content")
-    if not isinstance(content, str):
-        raise RuntimeError('Gemini response JSON field "content" must be a string.')
-    return content
-
-
-def _gemini_generate_content(
-    api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = DEFAULT_GEMINI_TEMPERATURE
-) -> str:
-    endpoint = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{urllib_parse.quote(GEMINI_MODEL)}:generateContent?key={urllib_parse.quote(api_key)}"
-    )
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(image_bytes).decode("ascii")}},
-                ],
-            }
-        ],
-        "generationConfig": {
-            "temperature": float(temperature),
-            "responseMimeType": "application/json",
-        },
-    }
-    request_payload = json.dumps(payload, ensure_ascii=True).encode("utf-8")
-    request = urllib_request.Request(
-        endpoint,
-        data=request_payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib_request.urlopen(request, timeout=120) as response:
-            response_payload = json.loads(response.read().decode("utf-8"))
-    except urllib_error.HTTPError as error:
-        body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Gemini request failed with HTTP {error.code}: {body}") from error
-    except urllib_error.URLError as error:
-        raise RuntimeError(f"Gemini request failed: {error}") from error
-    except json.JSONDecodeError as error:
-        raise RuntimeError("Gemini request returned invalid JSON.") from error
-
-    raw_output = _extract_text_from_response(response_payload)
-    if not raw_output:
-        raise RuntimeError("Gemini request returned an empty response.")
-    return _extract_content_from_json_response(raw_output)
-
-
-def _is_quota_error(message: str) -> bool:
-    normalized = message.lower()
-    return (
-        "http 429" in normalized
-        or "resource_exhausted" in normalized
-        or "quota" in normalized
-        or "rate limit" in normalized
-    )
-
-
-def _is_gemini_server_error(message: str) -> bool:
-    normalized = str(message).strip().lower()
-    if not normalized:
-        return False
-    if re.search(r"http\s+5\d\d", normalized):
-        return True
-    server_error_markers = (
-        "timed out",
-        "timeout",
-        "connection reset",
-        "connection aborted",
-        "connection refused",
-        "temporarily unavailable",
-        "service unavailable",
-        "internal error",
-        "internal server error",
-        "bad gateway",
-        "gateway timeout",
-    )
-    return any(marker in normalized for marker in server_error_markers)
+# Backward-compatible aliases for tests and existing call sites.
+_SECTION_HEADER_LEVEL_H3 = SECTION_HEADER_LEVEL_H3
+_section_header_levels_by_layout_id = section_header_levels_by_layout_id
+_apply_section_header_heading_level = apply_section_header_heading_level
+_list_item_indent_level_from_x1 = list_item_indent_level_from_x1
+_list_item_indent_levels_by_layout_id = list_item_indent_levels_by_layout_id
+_normalize_list_item_line = normalize_list_item_line
+_normalize_formula_latex_content = normalize_formula_latex_content
+_extract_text_from_response = extract_text_from_response
+_extract_content_from_json_response = extract_content_from_json_response
+_gemini_generate_content = gemini_generate_content
+_is_quota_error = is_quota_error
+_is_gemini_server_error = is_gemini_server_error
+_key_alias = key_alias
 
 
 def _prompt_for_layout(layout: dict[str, Any], *, prompt_template: str) -> tuple[str, str]:
