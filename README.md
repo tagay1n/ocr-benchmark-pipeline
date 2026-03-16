@@ -39,10 +39,11 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Caption binding mode from caption bbox (`Bind`), with visible arrows to table/picture/formula targets and explicit unbind controls.
   - `Detect` modal with model params, top-3 benchmark suggestions for `model+imgsz`, and in-flight busy state.
 - OCR review (`/static/ocr_review.html?page_id=<id>`):
-  - Source + reconstructed + extracted-content panels.
-  - Draft editing and restore per OCR item.
+  - Source + reconstructed preview panels with synchronized scrolling.
+  - Review modes: `Two panels` and `Line by line` (slot-style line approval rail).
+  - Draft editing and per-layout restore.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with OCR bbox overlays.
-  - `Detect` modal with editable prompt template + generation params.
+  - `Detect` modal with layout selection + generation params.
   - All pipeline steps are manual by reviewer action.
 
 ## Configuration

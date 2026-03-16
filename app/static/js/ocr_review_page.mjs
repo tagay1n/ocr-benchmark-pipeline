@@ -99,6 +99,7 @@
       const EDITOR_DRAWER_RESPONSIVE_BREAKPOINT = 1120;
       const FOCUSED_STRIP_PAD_RATIO = 0.02;
       const FOCUSED_STRIP_MIN_HEIGHT_RATIO = 0.08;
+      const LINE_REVIEW_SLOT_OFFSETS = [-2, -1, 0, 1, 2];
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -142,8 +143,7 @@
       const lineReviewPanel = document.getElementById("line-review-panel");
       const lineReviewLayout = document.getElementById("line-review-layout");
       const lineReviewProgress = document.getElementById("line-review-progress");
-      const lineReviewBaselineText = document.getElementById("line-review-baseline-text");
-      const lineReviewCurrentText = document.getElementById("line-review-current-text");
+      const lineReviewReel = document.getElementById("line-review-reel");
       const lineReviewPrevBtn = document.getElementById("line-review-prev-btn");
       const lineReviewApproveBtn = document.getElementById("line-review-approve-btn");
       const lineReviewNextBtn = document.getElementById("line-review-next-btn");
@@ -2720,12 +2720,186 @@
         setHoveredLine(normalizedLayoutId, lineBand, { source: "line_review" });
       }
 
+      function normalizeBBoxRect(bbox) {
+        const rawX1 = Number(bbox?.x1);
+        const rawY1 = Number(bbox?.y1);
+        const rawX2 = Number(bbox?.x2);
+        const rawY2 = Number(bbox?.y2);
+        if (![rawX1, rawY1, rawX2, rawY2].every((value) => Number.isFinite(value))) {
+          return null;
+        }
+        const x1 = Math.max(0, Math.min(1, Math.min(rawX1, rawX2)));
+        const y1 = Math.max(0, Math.min(1, Math.min(rawY1, rawY2)));
+        const x2 = Math.max(0, Math.min(1, Math.max(rawX1, rawX2)));
+        const y2 = Math.max(0, Math.min(1, Math.max(rawY1, rawY2)));
+        if (x2 <= x1 || y2 <= y1) {
+          return null;
+        }
+        return { x1, y1, x2, y2 };
+      }
+
+      function renderLineReviewSourceLine(node, output, lineBand) {
+        if (!(node instanceof Element)) {
+          return;
+        }
+        const normalizedRect = normalizeBBoxRect(output?.bbox);
+        if (!normalizedRect || !lineBand) {
+          return;
+        }
+        const contentWidth = normalizedRect.x2 - normalizedRect.x1;
+        const contentHeight = normalizedRect.y2 - normalizedRect.y1;
+        if (contentWidth <= 0 || contentHeight <= 0) {
+          return;
+        }
+        const sourceTop = normalizedRect.y1 + contentHeight * Number(lineBand.topRatio);
+        const sourceHeight = Math.max(1e-4, contentHeight * Number(lineBand.heightRatio));
+        if (!Number.isFinite(sourceTop) || !Number.isFinite(sourceHeight) || sourceHeight <= 0) {
+          return;
+        }
+        const imageUrl = String(pageImage.currentSrc || pageImage.src || "");
+        if (!imageUrl) {
+          return;
+        }
+
+        const image = document.createElement("img");
+        image.src = imageUrl;
+        image.alt = "";
+        image.draggable = false;
+        image.style.width = `${100 / contentWidth}%`;
+        image.style.height = `${100 / sourceHeight}%`;
+        image.style.left = `${(-normalizedRect.x1 / contentWidth) * 100}%`;
+        image.style.top = `${(-sourceTop / sourceHeight) * 100}%`;
+        node.appendChild(image);
+      }
+
+      function openEditorForLine(layoutId, lineIndex) {
+        const normalizedLayoutId = Number(layoutId);
+        const normalizedLineIndex = Number(lineIndex);
+        if (!Number.isInteger(normalizedLayoutId) || normalizedLayoutId <= 0) {
+          return;
+        }
+        if (!Number.isFinite(normalizedLineIndex)) {
+          return;
+        }
+        openExpandedEditor(normalizedLayoutId);
+        if (setExpandedEditorCaretToLine(normalizedLayoutId, normalizedLineIndex)) {
+          return;
+        }
+        let attempts = 8;
+        const trySetCaret = () => {
+          if (setExpandedEditorCaretToLine(normalizedLayoutId, normalizedLineIndex)) {
+            return;
+          }
+          attempts -= 1;
+          if (attempts <= 0) {
+            return;
+          }
+          window.setTimeout(trySetCaret, 70);
+        };
+        trySetCaret();
+      }
+
+      function openEditorForCurrentLine() {
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const lineIndex = currentLineReviewIndex(selectedLayoutId);
+        openEditorForLine(selectedLayoutId, lineIndex);
+      }
+
+      function createLineReviewSlot({
+        output,
+        lineIndex,
+        currentIndex,
+        lineCount,
+        lines,
+        baselineLines,
+        approved,
+        isEdge,
+      }) {
+        const slot = document.createElement("div");
+        slot.className = "line-review-slot";
+        if (isEdge) {
+          slot.classList.add("edge");
+        }
+
+        const sourceLine = document.createElement("div");
+        sourceLine.className = "line-review-source-line";
+        const geminiLine = document.createElement("div");
+        geminiLine.className = "line-review-gemini-line";
+        slot.appendChild(sourceLine);
+        slot.appendChild(geminiLine);
+
+        if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= lineCount) {
+          slot.classList.add("empty");
+          sourceLine.textContent = " ";
+          geminiLine.textContent = " ";
+          return slot;
+        }
+
+        slot.dataset.lineIndex = String(lineIndex);
+        slot.classList.add("is-clickable");
+        const isCurrent = lineIndex === currentIndex;
+        if (isCurrent) {
+          slot.classList.add("current");
+          geminiLine.classList.add("is-editable");
+          geminiLine.title = "Double-click to edit this line";
+        }
+        if (approved.has(lineIndex)) {
+          slot.classList.add("is-approved");
+        }
+
+        const lineBand = resolveLineBandForLayout(output.layout_id, lineIndex) || lineBandFromLineIndex(lineIndex, lineCount);
+        renderLineReviewSourceLine(sourceLine, output, lineBand);
+
+        const currentText = String(lines[lineIndex] ?? "");
+        const baselineText = String(baselineLines[lineIndex] ?? "");
+        geminiLine.textContent = currentText || " ";
+        geminiLine.classList.toggle("is-changed", baselineText !== currentText);
+        return slot;
+      }
+
+      function renderLineReviewReel({
+        output,
+        currentIndex,
+        lineCount,
+        lines,
+        baselineLines,
+        approved,
+      }) {
+        if (!(lineReviewReel instanceof HTMLElement)) {
+          return;
+        }
+        lineReviewReel.innerHTML = "";
+        for (let offsetIndex = 0; offsetIndex < LINE_REVIEW_SLOT_OFFSETS.length; offsetIndex += 1) {
+          const offset = LINE_REVIEW_SLOT_OFFSETS[offsetIndex];
+          const lineIndex = currentIndex + offset;
+          const isEdge = offsetIndex === 0 || offsetIndex === LINE_REVIEW_SLOT_OFFSETS.length - 1;
+          const slot = createLineReviewSlot({
+            output,
+            lineIndex,
+            currentIndex,
+            lineCount,
+            lines,
+            baselineLines,
+            approved,
+            isEdge,
+          });
+          lineReviewReel.appendChild(slot);
+        }
+      }
+
       function renderLineReviewPanel() {
         if (!lineReviewPanel) {
           return;
         }
         if (state.viewMode !== "line_by_line") {
           lineReviewPanel.hidden = true;
+          if (lineReviewReel) {
+            lineReviewReel.innerHTML = "";
+          }
           clearLineStatusHighlights();
           return;
         }
@@ -2733,6 +2907,9 @@
         const selectedOutput = outputByLayoutId(selectedLayoutId);
         if (!selectedOutput || !lineReviewRequiredOutput(selectedOutput)) {
           lineReviewPanel.hidden = true;
+          if (lineReviewReel) {
+            lineReviewReel.innerHTML = "";
+          }
           clearLineStatusHighlights();
           return;
         }
@@ -2748,12 +2925,15 @@
         lineReviewLayout.textContent = `${selectedOutput.reading_order}. ${formatClassLabel(selectedOutput.class_name)}`;
         lineReviewProgress.textContent = `Line ${currentIndex + 1}/${lineCount} • Approved ${approvedCount}/${lineCount}`;
 
-        const currentText = lines[currentIndex] ?? "";
         const baselineLines = serverLogicalLinesForLayout(selectedLayoutId);
-        const baselineText = baselineLines[currentIndex] ?? "";
-        lineReviewBaselineText.textContent = baselineText || " ";
-        lineReviewCurrentText.textContent = currentText || " ";
-        lineReviewCurrentText.classList.toggle("is-changed", baselineText !== currentText);
+        renderLineReviewReel({
+          output: selectedOutput,
+          currentIndex,
+          lineCount,
+          lines,
+          baselineLines,
+          approved,
+        });
 
         lineReviewPrevBtn.disabled = currentIndex <= 0 || state.reviewSubmitInProgress || state.reextractInProgress;
         lineReviewNextBtn.disabled =
@@ -4106,6 +4286,54 @@
       lineReviewResetBboxBtn?.addEventListener("click", () => {
         resetLineApprovalsForSelectedBbox();
       });
+      lineReviewReel?.addEventListener("click", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const slot = target.closest(".line-review-slot[data-line-index]");
+        if (!(slot instanceof HTMLElement)) {
+          return;
+        }
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const nextIndex = Number(slot.dataset.lineIndex);
+        if (!Number.isInteger(nextIndex)) {
+          return;
+        }
+        setLineReviewCursor(selectedLayoutId, nextIndex, { persist: true });
+        syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+        renderLineReviewPanel();
+      });
+      lineReviewReel?.addEventListener("dblclick", (event) => {
+        const target = event.target;
+        if (!(target instanceof Element)) {
+          return;
+        }
+        const currentLine = target.closest(".line-review-slot.current .line-review-gemini-line");
+        if (!(currentLine instanceof HTMLElement)) {
+          return;
+        }
+        const slot = currentLine.closest(".line-review-slot[data-line-index]");
+        if (!(slot instanceof HTMLElement)) {
+          return;
+        }
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const output = outputByLayoutId(selectedLayoutId);
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return;
+        }
+        const lineIndex = Number(slot.dataset.lineIndex);
+        if (!Number.isInteger(lineIndex)) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        openEditorForLine(selectedLayoutId, lineIndex);
+      });
       reconstructedViewport.addEventListener("pointermove", () => {
         notifyReconstructedControlsActivity();
       });
@@ -4226,6 +4454,21 @@
         }
         if (state.panelVisibility.reconstructed) {
           notifyReconstructedControlsActivity();
+        }
+        if (
+          event.key === "Enter" &&
+          !event.repeat &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey &&
+          !event.shiftKey &&
+          !isInteractiveTextTarget(event.target) &&
+          state.viewMode === "line_by_line" &&
+          !lineReviewPanel?.hidden
+        ) {
+          event.preventDefault();
+          openEditorForCurrentLine();
+          return;
         }
         if (
           event.key === "ArrowUp" &&
