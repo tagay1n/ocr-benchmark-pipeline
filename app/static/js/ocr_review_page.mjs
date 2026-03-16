@@ -101,9 +101,12 @@
       const FOCUSED_STRIP_MIN_HEIGHT_RATIO = 0.08;
       const LINE_REVIEW_SLOT_OFFSETS = [-1, 0, 1];
       const LINE_REVIEW_CONTEXT_RATIO = 0.28;
-      const LINE_REVIEW_MIN_HEIGHT_PX = 24;
-      const LINE_REVIEW_MAX_HEIGHT_PX = 72;
-      const LINE_REVIEW_DEFAULT_HEIGHT_PX = 32;
+      const LINE_REVIEW_TARGET_HEIGHT_PX = 44;
+      const LINE_REVIEW_MIN_HEIGHT_PX = 30;
+      const LINE_REVIEW_MAX_HEIGHT_PX = 62;
+      const LINE_REVIEW_MIN_WIDTH_PX = 120;
+      const LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK = 0.08;
+      const LINE_REVIEW_MAX_WIDTH_RATIO = 0.94;
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -2802,30 +2805,73 @@
         };
       }
 
-      function applyLineReviewLaneHeights(sourceLane, geminiLane, crop) {
-        const lanes = [sourceLane, geminiLane];
-        for (const lane of lanes) {
-          if (lane instanceof HTMLElement) {
-            lane.style.height = `${LINE_REVIEW_DEFAULT_HEIGHT_PX}px`;
+      function resolveLineReviewDisplayGeometry(output, crop) {
+        const normalizedRect = normalizeBBoxRect(output?.bbox);
+        const contentWidth = Math.max(
+          1e-6,
+          normalizedRect ? normalizedRect.x2 - normalizedRect.x1 : 0.5,
+        );
+        let widthRatio = Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, Math.max(0.18, contentWidth));
+        let heightPx = LINE_REVIEW_TARGET_HEIGHT_PX;
+        if (crop && lineReviewReel instanceof HTMLElement) {
+          const reelWidth = Number(lineReviewReel.clientWidth);
+          const imageWidth = Number(pageImage.naturalWidth || pageImage.width || 0);
+          const imageHeight = Number(pageImage.naturalHeight || pageImage.height || 0);
+          const aspectFactor =
+            Number.isFinite(reelWidth) && reelWidth > 0 &&
+            Number.isFinite(imageWidth) && imageWidth > 0 &&
+            Number.isFinite(imageHeight) && imageHeight > 0
+              ? (reelWidth * crop.sourceHeight * (imageHeight / imageWidth)) / contentWidth
+              : 0;
+          if (Number.isFinite(aspectFactor) && aspectFactor > 0) {
+            const minWidthRatioFromPx = Math.max(
+              LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK,
+              Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, LINE_REVIEW_MIN_WIDTH_PX / reelWidth),
+            );
+            const widthForTarget = LINE_REVIEW_TARGET_HEIGHT_PX / aspectFactor;
+            const widthForMinHeight = LINE_REVIEW_MIN_HEIGHT_PX / aspectFactor;
+            const widthForMaxHeight = LINE_REVIEW_MAX_HEIGHT_PX / aspectFactor;
+            const minAllowedWidth = Math.max(minWidthRatioFromPx, widthForMinHeight);
+            const maxAllowedWidth = Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, widthForMaxHeight);
+            if (minAllowedWidth <= maxAllowedWidth) {
+              widthRatio = Math.max(
+                minAllowedWidth,
+                Math.min(maxAllowedWidth, widthForTarget),
+              );
+            } else {
+              widthRatio = Math.max(
+                minWidthRatioFromPx,
+                Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, widthForTarget),
+              );
+            }
+            heightPx = aspectFactor * widthRatio;
           }
         }
-        if (!crop || !(lineReviewReel instanceof HTMLElement)) {
-          return;
-        }
-        const reelWidth = Number(lineReviewReel.clientWidth);
-        const imageWidth = Number(pageImage.naturalWidth || pageImage.width || 0);
-        const imageHeight = Number(pageImage.naturalHeight || pageImage.height || 0);
-        if (reelWidth <= 0 || imageWidth <= 0 || imageHeight <= 0) {
-          return;
-        }
-        const rawHeightPx = reelWidth * crop.sourceHeight * (imageHeight / imageWidth);
-        const heightPx = Math.max(
+        const safeHeight = Math.max(
           LINE_REVIEW_MIN_HEIGHT_PX,
-          Math.min(LINE_REVIEW_MAX_HEIGHT_PX, rawHeightPx),
+          Math.min(LINE_REVIEW_MAX_HEIGHT_PX, Number(heightPx) || LINE_REVIEW_TARGET_HEIGHT_PX),
+        );
+        const safeWidth = Math.max(
+          LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK,
+          Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, Number(widthRatio) || 0.5),
+        );
+        return {
+          leftRatio: Math.max(0, (1 - safeWidth) / 2),
+          widthRatio: safeWidth,
+          contentWidth,
+          heightPx: safeHeight,
+        };
+      }
+
+      function applyLineReviewLaneHeights(sourceLane, geminiLane, heightPx) {
+        const lanes = [sourceLane, geminiLane];
+        const safeHeight = Math.max(
+          LINE_REVIEW_MIN_HEIGHT_PX,
+          Math.min(LINE_REVIEW_MAX_HEIGHT_PX, Number(heightPx) || LINE_REVIEW_TARGET_HEIGHT_PX),
         );
         for (const lane of lanes) {
           if (lane instanceof HTMLElement) {
-            lane.style.height = `${heightPx}px`;
+            lane.style.height = `${safeHeight}px`;
           }
         }
       }
@@ -2849,20 +2895,23 @@
         node.appendChild(image);
       }
 
-      function applyLineReviewHorizontalGeometry(node, output) {
+      function applyLineReviewHorizontalGeometry(node, output, geometry = null) {
         if (!(node instanceof HTMLElement)) {
           return;
         }
-        const normalizedRect = normalizeBBoxRect(output?.bbox);
-        if (!normalizedRect) {
-          node.style.left = "0%";
-          node.style.width = "100%";
-          return;
-        }
-        const width = Math.max(0, Math.min(1, normalizedRect.x2 - normalizedRect.x1));
-        const centeredLeft = Math.max(0, (1 - width) / 2);
-        node.style.left = `${centeredLeft * 100}%`;
-        node.style.width = `${width * 100}%`;
+        const fallbackRect = normalizeBBoxRect(output?.bbox);
+        const fallbackWidth = Math.max(
+          LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK,
+          Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, fallbackRect ? fallbackRect.x2 - fallbackRect.x1 : 0.6),
+        );
+        const leftRatio = Number.isFinite(Number(geometry?.leftRatio))
+          ? Number(geometry.leftRatio)
+          : Math.max(0, (1 - fallbackWidth) / 2);
+        const widthRatio = Number.isFinite(Number(geometry?.widthRatio))
+          ? Number(geometry.widthRatio)
+          : fallbackWidth;
+        node.style.left = `${Math.max(0, Math.min(1, leftRatio)) * 100}%`;
+        node.style.width = `${Math.max(0, Math.min(1, widthRatio)) * 100}%`;
       }
 
       function fitLineReviewGeminiText(lineNode, text) {
@@ -3008,7 +3057,8 @@
           resolveLineBandForLayout(output.layout_id, lineIndex) ||
           lineBandFromLineIndex(lineIndex, lineCount);
         const sourceCrop = resolveLineReviewSourceCrop(output, lineBand);
-        applyLineReviewHorizontalGeometry(sourceLine, output);
+        const displayGeometry = resolveLineReviewDisplayGeometry(output, sourceCrop);
+        applyLineReviewHorizontalGeometry(sourceLine, output, displayGeometry);
 
         const geminiLane = document.createElement("div");
         geminiLane.className = "line-review-gemini-lane";
@@ -3016,9 +3066,9 @@
         geminiLine.className = "line-review-gemini-line";
         geminiLane.appendChild(geminiLine);
         slot.appendChild(geminiLane);
-        applyLineReviewLaneHeights(sourceLane, geminiLane, sourceCrop);
+        applyLineReviewLaneHeights(sourceLane, geminiLane, displayGeometry.heightPx);
         renderLineReviewSourceLine(sourceLine, sourceCrop);
-        applyLineReviewHorizontalGeometry(geminiLine, output);
+        applyLineReviewHorizontalGeometry(geminiLine, output, displayGeometry);
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
         geminiLine.textContent = currentText || " ";
