@@ -235,6 +235,7 @@
       let editorResizeSession = null;
       let altMagnifierPressed = false;
       let scrollSyncMutedViewport = null;
+      let lineReviewTextMeasureNode = null;
 
       function updateMagnifierToggleUi() {
         if (!(magnifierToggleBtn instanceof HTMLButtonElement)) {
@@ -2914,6 +2915,58 @@
         node.style.width = `${Math.max(0, Math.min(1, widthRatio)) * 100}%`;
       }
 
+      function ensureLineReviewTextMeasureNode() {
+        if (lineReviewTextMeasureNode instanceof HTMLElement) {
+          return lineReviewTextMeasureNode;
+        }
+        const node = document.createElement("span");
+        node.style.position = "fixed";
+        node.style.left = "-100000px";
+        node.style.top = "-100000px";
+        node.style.visibility = "hidden";
+        node.style.pointerEvents = "none";
+        node.style.whiteSpace = "pre";
+        node.style.padding = "0";
+        node.style.margin = "0";
+        node.style.border = "0";
+        document.body.appendChild(node);
+        lineReviewTextMeasureNode = node;
+        return node;
+      }
+
+      function measureLineReviewTextMetrics(
+        lineNode,
+        text,
+        {
+          fontSize = null,
+          lineHeight = null,
+          wordSpacing = 0,
+          letterSpacing = 0,
+        } = {},
+      ) {
+        if (!(lineNode instanceof HTMLElement)) {
+          return { width: 0, height: 0 };
+        }
+        const measureNode = ensureLineReviewTextMeasureNode();
+        const computed = window.getComputedStyle(lineNode);
+        measureNode.style.fontFamily = computed.fontFamily;
+        measureNode.style.fontSize = fontSize ? `${fontSize}px` : computed.fontSize;
+        measureNode.style.fontWeight = computed.fontWeight;
+        measureNode.style.fontStyle = computed.fontStyle;
+        measureNode.style.fontStretch = computed.fontStretch;
+        measureNode.style.lineHeight = lineHeight
+          ? `${lineHeight}px`
+          : computed.lineHeight;
+        measureNode.style.letterSpacing = `${Number(letterSpacing) || 0}px`;
+        measureNode.style.wordSpacing = `${Number(wordSpacing) || 0}px`;
+        measureNode.textContent = String(text ?? "");
+        const rect = measureNode.getBoundingClientRect();
+        return {
+          width: Number.isFinite(rect.width) ? rect.width : 0,
+          height: Number.isFinite(rect.height) ? rect.height : 0,
+        };
+      }
+
       function fitLineReviewGeminiText(lineNode, text) {
         if (!(lineNode instanceof HTMLElement)) {
           return;
@@ -2921,70 +2974,123 @@
         const rawText = String(text ?? "");
         lineNode.style.wordSpacing = "0px";
         lineNode.style.letterSpacing = "0px";
+        lineNode.style.transform = "scaleX(1)";
+        lineNode.style.fontSize = "";
         if (!rawText) {
           return;
         }
-        const availableWidth = Math.max(1, lineNode.clientWidth - 2);
+        const computed = window.getComputedStyle(lineNode);
+        const paddingLeft = Number.parseFloat(computed.paddingLeft) || 0;
+        const paddingRight = Number.parseFloat(computed.paddingRight) || 0;
+        const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
+        const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+        const availableWidth = Math.max(1, lineNode.clientWidth - paddingLeft - paddingRight - 1);
+        const availableHeight = Math.max(1, lineNode.clientHeight - paddingTop - paddingBottom - 1);
         if (availableWidth <= 2) {
           return;
         }
-        const measuredWidth = Number(lineNode.scrollWidth);
-        if (!Number.isFinite(measuredWidth) || measuredWidth <= 0 || measuredWidth >= availableWidth) {
+        const targetWidth = availableWidth;
+
+        const baseFontSize = Number.parseFloat(computed.fontSize) || 12;
+        const baseLineHeightPx = Number.parseFloat(computed.lineHeight);
+        const lineHeightRatio =
+          Number.isFinite(baseLineHeightPx) && baseFontSize > 0
+            ? baseLineHeightPx / baseFontSize
+            : 1.2;
+        const baseMetrics = measureLineReviewTextMetrics(lineNode, rawText, {
+          fontSize: baseFontSize,
+          lineHeight: baseFontSize * lineHeightRatio,
+        });
+        if (!Number.isFinite(baseMetrics.width) || baseMetrics.width <= 0) {
           return;
         }
-        const spacesCount = countStretchableSpaces(rawText);
-        const maxWordSpacing = reconstructionWordSpacing({
-          measuredContentWidth: measuredWidth,
-          availableWidth,
-          spacesCount,
-          maxWordSpacing: 2.8,
-          minGainRatio: 0.01,
-        });
-        if (maxWordSpacing > 0) {
-          let low = 0;
-          let high = maxWordSpacing;
+        const maxByWidth = baseFontSize * (targetWidth / baseMetrics.width);
+        const maxByHeight = availableHeight / Math.max(1e-6, lineHeightRatio);
+        const fittedFontSize = Math.max(10, Math.min(56, maxByWidth, maxByHeight));
+        lineNode.style.fontSize = `${fittedFontSize}px`;
+
+        let currentWordSpacing = 0;
+        let currentLetterSpacing = 0;
+        const fittedLineHeightPx = fittedFontSize * lineHeightRatio;
+
+        const tuneSpacing = (property, minValue, maxValue, iterations = 10) => {
+          let low = Number(minValue);
+          let high = Number(maxValue);
           let best = 0;
-          for (let idx = 0; idx < 8; idx += 1) {
+          let bestDiff = Number.POSITIVE_INFINITY;
+          for (let idx = 0; idx < iterations; idx += 1) {
             const mid = (low + high) / 2;
-            lineNode.style.wordSpacing = `${mid}px`;
-            if (lineNode.scrollWidth <= availableWidth + 1) {
+            const metrics =
+              property === "wordSpacing"
+                ? measureLineReviewTextMetrics(lineNode, rawText, {
+                    fontSize: fittedFontSize,
+                    lineHeight: fittedLineHeightPx,
+                    wordSpacing: mid,
+                    letterSpacing: currentLetterSpacing,
+                  })
+                : measureLineReviewTextMetrics(lineNode, rawText, {
+                    fontSize: fittedFontSize,
+                    lineHeight: fittedLineHeightPx,
+                    wordSpacing: currentWordSpacing,
+                    letterSpacing: mid,
+                  });
+            const width = Number(metrics.width);
+            if (!Number.isFinite(width) || width <= 0) {
+              continue;
+            }
+            const diff = Math.abs(targetWidth - width);
+            if (diff < bestDiff) {
+              bestDiff = diff;
               best = mid;
+            }
+            if (width < targetWidth) {
               low = mid;
             } else {
               high = mid;
             }
           }
-          lineNode.style.wordSpacing = `${best}px`;
-        }
-        const adjustedWidth = Number(lineNode.scrollWidth);
-        if (!Number.isFinite(adjustedWidth) || adjustedWidth >= availableWidth) {
-          return;
-        }
-        const glyphsCount = countStretchableGlyphs(rawText);
-        const maxLetterSpacing = reconstructionLetterSpacing({
-          measuredContentWidth: adjustedWidth,
-          availableWidth,
-          glyphsCount,
-          maxLetterSpacing: 0.55,
-          minGainRatio: 0.004,
-        });
-        if (maxLetterSpacing <= 0) {
-          return;
-        }
-        let low = 0;
-        let high = maxLetterSpacing;
-        let best = 0;
-        for (let idx = 0; idx < 8; idx += 1) {
-          const mid = (low + high) / 2;
-          lineNode.style.letterSpacing = `${mid}px`;
-          if (lineNode.scrollWidth <= availableWidth + 1) {
-            best = mid;
-            low = mid;
+          lineNode.style[property] = `${best}px`;
+          if (property === "wordSpacing") {
+            currentWordSpacing = best;
           } else {
-            high = mid;
+            currentLetterSpacing = best;
+          }
+        };
+
+        const spacesCount = countStretchableSpaces(rawText);
+        if (spacesCount > 0) {
+          tuneSpacing("wordSpacing", -1.8, 4.8, 11);
+        }
+
+        const glyphsCount = countStretchableGlyphs(rawText);
+        if (glyphsCount > 0) {
+          tuneSpacing("letterSpacing", -0.22, 0.95, 11);
+        }
+
+        const adjustedMetrics = measureLineReviewTextMetrics(lineNode, rawText, {
+          fontSize: fittedFontSize,
+          lineHeight: fittedLineHeightPx,
+          wordSpacing: currentWordSpacing,
+          letterSpacing: currentLetterSpacing,
+        });
+        const adjustedWidth = Number(adjustedMetrics.width);
+        if (!Number.isFinite(adjustedWidth) || adjustedWidth <= 0) {
+          return;
+        }
+
+        const scale = targetWidth / adjustedWidth;
+        const safeScale = Math.max(0.92, Math.min(1.12, scale));
+        lineNode.style.transform = `scaleX(${safeScale})`;
+
+        const postScaleWidth = adjustedWidth * safeScale;
+        if (postScaleWidth > availableWidth + 0.5) {
+          const overflowScale = availableWidth / Math.max(1, adjustedWidth);
+          lineNode.style.transform = `scaleX(${Math.max(0.92, Math.min(1.02, overflowScale))})`;
+        } else if (postScaleWidth < availableWidth - 4 && spacesCount > 0) {
+          if (Number.isFinite(currentWordSpacing)) {
+            lineNode.style.wordSpacing = `${currentWordSpacing + 0.16}px`;
           }
         }
-        lineNode.style.letterSpacing = `${best}px`;
       }
 
       function openEditorForLine(layoutId, lineIndex) {
