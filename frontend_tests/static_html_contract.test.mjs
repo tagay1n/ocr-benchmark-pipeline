@@ -201,6 +201,18 @@ test("ocr review HTML no longer hardcodes class color map", () => {
   assert.equal(moduleCode.includes("const CLASS_COLORS = {"), false);
 });
 
+test("ocr review init picks first unapproved line for first pending bbox", () => {
+  const moduleCode = readModule("app/static/js/ocr_review_page.mjs");
+  assert.match(
+    moduleCode,
+    /setLineReviewCursor\(\s*pendingLineReviewOutput\.layout_id,\s*firstUnapprovedLineIndex\(pendingLineReviewOutput\.layout_id\)/m,
+  );
+  assert.doesNotMatch(
+    moduleCode,
+    /setLineReviewCursor\(\s*pendingLineReviewOutput\.layout_id,\s*0\s*,/m,
+  );
+});
+
 test("state/event utils expose storage helpers", async () => {
   const moduleUrl = pathToFileURL(`${process.cwd()}/app/static/js/state_event_utils.mjs`).href;
   const utils = await import(moduleUrl);

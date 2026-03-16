@@ -4845,7 +4845,11 @@
         renderOverlay();
         const pendingLineReviewOutput = firstPendingLineReviewOutput();
         if (pendingLineReviewOutput) {
-          setLineReviewCursor(pendingLineReviewOutput.layout_id, 0, { persist: false });
+          setLineReviewCursor(
+            pendingLineReviewOutput.layout_id,
+            firstUnapprovedLineIndex(pendingLineReviewOutput.layout_id),
+            { persist: false },
+          );
           selectOutput(pendingLineReviewOutput.layout_id, { scrollImageToLayout: false });
         } else {
           const preferredOutput = preferredInitialOutput();
