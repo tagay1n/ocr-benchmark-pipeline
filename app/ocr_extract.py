@@ -387,6 +387,28 @@ def _is_quota_error(message: str) -> bool:
     )
 
 
+def _is_gemini_server_error(message: str) -> bool:
+    normalized = str(message).strip().lower()
+    if not normalized:
+        return False
+    if re.search(r"http\s+5\d\d", normalized):
+        return True
+    server_error_markers = (
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection aborted",
+        "connection refused",
+        "temporarily unavailable",
+        "service unavailable",
+        "internal error",
+        "internal server error",
+        "bad gateway",
+        "gateway timeout",
+    )
+    return any(marker in normalized for marker in server_error_markers)
+
+
 def _prompt_for_layout(layout: dict[str, Any], *, prompt_template: str) -> tuple[str, str]:
     class_name = normalize_class_name(str(layout["class_name"]))
     rendered_prompt = render_prompt_for_layout_class(
@@ -466,6 +488,7 @@ def extract_ocr_for_page(
     temperature: float | None = None,
     max_retries_per_layout: int | None = None,
     progress_callback: Callable[[dict[str, int]], None] | None = None,
+    continue_on_server_error: bool = False,
 ) -> dict[str, Any]:
     with get_session() as session:
         page = session.get(Page, page_id)
@@ -536,6 +559,8 @@ def extract_ocr_for_page(
     prompt_debug_rows: list[dict[str, Any]] = []
     extracted_count = 0
     skipped_count = 0
+    failed_count = 0
+    failed_layout_ids: list[int] = []
     request_count = 0
     processed_count = 0
     total_selected = len(layouts_to_process)
@@ -600,6 +625,21 @@ def extract_ocr_for_page(
                     continue
                 last_error = error_text
         if last_error is not None:
+            layout_id = int(layout["id"])
+            if continue_on_server_error and _is_gemini_server_error(last_error):
+                failed_count += 1
+                failed_layout_ids.append(layout_id)
+                processed_count += 1
+                if callable(progress_callback):
+                    progress_callback(
+                        {
+                            "processed_layouts": int(processed_count),
+                            "total_layouts": int(total_selected),
+                            "failed_layout_id": int(layout_id),
+                            "failed_count": int(failed_count),
+                        }
+                    )
+                continue
             _write_prompt_debug_dump(page_id, prompt_debug_rows)
             raise RuntimeError(f"OCR extraction failed for layout {layout['id']}: {last_error}")
 
@@ -640,14 +680,14 @@ def extract_ocr_for_page(
             )
 
     now = _utc_now()
+    final_status = "ocr_failed" if failed_count > 0 else "ocr_done"
     with get_session() as session:
-        if selected_layout_ids is None:
-            session.execute(delete(OcrOutput).where(OcrOutput.page_id == page_id))
-        else:
+        output_layout_ids = [int(output["layout_id"]) for output in pending_outputs]
+        if output_layout_ids:
             session.execute(
                 delete(OcrOutput).where(
                     OcrOutput.page_id == page_id,
-                    OcrOutput.layout_id.in_(selected_layout_ids),
+                    OcrOutput.layout_id.in_(output_layout_ids),
                 )
             )
         for output in pending_outputs:
@@ -667,19 +707,21 @@ def extract_ocr_for_page(
         page_row = session.get(Page, page_id)
         if page_row is None:
             raise ValueError("Page not found.")
-        page_row.status = "ocr_done"
+        page_row.status = final_status
         page_row.updated_at = now
 
     prompt_debug_path = _write_prompt_debug_dump(page_id, prompt_debug_rows)
 
     return {
         "page_id": page_id,
-        "status": "ocr_done",
+        "status": final_status,
         "model": GEMINI_MODEL,
         "layouts_total": len(layouts),
         "layouts_selected": len(layouts_to_process),
         "extracted_count": extracted_count,
         "skipped_count": skipped_count,
+        "failed_count": failed_count,
+        "failed_layout_ids": failed_layout_ids,
         "requests_count": request_count,
         "prompt_debug_path": None if prompt_debug_path is None else str(prompt_debug_path),
         "inference_params": {

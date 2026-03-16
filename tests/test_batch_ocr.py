@@ -206,6 +206,59 @@ class BatchOcrApiTests(unittest.TestCase):
         self.assertEqual(str(jobs[1][1]), "queued")
         self.assertEqual(str(jobs[2][1]), "running")
 
+    def test_recover_pipeline_jobs_after_restart_clears_stale_running_batch_jobs(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add_all(
+                [
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="running",
+                        payload_json='{"trigger":"batch_ocr","layout_ids":[1,2]}',
+                        result_json='{"progress":{"processed_layouts":1,"total_layouts":2}}',
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                    main.PipelineJob(
+                        stage="layout_benchmark",
+                        page_id=None,
+                        status="running",
+                        payload_json='{"trigger":"benchmark"}',
+                        result_json='{"progress":{}}',
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                ]
+            )
+
+        recovered = pipeline_runtime.recover_pipeline_jobs_after_restart(exclude_stages={"layout_benchmark"})
+        self.assertEqual(int(recovered["recovered_jobs"]), 1)
+
+        with db.get_session() as session:
+            jobs = session.execute(
+                select(main.PipelineJob.stage, main.PipelineJob.status, main.PipelineJob.error)
+                .order_by(main.PipelineJob.id.asc())
+            ).all()
+        self.assertEqual(str(jobs[0][0]), "ocr_extract")
+        self.assertEqual(str(jobs[0][1]), "failed")
+        self.assertIn("Interrupted by service restart", str(jobs[0][2]))
+        self.assertEqual(str(jobs[1][0]), "layout_benchmark")
+        self.assertEqual(str(jobs[1][1]), "running")
+
+        status_payload = main.batch_ocr_status()
+        self.assertEqual(bool(status_payload["is_running"]), False)
+        self.assertEqual(int(status_payload["running_jobs"]), 0)
+        self.assertEqual(int(status_payload["queued_jobs"]), 0)
+
     def test_ocr_extract_handler_respects_payload_layout_ids(self) -> None:
         self._write_image("batch/extract.png", b"extract-page")
         main.scan_images()
@@ -252,6 +305,49 @@ class BatchOcrApiTests(unittest.TestCase):
         output_by_layout = {int(row["layout_id"]): str(row["content"]) for row in outputs_payload["outputs"]}
         self.assertEqual(output_by_layout[layout1], "existing content")
         self.assertEqual(output_by_layout[layout2], "updated content")
+
+    def test_batch_ocr_handler_continues_on_gemini_server_error(self) -> None:
+        self._write_image("batch/timeout-continue.png", b"extract-page")
+        main.scan_images()
+        page_id = self._page_id_by_rel_path("batch/timeout-continue.png")
+        layout1 = self._add_text_layout(page_id, 1)
+        layout2 = self._add_text_layout(page_id, 2)
+        self._set_page_status(page_id, "layout_reviewed")
+
+        call_index = {"value": 0}
+
+        def fake_gemini(*_args, **_kwargs) -> str:
+            call_index["value"] += 1
+            if call_index["value"] <= 3:
+                raise RuntimeError("The read operation timed out")
+            return "second-ok"
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract,
+            "_gemini_generate_content",
+            side_effect=fake_gemini,
+        ):
+            result = pipeline_runtime._ocr_extract_handler(
+                {
+                    "page_id": page_id,
+                    "payload": {"trigger": "batch_ocr", "layout_ids": [layout1, layout2]},
+                    "id": 100,
+                    "stage": "ocr_extract",
+                }
+            )
+
+        self.assertEqual(result["status"], "ocr_failed")
+        self.assertEqual(result["extracted_count"], 1)
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["failed_layout_ids"], [layout1])
+
+        page_payload = main.page_details(page_id)
+        self.assertEqual(str(page_payload["page"]["status"]), "ocr_failed")
+
+        outputs_payload = main.page_ocr_outputs(page_id)
+        self.assertEqual(int(outputs_payload["count"]), 1)
+        self.assertEqual(int(outputs_payload["outputs"][0]["layout_id"]), layout2)
+        self.assertEqual(str(outputs_payload["outputs"][0]["content"]), "second-ok")
 
     def test_batch_ocr_status_reports_bbox_progress_for_active_run(self) -> None:
         now = main._utc_now()

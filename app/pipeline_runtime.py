@@ -90,6 +90,25 @@ def register_default_handlers() -> None:
     _DEFAULT_HANDLERS_REGISTERED = True
 
 
+def recover_pipeline_jobs_after_restart(*, exclude_stages: set[str] | None = None) -> dict[str, int]:
+    now = _utc_now()
+    excluded = {str(stage) for stage in (exclude_stages or set())}
+    recovered_jobs = 0
+    recovery_error = "Interrupted by service restart."
+    with get_session() as session:
+        query = select(PipelineJob).where(PipelineJob.status == "running")
+        if excluded:
+            query = query.where(~PipelineJob.stage.in_(excluded))
+        jobs = session.execute(query).scalars().all()
+        for job in jobs:
+            job.status = "failed"
+            job.error = recovery_error if not job.error else str(job.error)
+            job.finished_at = now
+            job.updated_at = now
+            recovered_jobs += 1
+    return {"recovered_jobs": recovered_jobs}
+
+
 def _ensure_worker_running() -> None:
     global _WORKER_THREAD
     with _WORKER_LOCK:
@@ -175,8 +194,12 @@ def _completion_message(stage: str, result: dict[str, Any] | None) -> str:
     if stage == STAGE_OCR_EXTRACT:
         extracted = int(result.get("extracted_count", 0))
         skipped = int(result.get("skipped_count", 0))
+        failed = int(result.get("failed_count", 0))
         requests = int(result.get("requests_count", 0))
-        return f"Completed OCR extraction, extracted {extracted}, skipped {skipped}, Gemini requests {requests}."
+        return (
+            "Completed OCR extraction, "
+            f"extracted {extracted}, skipped {skipped}, failed {failed}, Gemini requests {requests}."
+        )
     if stage == STAGE_LAYOUT_BENCHMARK:
         if bool(result.get("stopped")):
             processed = int(result.get("processed_tasks", 0))
@@ -403,6 +426,8 @@ def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
             return
         processed = int(progress_payload.get("processed_layouts", 0))
         total = int(progress_payload.get("total_layouts", 0))
+        failed_layout_id = int(progress_payload.get("failed_layout_id", 0))
+        failed_count = int(progress_payload.get("failed_count", 0))
         with get_session() as session:
             session.execute(
                 update(PipelineJob)
@@ -424,12 +449,19 @@ def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
             stage=STAGE_OCR_EXTRACT,
             event_type=EVENT_JOB_PROGRESS,
             page_id=page_id,
-            message=f"Batch OCR progress {max(0, processed)}/{max(0, total)}.",
+            message=(
+                f"Batch OCR skipped layout {max(0, failed_layout_id)} due to Gemini server error "
+                f"(failed {max(0, failed_count)}). Progress {max(0, processed)}/{max(0, total)}."
+                if failed_layout_id > 0
+                else f"Batch OCR progress {max(0, processed)}/{max(0, total)}."
+            ),
             data={
                 "trigger": "batch_ocr",
                 "job_id": job_id,
                 "processed_layouts": max(0, processed),
                 "total_layouts": max(0, total),
+                "failed_layout_id": max(0, failed_layout_id),
+                "failed_count": max(0, failed_count),
             },
         )
 
@@ -440,6 +472,7 @@ def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
             page_id,
             layout_ids=selected_layout_ids,
             progress_callback=_on_progress if is_batch_ocr else None,
+            continue_on_server_error=is_batch_ocr,
         )
     except Exception:
         with get_session() as session:

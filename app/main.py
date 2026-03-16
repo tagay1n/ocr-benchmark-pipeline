@@ -15,6 +15,7 @@ from .pipeline_runtime import (
     emit_event as emit_event,
     enqueue_job as enqueue_job,
     enqueue_layout_detection_for_new_pages as enqueue_layout_detection_for_new_pages,
+    recover_pipeline_jobs_after_restart,
     register_default_handlers,
 )
 from .runtime_options import reset_runtime_options_from_settings
@@ -84,6 +85,7 @@ from .api.shared import run_startup_scan
 async def lifespan(_: FastAPI):
     init_db()
     register_default_handlers()
+    recover_pipeline_jobs_after_restart(exclude_stages={"layout_benchmark"})
     recover_layout_benchmark_after_restart()
     reset_runtime_options_from_settings()
     run_startup_scan()

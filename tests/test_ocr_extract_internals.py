@@ -174,6 +174,12 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertTrue(ocr_extract._is_quota_error("rate limit reached"))
         self.assertFalse(ocr_extract._is_quota_error("HTTP 500 internal error"))
 
+    def test_is_gemini_server_error_matches_timeout_and_http_5xx(self) -> None:
+        self.assertTrue(ocr_extract._is_gemini_server_error("The read operation timed out"))
+        self.assertTrue(ocr_extract._is_gemini_server_error("Gemini request failed with HTTP 503: backend unavailable"))
+        self.assertFalse(ocr_extract._is_gemini_server_error("HTTP 429 quota exceeded"))
+        self.assertFalse(ocr_extract._is_gemini_server_error("validation error in prompt"))
+
     def test_usage_state_roundtrip_and_invalid_payload_handling(self) -> None:
         usage_path = self.test_settings.gemini_usage_path
         self.assertIsNotNone(usage_path)
@@ -600,6 +606,52 @@ class OcrExtractInternalsTests(unittest.TestCase):
         usage_path = Path(self.test_settings.gemini_usage_path or "")
         if usage_path.exists():
             self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), [])
+
+    def test_extract_ocr_continues_on_server_error_when_enabled(self) -> None:
+        self._write_image("ocr/continue-on-timeout.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        first = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=0.45, y2=1.0),
+            ),
+        )["layout"]
+        second = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.55, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract,
+            "_gemini_generate_content",
+            side_effect=[RuntimeError("The read operation timed out"), "second-ok"],
+        ):
+            result = ocr_extract.extract_ocr_for_page(
+                page_id,
+                continue_on_server_error=True,
+                max_retries_per_layout=1,
+            )
+
+        self.assertEqual(result["status"], "ocr_failed")
+        self.assertEqual(result["extracted_count"], 1)
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["failed_layout_ids"], [int(first["id"])])
+        self.assertEqual(result["requests_count"], 1)
+
+        page_payload = main.page_details(page_id)
+        self.assertEqual(page_payload["page"]["status"], "ocr_failed")
+
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 1)
+        self.assertEqual(int(outputs[0]["layout_id"]), int(second["id"]))
+        self.assertEqual(str(outputs[0]["content"]), "second-ok")
 
 
 if __name__ == "__main__":
