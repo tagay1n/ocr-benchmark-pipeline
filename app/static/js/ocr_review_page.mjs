@@ -136,6 +136,11 @@
       const LINE_REVIEW_MIN_WIDTH_PX = 120;
       const LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK = 0.08;
       const LINE_REVIEW_MAX_WIDTH_RATIO = 0.94;
+      const SOURCE_INK_MIN_DARK_ALPHA = 20;
+      const SOURCE_INK_MIN_CONTRAST = 18;
+      const SOURCE_INK_MEAN_OFFSET = 24;
+      const SOURCE_INK_DARK_PIXEL_RATIO = 0.04;
+      const SOURCE_INK_MIN_RATIO = 0.2;
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -265,6 +270,10 @@
       let altMagnifierPressed = false;
       let scrollSyncMutedViewport = null;
       let lineReviewTextMeasureNode = null;
+      let sourceAnalysisCanvas = null;
+      let sourceAnalysisContext = null;
+      let sourceAnalysisImageKey = "";
+      const sourceLineInkWidthRatioCache = new Map();
 
       function updateMagnifierToggleUi() {
         setToggleButtonActiveState(magnifierToggleBtn, state.magnifierEnabled);
@@ -2814,6 +2823,211 @@
         };
       }
 
+      function sourceAnalysisState() {
+        const imageWidth = Number(pageImage.naturalWidth || pageImage.width || 0);
+        const imageHeight = Number(pageImage.naturalHeight || pageImage.height || 0);
+        const imageUrl = String(pageImage.currentSrc || pageImage.src || "");
+        if (!pageImage.complete || imageWidth <= 0 || imageHeight <= 0 || !imageUrl) {
+          return null;
+        }
+        return {
+          imageWidth,
+          imageHeight,
+          imageUrl,
+          key: `${imageUrl}|${imageWidth}x${imageHeight}`,
+        };
+      }
+
+      function ensureSourceAnalysisContext() {
+        const state = sourceAnalysisState();
+        if (!state) {
+          return null;
+        }
+        if (
+          sourceAnalysisContext instanceof CanvasRenderingContext2D &&
+          sourceAnalysisImageKey === state.key &&
+          sourceAnalysisCanvas instanceof HTMLCanvasElement
+        ) {
+          return {
+            context: sourceAnalysisContext,
+            imageWidth: state.imageWidth,
+            imageHeight: state.imageHeight,
+            key: state.key,
+          };
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = state.imageWidth;
+        canvas.height = state.imageHeight;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) {
+          return null;
+        }
+        try {
+          context.clearRect(0, 0, state.imageWidth, state.imageHeight);
+          context.drawImage(pageImage, 0, 0, state.imageWidth, state.imageHeight);
+        } catch {
+          return null;
+        }
+        sourceAnalysisCanvas = canvas;
+        sourceAnalysisContext = context;
+        sourceAnalysisImageKey = state.key;
+        return {
+          context,
+          imageWidth: state.imageWidth,
+          imageHeight: state.imageHeight,
+          key: state.key,
+        };
+      }
+
+      function estimateInkWidthRatioInRect(context, x, y, width, height) {
+        const safeWidth = Math.max(1, Math.floor(Number(width) || 0));
+        const safeHeight = Math.max(1, Math.floor(Number(height) || 0));
+        if (safeWidth < 2 || safeHeight < 2) {
+          return null;
+        }
+        let imageData;
+        try {
+          imageData = context.getImageData(Math.floor(x), Math.floor(y), safeWidth, safeHeight);
+        } catch {
+          return null;
+        }
+        const data = imageData?.data;
+        if (!data || data.length < 4) {
+          return null;
+        }
+
+        let lumaSum = 0;
+        let lumaCount = 0;
+        let lumaMin = 255;
+        let lumaMax = 0;
+        for (let index = 0; index < data.length; index += 4) {
+          const alpha = Number(data[index + 3]);
+          if (!Number.isFinite(alpha) || alpha < SOURCE_INK_MIN_DARK_ALPHA) {
+            continue;
+          }
+          const red = Number(data[index]);
+          const green = Number(data[index + 1]);
+          const blue = Number(data[index + 2]);
+          const luma = 0.299 * red + 0.587 * green + 0.114 * blue;
+          lumaSum += luma;
+          lumaCount += 1;
+          if (luma < lumaMin) lumaMin = luma;
+          if (luma > lumaMax) lumaMax = luma;
+        }
+        if (lumaCount <= 0) {
+          return null;
+        }
+        if (lumaMax - lumaMin < SOURCE_INK_MIN_CONTRAST) {
+          return null;
+        }
+        const mean = lumaSum / lumaCount;
+        const darkThreshold = Math.max(
+          35,
+          Math.min(245, Math.min(mean - SOURCE_INK_MEAN_OFFSET, lumaMax - 10)),
+        );
+        const minDarkPixelsPerColumn = Math.max(1, Math.floor(safeHeight * SOURCE_INK_DARK_PIXEL_RATIO));
+
+        let left = -1;
+        let right = -1;
+        for (let col = 0; col < safeWidth; col += 1) {
+          let darkCount = 0;
+          for (let row = 0; row < safeHeight; row += 1) {
+            const idx = (row * safeWidth + col) * 4;
+            const alpha = Number(data[idx + 3]);
+            if (!Number.isFinite(alpha) || alpha < SOURCE_INK_MIN_DARK_ALPHA) {
+              continue;
+            }
+            const red = Number(data[idx]);
+            const green = Number(data[idx + 1]);
+            const blue = Number(data[idx + 2]);
+            const luma = 0.299 * red + 0.587 * green + 0.114 * blue;
+            if (luma <= darkThreshold) {
+              darkCount += 1;
+              if (darkCount >= minDarkPixelsPerColumn) {
+                break;
+              }
+            }
+          }
+          if (darkCount >= minDarkPixelsPerColumn) {
+            if (left < 0) {
+              left = col;
+            }
+            right = col;
+          }
+        }
+        if (left < 0 || right < left) {
+          return null;
+        }
+        const ratioRaw = (right - left + 1) / safeWidth;
+        if (!Number.isFinite(ratioRaw) || ratioRaw <= 0) {
+          return null;
+        }
+        const ratio = Math.max(SOURCE_INK_MIN_RATIO, Math.min(1, ratioRaw));
+        return ratio >= 0.97 ? 1 : ratio;
+      }
+
+      function sourceLineWidthCacheKey(output, lineCount, analysisKey) {
+        const normalizedRect = normalizeBBoxRect(output?.bbox);
+        const rectKey = normalizedRect
+          ? `${normalizedRect.x1.toFixed(6)},${normalizedRect.y1.toFixed(6)},${normalizedRect.x2.toFixed(6)},${normalizedRect.y2.toFixed(6)}`
+          : "none";
+        return `${analysisKey}|layout:${Number(output?.layout_id) || 0}|lines:${lineCount}|bbox:${rectKey}`;
+      }
+
+      function estimateSourceLineWidthRatios(output) {
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return [];
+        }
+        const analysis = ensureSourceAnalysisContext();
+        if (!analysis) {
+          return [];
+        }
+        const normalizedRect = normalizeBBoxRect(output?.bbox);
+        if (!normalizedRect) {
+          return [];
+        }
+        const lineCount = Math.max(1, outputLineCount(output.layout_id));
+        const cacheKey = sourceLineWidthCacheKey(output, lineCount, analysis.key);
+        const cached = sourceLineInkWidthRatioCache.get(cacheKey);
+        if (Array.isArray(cached)) {
+          return cached.slice();
+        }
+
+        const bboxLeftPx = normalizedRect.x1 * analysis.imageWidth;
+        const bboxTopPx = normalizedRect.y1 * analysis.imageHeight;
+        const bboxWidthPx = Math.max(1, (normalizedRect.x2 - normalizedRect.x1) * analysis.imageWidth);
+        const bboxHeightPx = Math.max(1, (normalizedRect.y2 - normalizedRect.y1) * analysis.imageHeight);
+        const ratios = [];
+        for (let lineIndex = 0; lineIndex < lineCount; lineIndex += 1) {
+          const band =
+            resolveLineBandForLayout(output.layout_id, lineIndex) ||
+            lineBandFromLineIndex(lineIndex, lineCount);
+          if (!band) {
+            ratios.push(1);
+            continue;
+          }
+          const rawTopPx = bboxHeightPx * Number(band.topRatio || 0);
+          const rawHeightPx = Math.max(1, bboxHeightPx * Number(band.heightRatio || 0));
+          const verticalPadPx = rawHeightPx * 0.1;
+          const cropTop = Math.max(0, bboxTopPx + rawTopPx - verticalPadPx);
+          const cropBottom = Math.min(
+            analysis.imageHeight,
+            bboxTopPx + rawTopPx + rawHeightPx + verticalPadPx,
+          );
+          const cropHeight = Math.max(1, cropBottom - cropTop);
+          const ratio = estimateInkWidthRatioInRect(
+            analysis.context,
+            bboxLeftPx,
+            cropTop,
+            bboxWidthPx,
+            cropHeight,
+          );
+          ratios.push(Number.isFinite(ratio) && ratio > 0 ? ratio : 1);
+        }
+        sourceLineInkWidthRatioCache.set(cacheKey, ratios.slice());
+        return ratios;
+      }
+
       function resolveLineReviewDisplayGeometry(output, crop) {
         const normalizedRect = normalizeBBoxRect(output?.bbox);
         const contentWidth = Math.max(
@@ -3946,6 +4160,108 @@
         return block;
       }
 
+      function splitPreserveLines(content) {
+        return String(content ?? "").replace(/\r\n/g, "\n").split("\n");
+      }
+
+      function renderPreserveLinesContent(container, content) {
+        if (!container) {
+          return;
+        }
+        const lines = splitPreserveLines(content);
+        container.innerHTML = "";
+        for (const line of lines) {
+          const row = document.createElement("div");
+          row.className = "recon-preserve-line";
+          row.dataset.rawLine = line;
+          const text = document.createElement("span");
+          text.className = "recon-preserve-line-text";
+          text.textContent = line.length > 0 ? line : "\u00A0";
+          row.appendChild(text);
+          container.appendChild(row);
+        }
+      }
+
+      function preserveLineNodes(container) {
+        if (!container) {
+          return [];
+        }
+        return Array.from(container.querySelectorAll(".recon-preserve-line"));
+      }
+
+      function fitPreserveLinesContent(container, availableWidth, availableHeight, output = null) {
+        const rows = preserveLineNodes(container);
+        if (!rows.length) {
+          return;
+        }
+        const lineCount = rows.length;
+        const slotHeight = Math.max(1, availableHeight / lineCount);
+        container.style.setProperty("--recon-line-slot-height", `${slotHeight}px`);
+        const sourceWidthRatios = estimateSourceLineWidthRatios(output);
+
+        for (const row of rows) {
+          const text = row.querySelector(".recon-preserve-line-text");
+          if (text instanceof HTMLElement) {
+            text.style.transform = "scaleX(1)";
+            text.style.wordSpacing = "0px";
+            text.style.letterSpacing = "0px";
+          }
+        }
+
+        const bestFontSize = findMaxFittingFontSize({
+          minFontSize: 2,
+          maxFontSize: Math.max(2, slotHeight * 2.1),
+          iterations: 14,
+          fitsAtFontSize(fontSize) {
+            const font = `${fontSize}px`;
+            for (const row of rows) {
+              const text = row.querySelector(".recon-preserve-line-text");
+              if (text instanceof HTMLElement) {
+                text.style.fontSize = font;
+              }
+            }
+            const maxRowHeight = Math.ceil(slotHeight + 0.5);
+            for (const row of rows) {
+              const text = row.querySelector(".recon-preserve-line-text");
+              if (!(text instanceof HTMLElement)) {
+                continue;
+              }
+              if (text.scrollHeight > maxRowHeight) {
+                return false;
+              }
+            }
+            return true;
+          },
+        });
+        const resolvedFont = `${bestFontSize}px`;
+        for (const row of rows) {
+          const text = row.querySelector(".recon-preserve-line-text");
+          if (text instanceof HTMLElement) {
+            text.style.fontSize = resolvedFont;
+          }
+        }
+
+        for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+          const row = rows[rowIndex];
+          const text = row.querySelector(".recon-preserve-line-text");
+          if (text instanceof HTMLElement) {
+            const textWidth = Number(text.scrollWidth) || 0;
+            let textScale = 1;
+            if (textWidth > 0) {
+              const ratioRaw = Number(sourceWidthRatios[rowIndex]);
+              const sourceRatio =
+                Number.isFinite(ratioRaw) && ratioRaw > 0
+                  ? Math.max(SOURCE_INK_MIN_RATIO, Math.min(1, ratioRaw))
+                  : 1;
+              const targetWidth = Math.max(1, availableWidth * sourceRatio);
+              textScale = (targetWidth - 0.5) / textWidth;
+            }
+            textScale = Math.max(0.18, Math.min(2.8, textScale));
+            text.style.transform = `scaleX(${textScale})`;
+          }
+        }
+      }
+
       function isPictureOutput(output) {
         const className = String(output?.class_name || "").trim().toLowerCase();
         return className === "picture";
@@ -4045,7 +4361,12 @@
         if (format === "markdown") {
           const mode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
           const className = mode === "markdown" ? "markdown" : "markdown raw-view";
-          const block = appendPlainContent(container, content, className);
+          const preserveLines = lineReviewRequiredOutput(output);
+          const block = appendPlainContent(container, preserveLines ? "" : content, className);
+          if (preserveLines) {
+            block.classList.add("preserve-lines");
+            renderPreserveLinesContent(block, content);
+          }
           const hasMarkdownTable = containsMarkdownTable(content);
           if (hasMarkdownTable) {
             container.classList.add("markdown-table-warning");
@@ -4064,7 +4385,7 @@
             badge.title = `${lookalikeCount} suspicious lookalike token(s) detected`;
             container.appendChild(badge);
           }
-          if (mode === "markdown") {
+          if (mode === "markdown" && !preserveLines) {
             renderMarkdownInto(block, content, { onRendered: scheduleReconstructionRefit });
           }
           return block;
@@ -4089,6 +4410,35 @@
         const measured = Number(contentNode.scrollWidth);
         contentNode.style.width = previousWidth;
         contentNode.style.maxWidth = previousMaxWidth;
+        if (!Number.isFinite(measured) || measured <= 0) {
+          return 0;
+        }
+        return measured;
+      }
+
+      function measureIntrinsicContentHeight(contentNode, constrainedWidthPx = null) {
+        if (!contentNode) {
+          return 0;
+        }
+        const previousWidth = contentNode.style.width;
+        const previousMaxWidth = contentNode.style.maxWidth;
+        const previousHeight = contentNode.style.height;
+        const previousMaxHeight = contentNode.style.maxHeight;
+        const previousOverflow = contentNode.style.overflow;
+        const widthValue = Number(constrainedWidthPx);
+        if (Number.isFinite(widthValue) && widthValue > 0) {
+          contentNode.style.width = `${widthValue}px`;
+        }
+        contentNode.style.maxWidth = "none";
+        contentNode.style.height = "auto";
+        contentNode.style.maxHeight = "none";
+        contentNode.style.overflow = "visible";
+        const measured = Number(contentNode.scrollHeight);
+        contentNode.style.width = previousWidth;
+        contentNode.style.maxWidth = previousMaxWidth;
+        contentNode.style.height = previousHeight;
+        contentNode.style.maxHeight = previousMaxHeight;
+        contentNode.style.overflow = previousOverflow;
         if (!Number.isFinite(measured) || measured <= 0) {
           return 0;
         }
@@ -4197,10 +4547,17 @@
         if (format === "skip") {
           return;
         }
-
         const availableWidth = Math.max(1, item.clientWidth - 2);
         const availableHeight = Math.max(1, item.clientHeight - 2);
         if (availableWidth <= 4 || availableHeight <= 4) {
+          return;
+        }
+        const preserveLines = contentNode.classList.contains("preserve-lines");
+        if (preserveLines) {
+          contentNode.style.width = `${availableWidth}px`;
+          contentNode.style.height = `${availableHeight}px`;
+          contentNode.style.transform = "scaleX(1)";
+          fitPreserveLinesContent(contentNode, availableWidth, availableHeight, output);
           return;
         }
 
@@ -4209,6 +4566,9 @@
         contentNode.style.transform = "scaleX(1)";
         contentNode.style.wordSpacing = "0px";
         contentNode.style.letterSpacing = "0px";
+        contentNode.style.whiteSpace = "";
+        contentNode.style.wordBreak = "";
+        contentNode.style.overflowWrap = "";
 
         const lineHeight = reconstructionLineHeight(format);
         contentNode.style.lineHeight = String(lineHeight);
@@ -4220,6 +4580,10 @@
           iterations: 14,
           fitsAtFontSize(fontSize) {
             contentNode.style.fontSize = `${fontSize}px`;
+            if (preserveLines) {
+              const maxHeight = Math.ceil(availableHeight + 1);
+              return contentNode.scrollHeight <= maxHeight;
+            }
             return contentFitsInItem(contentNode, availableWidth, availableHeight);
           },
         });
@@ -4282,15 +4646,74 @@
 
         if (format !== "html") {
           const intrinsicWidth = measureIntrinsicContentWidth(contentNode);
-          const horizontalScale = reconstructionHorizontalScale({
+          let horizontalScale = reconstructionHorizontalScale({
             measuredContentWidth: intrinsicWidth,
             availableWidth,
             maxScale: 1.12,
             minGainRatio: 0.01,
           });
+          if (preserveLines && intrinsicWidth > 0) {
+            const widthFitRatio = (availableWidth - 0.5) / intrinsicWidth;
+            if (Number.isFinite(widthFitRatio) && widthFitRatio > 0) {
+              horizontalScale = Math.min(horizontalScale, Math.min(1, widthFitRatio));
+            }
+          }
+          horizontalScale = Math.max(0.18, horizontalScale);
           contentNode.style.transform = `scaleX(${horizontalScale})`;
         } else {
           contentNode.style.transform = "scaleX(1)";
+        }
+
+        if (preserveLines) {
+          const baseLineHeight = Math.max(0.9, Number.parseFloat(contentNode.style.lineHeight) || lineHeight || 1.1);
+          const maxAllowedLineHeight = 8;
+          const maxContentHeight = Math.max(1, availableHeight - 0.5);
+          const intrinsicHeightForRatio = measureIntrinsicContentHeight(contentNode, availableWidth);
+          let best = baseLineHeight;
+          if (intrinsicHeightForRatio > 0) {
+            const ratioHint = maxContentHeight / intrinsicHeightForRatio;
+            if (Number.isFinite(ratioHint) && ratioHint > 1) {
+              best = Math.min(maxAllowedLineHeight, Math.max(baseLineHeight, baseLineHeight * ratioHint));
+            }
+          }
+          contentNode.style.lineHeight = String(best);
+          const fitsHeight = (candidate) => {
+            contentNode.style.lineHeight = String(candidate);
+            const intrinsicHeight = measureIntrinsicContentHeight(contentNode, availableWidth);
+            return intrinsicHeight > 0 && intrinsicHeight <= maxContentHeight;
+          };
+          if (!fitsHeight(best)) {
+            let low = baseLineHeight;
+            let high = best;
+            best = low;
+            for (let index = 0; index < 14; index += 1) {
+              const mid = (low + high) / 2;
+              if (fitsHeight(mid)) {
+                best = mid;
+                low = mid;
+              } else {
+                high = mid;
+              }
+            }
+          } else {
+            let low = best;
+            let high = Math.min(maxAllowedLineHeight, best * 1.6);
+            while (high < maxAllowedLineHeight && fitsHeight(high)) {
+              low = high;
+              high = Math.min(maxAllowedLineHeight, high * 1.25);
+            }
+            best = low;
+            for (let index = 0; index < 12; index += 1) {
+              const mid = (low + high) / 2;
+              if (fitsHeight(mid)) {
+                best = mid;
+                low = mid;
+              } else {
+                high = mid;
+              }
+            }
+          }
+          contentNode.style.lineHeight = String(best);
         }
       }
 
@@ -4651,6 +5074,10 @@
           fetchPageOcrOutputs(state.pageId),
           fetchPageLayouts(state.pageId),
         ]);
+        sourceLineInkWidthRatioCache.clear();
+        sourceAnalysisImageKey = "";
+        sourceAnalysisCanvas = null;
+        sourceAnalysisContext = null;
         state.page = pagePayload.page;
         pageImage.src = pagePayload.image_url;
         state.outputs = outputsPayload.outputs || [];

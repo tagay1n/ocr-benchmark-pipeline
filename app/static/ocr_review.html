@@ -869,6 +869,64 @@
         white-space: normal;
       }
 
+      .recon-item-content.preserve-lines {
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        align-items: stretch;
+        gap: 0;
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: normal;
+      }
+
+      .recon-item-content.preserve-lines.markdown-rendered,
+      .recon-item-content.preserve-lines.markdown-rendered p,
+      .recon-item-content.preserve-lines.markdown-rendered ul,
+      .recon-item-content.preserve-lines.markdown-rendered ol,
+      .recon-item-content.preserve-lines.markdown-rendered li,
+      .recon-item-content.preserve-lines.markdown-rendered h1,
+      .recon-item-content.preserve-lines.markdown-rendered h2,
+      .recon-item-content.preserve-lines.markdown-rendered h3,
+      .recon-item-content.preserve-lines.markdown-rendered h4,
+      .recon-item-content.preserve-lines.markdown-rendered h5,
+      .recon-item-content.preserve-lines.markdown-rendered h6,
+      .recon-item-content.preserve-lines.markdown-rendered blockquote,
+      .recon-item-content.preserve-lines.markdown-rendered pre,
+      .recon-item-content.preserve-lines.markdown-rendered code,
+      .recon-item-content.preserve-lines.markdown-rendered span,
+      .recon-item-content.preserve-lines.markdown-rendered strong,
+      .recon-item-content.preserve-lines.markdown-rendered em,
+      .recon-item-content.preserve-lines.markdown-rendered a,
+      .recon-item-content.preserve-lines.markdown-rendered sub,
+      .recon-item-content.preserve-lines.markdown-rendered sup {
+        white-space: pre;
+        word-break: normal;
+        overflow-wrap: normal;
+      }
+
+      .recon-item-content.preserve-lines .recon-preserve-line {
+        display: flex;
+        align-items: flex-start;
+        justify-content: flex-start;
+        min-height: 0;
+        height: var(--recon-line-slot-height, auto);
+        max-height: var(--recon-line-slot-height, none);
+        line-height: 1;
+        white-space: pre;
+        word-break: normal;
+        overflow-wrap: normal;
+        overflow: hidden;
+        text-overflow: clip;
+        transform-origin: top left;
+      }
+
+      .recon-item-content.preserve-lines .recon-preserve-line-text {
+        display: inline-block;
+        white-space: pre;
+        transform-origin: top left;
+      }
+
       .recon-item-content.markdown-rendered p,
       .recon-item-content.markdown-rendered ul,
       .recon-item-content.markdown-rendered ol,
