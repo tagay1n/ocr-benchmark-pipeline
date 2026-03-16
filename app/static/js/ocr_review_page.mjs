@@ -2243,6 +2243,15 @@
         return state.outputs[0] || null;
       }
 
+      function firstPendingLineReviewOutput() {
+        for (const output of sortedLineReviewOutputs()) {
+          if (!isLineReviewOutputFullyApproved(output)) {
+            return output;
+          }
+        }
+        return null;
+      }
+
       function sortedLineReviewOutputs() {
         return state.outputs
           .filter((output) => lineReviewRequiredOutput(output))
@@ -4611,9 +4620,15 @@
 
         renderHeaderMeta();
         renderOverlay();
-        const preferredOutput = preferredInitialOutput();
-        if (preferredOutput) {
-          selectOutput(preferredOutput.layout_id, { scrollImageToLayout: false });
+        const pendingLineReviewOutput = firstPendingLineReviewOutput();
+        if (pendingLineReviewOutput) {
+          setLineReviewCursor(pendingLineReviewOutput.layout_id, 0, { persist: false });
+          selectOutput(pendingLineReviewOutput.layout_id, { scrollImageToLayout: false });
+        } else {
+          const preferredOutput = preferredInitialOutput();
+          if (preferredOutput) {
+            selectOutput(preferredOutput.layout_id, { scrollImageToLayout: false });
+          }
         }
         updateReviewUiState();
         notifyReconstructedControlsActivity();
