@@ -206,6 +206,52 @@ class BatchOcrApiTests(unittest.TestCase):
         self.assertEqual(str(jobs[1][1]), "queued")
         self.assertEqual(str(jobs[2][1]), "running")
 
+    def test_batch_ocr_stop_without_active_batch_jobs_returns_noop(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add_all(
+                [
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="queued",
+                        payload_json='{"trigger":"manual_reextract","layout_ids":[1]}',
+                        result_json=None,
+                        error=None,
+                        attempts=0,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=None,
+                        finished_at=None,
+                    ),
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="running",
+                        payload_json='{"trigger":"manual_reextract","layout_ids":[2]}',
+                        result_json=None,
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                ]
+            )
+
+        payload = main.stop_batch_ocr_job()
+        self.assertEqual(bool(payload["running_stop_requested"]), False)
+        self.assertEqual(int(payload["queued_cancelled"]), 0)
+
+        with db.get_session() as session:
+            jobs = session.execute(
+                select(main.PipelineJob.status)
+                .where(main.PipelineJob.stage == "ocr_extract")
+                .order_by(main.PipelineJob.id.asc())
+            ).all()
+        self.assertEqual([str(row[0]) for row in jobs], ["queued", "running"])
+
     def test_recover_pipeline_jobs_after_restart_clears_stale_running_batch_jobs(self) -> None:
         now = main._utc_now()
         with db.get_session() as session:
@@ -411,6 +457,167 @@ class BatchOcrApiTests(unittest.TestCase):
         self.assertEqual(int(payload["progress_current"]), 3)
         self.assertEqual(int(payload["running_jobs"]), 1)
         self.assertEqual(int(payload["queued_jobs"]), 1)
+
+    def test_batch_ocr_status_ignores_non_batch_active_jobs(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add_all(
+                [
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="running",
+                        payload_json='{"trigger":"manual_reextract","layout_ids":[1]}',
+                        result_json='{"progress":{"processed_layouts":1,"total_layouts":1}}',
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="queued",
+                        payload_json='{"trigger":"manual_reextract","layout_ids":[2]}',
+                        result_json=None,
+                        error=None,
+                        attempts=0,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=None,
+                        finished_at=None,
+                    ),
+                ]
+            )
+
+        payload = main.batch_ocr_status()
+        self.assertEqual(bool(payload["is_running"]), False)
+        self.assertEqual(int(payload["running_jobs"]), 0)
+        self.assertEqual(int(payload["queued_jobs"]), 0)
+        self.assertEqual(int(payload["progress_current"]), 0)
+        self.assertEqual(int(payload["progress_total"]), 0)
+
+    def test_batch_ocr_status_uses_newest_active_batch_run_only(self) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add_all(
+                [
+                    # Older run: fully processed but not active.
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="completed",
+                        payload_json=(
+                            '{"trigger":"batch_ocr","batch_run_id":"run-old","batch_total_layouts":4,'
+                            '"layout_ids":[1,2],"replace_existing":false}'
+                        ),
+                        result_json='{"extracted_count":2,"skipped_count":0}',
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=now,
+                    ),
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="completed",
+                        payload_json=(
+                            '{"trigger":"batch_ocr","batch_run_id":"run-old","batch_total_layouts":4,'
+                            '"layout_ids":[3,4],"replace_existing":false}'
+                        ),
+                        result_json='{"extracted_count":1,"skipped_count":1}',
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=now,
+                    ),
+                    # Newer active run: should be the one reflected in progress.
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="completed",
+                        payload_json=(
+                            '{"trigger":"batch_ocr","batch_run_id":"run-new","batch_total_layouts":5,'
+                            '"layout_ids":[10,11],"replace_existing":false}'
+                        ),
+                        result_json='{"extracted_count":1,"skipped_count":1}',
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=now,
+                    ),
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=None,
+                        status="running",
+                        payload_json=(
+                            '{"trigger":"batch_ocr","batch_run_id":"run-new","batch_total_layouts":5,'
+                            '"layout_ids":[12,13,14],"replace_existing":false}'
+                        ),
+                        result_json='{"progress":{"processed_layouts":1,"total_layouts":3}}',
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                ]
+            )
+
+        payload = main.batch_ocr_status()
+        self.assertEqual(bool(payload["is_running"]), True)
+        self.assertEqual(int(payload["running_jobs"]), 1)
+        self.assertEqual(int(payload["queued_jobs"]), 0)
+        self.assertEqual(int(payload["progress_total"]), 5)
+        self.assertEqual(int(payload["progress_current"]), 3)
+
+    def test_batch_ocr_run_no_pending_layouts_enqueues_nothing(self) -> None:
+        self._write_image("batch/no-pending.png", b"page")
+        main.scan_images()
+        page_id = self._page_id_by_rel_path("batch/no-pending.png")
+        layout_id = self._add_text_layout(page_id, 1)
+        self._set_page_status(page_id, "ocr_done")
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=layout_id,
+                    page_id=page_id,
+                    class_name="text",
+                    output_format="markdown",
+                    content="already extracted",
+                    model_name="gemini-3-flash-preview",
+                    key_alias="k1",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        enqueue_calls: list[tuple[str, int | None, dict[str, object] | None]] = []
+
+        def _fake_enqueue(stage: str, *, page_id: int | None, payload: dict[str, object] | None = None) -> bool:
+            enqueue_calls.append((stage, page_id, payload))
+            return True
+
+        with patch.object(main, "enqueue_job", side_effect=_fake_enqueue):
+            payload = main.run_batch_ocr_job()
+
+        self.assertEqual(bool(payload["enqueued"]), False)
+        self.assertEqual(int(payload["considered_pages"]), 0)
+        self.assertEqual(int(payload["considered_layouts"]), 0)
+        self.assertEqual(int(payload["queued_pages"]), 0)
+        self.assertEqual(int(payload["already_queued_or_running"]), 0)
+        self.assertEqual(enqueue_calls, [])
 
 
 if __name__ == "__main__":

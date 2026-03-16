@@ -105,6 +105,8 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(pageModule.includes('"/static/js/layout_class_catalog.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/layout_review_api.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/state_event_utils.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/zoom_controller.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/js/review_shell_utils.mjs"'), true);
   assert.equal(pageModule.includes("fetchLayoutDetectionDefaults"), true);
   assert.equal(apiModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
   assert.equal(apiModule.includes('"/api/layout-detection/defaults"'), true);
@@ -158,6 +160,11 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
     'id="line-review-reel"',
     'id="line-review-approve-bbox-btn"',
     'id="line-review-reset-bbox-btn"',
+    'id="reextract-modal"',
+    'id="reextract-modal-layouts"',
+    'id="reextract-modal-select-all"',
+    'id="reextract-modal-run-btn"',
+    'id="reextract-modal-cancel-btn"',
     'id="source-strip-overlay"',
     'id="reconstructed-strip-overlay"',
     'id="editor-action-bold"',
@@ -179,6 +186,8 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
   assert.equal(pageModule.includes('"./layout_class_catalog.mjs"'), true);
   assert.equal(pageModule.includes('"./ocr_review_api.mjs"'), true);
   assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
+  assert.equal(pageModule.includes('"./zoom_controller.mjs"'), true);
+  assert.equal(pageModule.includes('"./review_shell_utils.mjs"'), true);
   assert.equal(apiModule.includes("`/api/pages/${pageId}/ocr/reextract`"), true);
   assert.equal(apiModule.includes("`/api/ocr-outputs/${layoutId}`"), true);
 });

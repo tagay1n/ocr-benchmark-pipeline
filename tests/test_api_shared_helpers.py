@@ -105,6 +105,65 @@ class ApiSharedHelpersTests(unittest.TestCase):
         self.assertFalse(none_left["has_next"])
         self.assertIsNone(none_left["next_page_id"])
 
+    def test_next_page_for_statuses_filters_missing_and_respects_id_progression(self) -> None:
+        self._write_image("helpers/mixed-a.png", b"a")
+        self._write_image("helpers/mixed-b.png", b"b")
+        self._write_image("helpers/mixed-c.png", b"c")
+        main.scan_images()
+        pages = sorted(main.list_pages()["pages"], key=lambda row: int(row["id"]))
+        first_id = int(pages[0]["id"])
+        second_id = int(pages[1]["id"])
+        third_id = int(pages[2]["id"])
+
+        now = shared._utc_now()
+        with db.get_session() as session:
+            first = session.get(main.Page, first_id)
+            second = session.get(main.Page, second_id)
+            third = session.get(main.Page, third_id)
+            self.assertIsNotNone(first)
+            self.assertIsNotNone(second)
+            self.assertIsNotNone(third)
+            first.status = "new"
+            second.status = "layout_detected"
+            third.status = "layout_detected"
+            third.is_missing = True
+            first.updated_at = now
+            second.updated_at = now
+            third.updated_at = now
+
+        first_match = shared.next_page_for_statuses(statuses=("layout_detected", "new"))
+        self.assertTrue(first_match["has_next"])
+        self.assertEqual(int(first_match["next_page_id"]), first_id)
+
+        second_match = shared.next_page_for_statuses(
+            statuses=("layout_detected", "new"),
+            current_page_id=first_id,
+        )
+        self.assertTrue(second_match["has_next"])
+        self.assertEqual(int(second_match["next_page_id"]), second_id)
+
+        none_after_second = shared.next_page_for_statuses(
+            statuses=("layout_detected", "new"),
+            current_page_id=second_id,
+        )
+        self.assertFalse(none_after_second["has_next"])
+        self.assertIsNone(none_after_second["next_page_id"])
+
+    def test_next_page_for_statuses_ignores_blank_status_entries(self) -> None:
+        self._write_image("helpers/blank-status.png", b"x")
+        main.scan_images()
+        page_id = int(main.list_pages()["pages"][0]["id"])
+        now = shared._utc_now()
+        with db.get_session() as session:
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "new"
+            page.updated_at = now
+
+        payload = shared.next_page_for_statuses(statuses=("  ", "", "new", "   "))
+        self.assertTrue(payload["has_next"])
+        self.assertEqual(int(payload["next_page_id"]), page_id)
+
 
 if __name__ == "__main__":
     unittest.main()

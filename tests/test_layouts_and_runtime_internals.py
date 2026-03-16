@@ -731,6 +731,47 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         self.assertAlmostEqual(float(text_layout["bbox"]["x1"]), 0.11, places=4)
         self.assertAlmostEqual(float(text_layout["bbox"]["x2"]), 0.49, places=4)
 
+    def test_detect_layouts_keeps_adjacent_predictions_without_true_overlap(self) -> None:
+        self._write_image("layout/detect-dedupe-adjacent.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        detected_rows = [
+            {
+                "class_name": "text",
+                "confidence": 0.93,
+                "x1": 0.10,
+                "y1": 0.10,
+                "x2": 0.30,
+                "y2": 0.30,
+            },
+            {
+                "class_name": "text",
+                "confidence": 0.91,
+                "x1": 0.301,
+                "y1": 0.10,
+                "x2": 0.50,
+                "y2": 0.30,
+            },
+        ]
+        params = {
+            "confidence_threshold": 0.2,
+            "iou_threshold": 0.45,
+            "image_size": 1024,
+            "max_detections": 300,
+            "agnostic_nms": False,
+        }
+
+        with patch.object(layouts, "_detect_doclaynet_layouts", return_value=(detected_rows, params)):
+            result = main.detect_page_layouts(page_id, main.DetectLayoutsRequest(replace_existing=True))
+
+        self.assertEqual(result["created"], 2)
+        self.assertEqual(result["class_counts"], {"text": 2})
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual(len(page_layouts), 2)
+        x1_values = sorted(float(row["bbox"]["x1"]) for row in page_layouts)
+        self.assertEqual(x1_values, [0.1, 0.301])
+
     def test_patch_layout_reorders_without_unique_constraint_collision(self) -> None:
         self._write_image("layout/reorder-patch.png")
         main.scan_images()

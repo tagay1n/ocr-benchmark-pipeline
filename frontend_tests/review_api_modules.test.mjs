@@ -15,6 +15,11 @@ import {
 } from "../app/static/js/layout_review_api.mjs";
 import {
   completeOcrReview,
+  fetchNextOcrReviewPage,
+  fetchPageDetails,
+  fetchPageLayouts,
+  fetchPageOcrOutputs,
+  fetchPages,
   patchOcrOutput,
   reextractPageOcr,
 } from "../app/static/js/ocr_review_api.mjs";
@@ -99,6 +104,11 @@ test("ocr review API module sends expected routes and propagates backend detail 
   };
 
   try {
+    await fetchPages();
+    await fetchPageDetails(5);
+    await fetchPageLayouts(5);
+    await fetchPageOcrOutputs(5);
+    await fetchNextOcrReviewPage(5);
     await patchOcrOutput(9, { content: "updated" });
     await completeOcrReview(5);
     await assert.rejects(
@@ -109,15 +119,30 @@ test("ocr review API module sends expected routes and propagates backend detail 
     globalThis.fetch = originalFetch;
   }
 
-  assert.equal(calls.length, 3);
-  assert.equal(calls[0].url, "/api/ocr-outputs/9");
-  assert.equal(calls[0].options.method, "PATCH");
-  assert.match(String(calls[0].options.body), /updated/);
+  assert.equal(calls.length, 8);
+  assert.equal(calls[0].url, "/api/pages");
+  assert.equal(calls[0].options, undefined);
 
-  assert.equal(calls[1].url, "/api/pages/5/ocr/review-complete");
-  assert.equal(calls[1].options.method, "POST");
+  assert.equal(calls[1].url, "/api/pages/5");
+  assert.equal(calls[1].options, undefined);
 
-  assert.equal(calls[2].url, "/api/pages/5/ocr/reextract");
-  assert.equal(calls[2].options.method, "POST");
-  assert.match(String(calls[2].options.body), /layout_ids/);
+  assert.equal(calls[2].url, "/api/pages/5/layouts");
+  assert.equal(calls[2].options, undefined);
+
+  assert.equal(calls[3].url, "/api/pages/5/ocr-outputs");
+  assert.equal(calls[3].options, undefined);
+
+  assert.equal(calls[4].url, "/api/pages/5/ocr-review-next");
+  assert.equal(calls[4].options, undefined);
+
+  assert.equal(calls[5].url, "/api/ocr-outputs/9");
+  assert.equal(calls[5].options.method, "PATCH");
+  assert.match(String(calls[5].options.body), /updated/);
+
+  assert.equal(calls[6].url, "/api/pages/5/ocr/review-complete");
+  assert.equal(calls[6].options.method, "POST");
+
+  assert.equal(calls[7].url, "/api/pages/5/ocr/reextract");
+  assert.equal(calls[7].options.method, "POST");
+  assert.match(String(calls[7].options.body), /layout_ids/);
 });

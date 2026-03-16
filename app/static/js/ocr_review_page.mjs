@@ -71,6 +71,19 @@
         removeStorage,
         writeStorage,
       } from "./state_event_utils.mjs";
+      import {
+        loadStoredZoomSettings,
+        rebuildZoomPresetOptions as rebuildZoomPresetOptionsShared,
+        closeZoomMenu as closeZoomMenuShared,
+        openZoomMenu as openZoomMenuShared,
+        setZoomInputFromApplied as setZoomInputFromAppliedShared,
+        updateZoomMenuSelection as updateZoomMenuSelectionShared,
+      } from "./zoom_controller.mjs";
+      import {
+        formatStatusLabel,
+        updateHistoryNavigationButtons,
+        updateReviewStateBadge,
+      } from "./review_shell_utils.mjs";
 
       const STORAGE_KEYS = {
         draftPrefix: "ocrReview.drafts",
@@ -631,38 +644,21 @@
       }
 
       function rebuildZoomPresetOptions() {
-        const separator = zoomMenu.querySelector(".zoom-separator");
-        if (!(separator instanceof HTMLElement)) {
-          zoomOptions = Array.from(zoomMenu.querySelectorAll(".zoom-option"));
-          return;
-        }
-        for (const option of zoomMenu.querySelectorAll(".zoom-option[data-zoom-percent]")) {
-          option.remove();
-        }
-        const fragment = document.createDocumentFragment();
-        for (const percent of ZOOM_PRESET_PERCENTS) {
-          const option = document.createElement("button");
-          option.type = "button";
-          option.className = "zoom-option";
-          option.dataset.zoomPercent = String(percent);
-          option.textContent = `${percent}%`;
-          fragment.appendChild(option);
-        }
-        separator.after(fragment);
-        zoomOptions = Array.from(zoomMenu.querySelectorAll(".zoom-option"));
+        zoomOptions = rebuildZoomPresetOptionsShared(zoomMenu, ZOOM_PRESET_PERCENTS);
       }
 
       function applyStoredZoomSettings() {
-        state.zoomMode = normalizeZoomMode(readStorage(STORAGE_KEYS.zoomMode), {
-          fallback: "automatic",
-          allowCustom: true,
+        const zoomState = loadStoredZoomSettings({
+          readStorage,
+          zoomModeKey: STORAGE_KEYS.zoomMode,
+          zoomPercentKey: STORAGE_KEYS.zoomPercent,
+          normalizeZoomMode,
+          clampZoomPercent,
+          fallbackMode: "automatic",
         });
-        state.zoomPercent = 100;
-        const storedPercent = readStorage(STORAGE_KEYS.zoomPercent);
-        if (storedPercent !== null) {
-          state.zoomPercent = clampZoomPercent(storedPercent);
-        }
-        state.zoomAppliedPercent = 100;
+        state.zoomMode = zoomState.zoomMode;
+        state.zoomPercent = zoomState.zoomPercent;
+        state.zoomAppliedPercent = zoomState.zoomAppliedPercent;
         setZoomInputFromApplied();
         updateZoomMenuSelection();
       }
@@ -678,30 +674,22 @@
       }
 
       function closeZoomMenu() {
-        zoomMenu.hidden = true;
-        zoomTrigger.setAttribute("aria-expanded", "false");
+        closeZoomMenuShared(zoomMenu, zoomTrigger);
       }
 
       function openZoomMenu() {
-        zoomMenu.hidden = false;
-        zoomTrigger.setAttribute("aria-expanded", "true");
+        openZoomMenuShared(zoomMenu, zoomTrigger);
       }
 
       function updateZoomMenuSelection() {
-        for (const option of zoomOptions) {
-          const optionMode = option.dataset.zoomMode || "";
-          const optionPercent = option.dataset.zoomPercent || "";
-          const modeMatch = optionMode !== "" && optionMode === state.zoomMode;
-          const percentMatch =
-            optionPercent !== "" &&
-            state.zoomMode === "custom" &&
-            Number(optionPercent) === Math.round(state.zoomPercent);
-          option.classList.toggle("active", modeMatch || percentMatch);
-        }
+        updateZoomMenuSelectionShared(zoomOptions, {
+          zoomMode: state.zoomMode,
+          zoomPercent: state.zoomPercent,
+        });
       }
 
       function setZoomInputFromApplied() {
-        zoomPercentInput.value = String(Math.round(state.zoomAppliedPercent));
+        setZoomInputFromAppliedShared(zoomPercentInput, state.zoomAppliedPercent);
       }
 
       function activeZoomViewport() {
@@ -1626,13 +1614,6 @@
         syncHoveredLineFromExpandedEditor({ source: "editor" });
       }
 
-      function formatStatusLabel(value) {
-        return String(value || "")
-          .replace(/_/g, " ")
-          .trim()
-          .toUpperCase();
-      }
-
       function compactTextPreview(value, maxLength = 90) {
         const normalized = String(value ?? "").replace(/\s+/g, " ").trim();
         if (!normalized) {
@@ -1676,26 +1657,12 @@
       }
 
       function updateReviewBadge() {
-        reviewStateBadge.classList.remove("needs-review", "reviewed", "unknown");
-        const status = String(state.page?.status || "").trim();
-        if (!status) {
-          reviewStateBadge.hidden = true;
-          reviewStateBadge.textContent = "";
-          return;
-        }
-        reviewStateBadge.hidden = false;
-        if (status === "ocr_done") {
-          reviewStateBadge.textContent = "NEEDS REVIEW";
-          reviewStateBadge.classList.add("needs-review");
-          return;
-        }
-        if (status === "ocr_reviewed") {
-          reviewStateBadge.textContent = "REVIEWED";
-          reviewStateBadge.classList.add("reviewed");
-          return;
-        }
-        reviewStateBadge.textContent = formatStatusLabel(status);
-        reviewStateBadge.classList.add("unknown");
+        updateReviewStateBadge({
+          badge: reviewStateBadge,
+          status: state.page?.status,
+          needsReviewStatus: "ocr_done",
+          reviewedStatus: "ocr_reviewed",
+        });
       }
 
       function updateReviewButtonState() {
@@ -4353,24 +4320,22 @@
 
       function updateHistoryControls() {
         const prevPageId = previousHistoryPageId(state.history, state.historyIndex);
-        historyBackBtn.disabled = !Number.isInteger(prevPageId) || prevPageId <= 0;
-        historyBackBtn.title = historyBackBtn.disabled
-          ? "No previous reviewed page in history."
-          : "Open previous reviewed page";
-
         const forwardPageId = nextHistoryPageId(state.history, state.historyIndex);
-        if (Number.isInteger(forwardPageId) && forwardPageId > 0) {
-          historyForthBtn.disabled = false;
-          historyForthBtn.title = "Open next reviewed page in history.";
-          return;
-        }
-
         const queueTarget = Number(state.nextReviewPageId);
-        const hasQueueTarget = Number.isInteger(queueTarget) && queueTarget > 0;
-        historyForthBtn.disabled = !hasQueueTarget;
-        historyForthBtn.title = hasQueueTarget
-          ? "Open next page for OCR review."
-          : "No next page for OCR review.";
+        updateHistoryNavigationButtons({
+          historyBackButton: historyBackBtn,
+          historyForwardButton: historyForthBtn,
+          backTarget: Number.isInteger(prevPageId) && prevPageId > 0 ? prevPageId : null,
+          forwardHistoryTarget: Number.isInteger(forwardPageId) && forwardPageId > 0 ? forwardPageId : null,
+          queueTarget: Number.isInteger(queueTarget) && queueTarget > 0 ? queueTarget : null,
+          labels: {
+            noBackTitle: "No previous reviewed page in history.",
+            backTitle: "Open previous reviewed page",
+            forwardHistoryTitle: "Open next reviewed page in history.",
+            forwardQueueTitle: "Open next page for OCR review.",
+            noForwardTitle: "No next page for OCR review.",
+          },
+        });
       }
 
       function storeHistoryState() {
