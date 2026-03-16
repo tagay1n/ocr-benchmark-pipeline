@@ -99,7 +99,7 @@
       const EDITOR_DRAWER_RESPONSIVE_BREAKPOINT = 1120;
       const FOCUSED_STRIP_PAD_RATIO = 0.02;
       const FOCUSED_STRIP_MIN_HEIGHT_RATIO = 0.08;
-      const LINE_REVIEW_SLOT_OFFSETS = [-2, -1, 0, 1, 2];
+      const LINE_REVIEW_SLOT_OFFSETS = [-1, 0, 1];
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -2259,6 +2259,59 @@
         return state.outputs[0] || null;
       }
 
+      function sortedLineReviewOutputs() {
+        return state.outputs
+          .filter((output) => lineReviewRequiredOutput(output))
+          .slice()
+          .sort((left, right) => {
+            const orderDiff = Number(left.reading_order) - Number(right.reading_order);
+            if (orderDiff !== 0) {
+              return orderDiff;
+            }
+            return Number(left.layout_id) - Number(right.layout_id);
+          });
+      }
+
+      function isLineReviewOutputFullyApproved(output) {
+        if (!output || !lineReviewRequiredOutput(output)) {
+          return true;
+        }
+        const lines = logicalLinesForOutput(output);
+        return approvedLineSet(output.layout_id, lines.length).size >= lines.length;
+      }
+
+      function nextPendingLineReviewOutputAfter(layoutId) {
+        const currentLayoutId = Number(layoutId);
+        if (!Number.isInteger(currentLayoutId) || currentLayoutId <= 0) {
+          return null;
+        }
+        let seenCurrent = false;
+        for (const output of sortedLineReviewOutputs()) {
+          if (!seenCurrent) {
+            if (Number(output.layout_id) === currentLayoutId) {
+              seenCurrent = true;
+            }
+            continue;
+          }
+          if (isLineReviewOutputFullyApproved(output)) {
+            continue;
+          }
+          return output;
+        }
+        return null;
+      }
+
+      function moveToNextPendingLineReviewOutput(currentLayoutId) {
+        const nextOutput = nextPendingLineReviewOutputAfter(currentLayoutId);
+        if (!nextOutput) {
+          return false;
+        }
+        const nextLayoutId = Number(nextOutput.layout_id);
+        setLineReviewCursor(nextLayoutId, firstUnapprovedLineIndex(nextLayoutId), { persist: true });
+        selectOutput(nextLayoutId, { scrollImageToLayout: true, isUserSelection: true });
+        return true;
+      }
+
       function approveLine(layoutId, lineIndex, { approved = true, persist = true } = {}) {
         const output = outputByLayoutId(layoutId);
         if (!output) {
@@ -2772,6 +2825,21 @@
         node.appendChild(image);
       }
 
+      function applyLineReviewHorizontalGeometry(node, output) {
+        if (!(node instanceof HTMLElement)) {
+          return;
+        }
+        const normalizedRect = normalizeBBoxRect(output?.bbox);
+        if (!normalizedRect) {
+          node.style.left = "0%";
+          node.style.width = "100%";
+          return;
+        }
+        const width = Math.max(0, normalizedRect.x2 - normalizedRect.x1);
+        node.style.left = `${normalizedRect.x1 * 100}%`;
+        node.style.width = `${width * 100}%`;
+      }
+
       function openEditorForLine(layoutId, lineIndex) {
         const normalizedLayoutId = Number(layoutId);
         const normalizedLineIndex = Number(lineIndex);
@@ -2817,26 +2885,25 @@
         lines,
         baselineLines,
         approved,
-        isEdge,
       }) {
         const slot = document.createElement("div");
         slot.className = "line-review-slot";
-        if (isEdge) {
-          slot.classList.add("edge");
-        }
 
+        const sourceLane = document.createElement("div");
+        sourceLane.className = "line-review-source-lane";
         const sourceLine = document.createElement("div");
         sourceLine.className = "line-review-source-line";
+        sourceLane.appendChild(sourceLine);
+        const geminiLane = document.createElement("div");
+        geminiLane.className = "line-review-gemini-lane";
         const geminiLine = document.createElement("div");
         geminiLine.className = "line-review-gemini-line";
-        slot.appendChild(sourceLine);
-        slot.appendChild(geminiLine);
+        geminiLane.appendChild(geminiLine);
+        slot.appendChild(sourceLane);
+        slot.appendChild(geminiLane);
 
         if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= lineCount) {
-          slot.classList.add("empty");
-          sourceLine.textContent = " ";
-          geminiLine.textContent = " ";
-          return slot;
+          return null;
         }
 
         slot.dataset.lineIndex = String(lineIndex);
@@ -2851,6 +2918,8 @@
           slot.classList.add("is-approved");
         }
 
+        applyLineReviewHorizontalGeometry(sourceLine, output);
+        applyLineReviewHorizontalGeometry(geminiLine, output);
         const lineBand = resolveLineBandForLayout(output.layout_id, lineIndex) || lineBandFromLineIndex(lineIndex, lineCount);
         renderLineReviewSourceLine(sourceLine, output, lineBand);
 
@@ -2876,7 +2945,9 @@
         for (let offsetIndex = 0; offsetIndex < LINE_REVIEW_SLOT_OFFSETS.length; offsetIndex += 1) {
           const offset = LINE_REVIEW_SLOT_OFFSETS[offsetIndex];
           const lineIndex = currentIndex + offset;
-          const isEdge = offsetIndex === 0 || offsetIndex === LINE_REVIEW_SLOT_OFFSETS.length - 1;
+          if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= lineCount) {
+            continue;
+          }
           const slot = createLineReviewSlot({
             output,
             lineIndex,
@@ -2885,9 +2956,10 @@
             lines,
             baselineLines,
             approved,
-            isEdge,
           });
-          lineReviewReel.appendChild(slot);
+          if (slot) {
+            lineReviewReel.appendChild(slot);
+          }
         }
       }
 
@@ -2936,14 +3008,21 @@
         });
 
         lineReviewPrevBtn.disabled = currentIndex <= 0 || state.reviewSubmitInProgress || state.reextractInProgress;
+        const nextPendingOutput = nextPendingLineReviewOutputAfter(selectedLayoutId);
+        const canAdvanceWithinCurrent = currentIndex < lineCount - 1;
+        const canAdvanceToNextOutput = Boolean(nextPendingOutput);
         lineReviewNextBtn.disabled =
-          currentIndex >= lineCount - 1 || state.reviewSubmitInProgress || state.reextractInProgress;
+          state.reviewSubmitInProgress ||
+          state.reextractInProgress ||
+          (!canAdvanceWithinCurrent && !canAdvanceToNextOutput);
         const lineActionDisabled = state.reviewSubmitInProgress || state.reextractInProgress;
         lineReviewApproveBtn.disabled = lineActionDisabled;
-        lineReviewApproveBboxBtn.disabled = lineActionDisabled;
+        const currentBboxHasPending = approvedCount < lineCount;
+        lineReviewApproveBboxBtn.disabled =
+          lineActionDisabled || (!currentBboxHasPending && !canAdvanceToNextOutput);
         lineReviewResetBboxBtn.disabled = lineActionDisabled;
         lineReviewApproveBtn.classList.toggle("approved", isApproved);
-        lineReviewApproveBtn.textContent = isApproved ? "Next (A)" : "Approve + next (A)";
+        lineReviewApproveBtn.textContent = "Approve (A)";
         applyLineStatusHighlights();
       }
 
@@ -2960,7 +3039,27 @@
           return;
         }
         const lines = logicalLinesForOutput(output);
-        const nextIndex = Math.max(0, Math.min(lines.length - 1, currentLineReviewIndex(selectedLayoutId) + delta));
+        const currentIndex = currentLineReviewIndex(selectedLayoutId);
+        const offset = Number(delta);
+        if (
+          Number.isFinite(offset) &&
+          offset > 0 &&
+          currentIndex >= lines.length - 1
+        ) {
+          updateApprovedLineIndexes(
+            selectedLayoutId,
+            Array.from({ length: lines.length }, (_, index) => index),
+            { persist: true },
+          );
+          if (moveToNextPendingLineReviewOutput(selectedLayoutId)) {
+            return;
+          }
+          setLineReviewCursor(selectedLayoutId, lines.length - 1, { persist: true });
+          syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+          renderLineReviewPanel();
+          return;
+        }
+        const nextIndex = Math.max(0, Math.min(lines.length - 1, currentIndex + offset));
         setLineReviewCursor(selectedLayoutId, nextIndex, { persist: true });
         syncHoveredLineFromLineReviewCursor(selectedLayoutId);
         renderLineReviewPanel();
@@ -2981,6 +3080,16 @@
         if (lineIndex < lineCount - 1) {
           setLineReviewCursor(selectedLayoutId, lineIndex + 1, { persist: true });
           syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+          renderLineReviewPanel();
+          return;
+        }
+        updateApprovedLineIndexes(
+          selectedLayoutId,
+          Array.from({ length: lineCount }, (_, index) => index),
+          { persist: true },
+        );
+        if (moveToNextPendingLineReviewOutput(selectedLayoutId)) {
+          return;
         }
         renderLineReviewPanel();
       }
@@ -3003,9 +3112,19 @@
           return;
         }
         const lines = logicalLinesForOutput(output);
+        if (isLineReviewOutputFullyApproved(output)) {
+          if (moveToNextPendingLineReviewOutput(selectedLayoutId)) {
+            return;
+          }
+          renderLineReviewPanel();
+          return;
+        }
         updateApprovedLineIndexes(selectedLayoutId, Array.from({ length: lines.length }, (_, idx) => idx), {
           persist: true,
         });
+        if (moveToNextPendingLineReviewOutput(selectedLayoutId)) {
+          return;
+        }
         renderLineReviewPanel();
       }
 
