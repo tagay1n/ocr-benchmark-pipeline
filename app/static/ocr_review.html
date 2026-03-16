@@ -626,7 +626,7 @@
         min-height: 0;
       }
 
-      .grid.view-mode-focused-strip {
+      .grid.view-mode-line-by-line {
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
       }
 
@@ -1298,6 +1298,10 @@
           <div class="panel-toggles" role="group" aria-label="Panel visibility">
             <button id="toggle-source-btn" class="toggle-btn active" type="button" aria-pressed="true">Source</button>
             <button id="toggle-reconstructed-btn" class="toggle-btn active" type="button" aria-pressed="true">Reconstructed</button>
+          </div>
+          <div class="panel-toggles" role="group" aria-label="Review mode">
+            <button id="view-two-panels-btn" class="toggle-btn active" type="button" aria-pressed="true">Two panels</button>
+            <button id="view-line-by-line-btn" class="toggle-btn" type="button" aria-pressed="false">Line by line</button>
           </div>
           <button id="reextract-btn" type="button">Detect</button>
           <button id="review-btn" type="button">Mark reviewed</button>

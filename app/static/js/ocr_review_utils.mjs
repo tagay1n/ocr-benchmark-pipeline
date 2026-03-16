@@ -8,10 +8,13 @@ export function normalizeReconstructedRenderMode(rawValue) {
 
 export function normalizeReviewViewMode(rawValue) {
   const value = String(rawValue || "").trim().toLowerCase();
-  if (value === "focused_strip") {
-    return "focused_strip";
+  if (value === "line_by_line" || value === "line-by-line" || value === "focused_strip") {
+    return "line_by_line";
   }
-  return "side_by_side";
+  if (value === "two_panels" || value === "two-panels" || value === "side_by_side") {
+    return "two_panels";
+  }
+  return "two_panels";
 }
 
 export function isLineSyncEnabledOutputFormat(outputFormat) {

@@ -164,6 +164,8 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
     'id="editor-action-ordered-list-item"',
     'id="magnifier-toggle-btn"',
     'id="source-bind-lines-layer"',
+    'id="view-two-panels-btn"',
+    'id="view-line-by-line-btn"',
   ];
   for (const marker of requiredIds) {
     assert.equal(html.includes(marker), true, `missing marker: ${marker}`);

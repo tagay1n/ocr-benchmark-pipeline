@@ -78,14 +78,17 @@ test("normalizeReconstructedRenderMode defaults to markdown and accepts raw", ()
   assert.equal(normalizeReconstructedRenderMode("something-else"), "markdown");
 });
 
-test("normalizeReviewViewMode defaults to side_by_side and accepts supported comparison modes", () => {
-  assert.equal(normalizeReviewViewMode(undefined), "side_by_side");
-  assert.equal(normalizeReviewViewMode(null), "side_by_side");
-  assert.equal(normalizeReviewViewMode(""), "side_by_side");
-  assert.equal(normalizeReviewViewMode("focused_strip"), "focused_strip");
-  assert.equal(normalizeReviewViewMode(" FOCUSED_STRIP "), "focused_strip");
-  assert.equal(normalizeReviewViewMode("side_by_side"), "side_by_side");
-  assert.equal(normalizeReviewViewMode("anything-else"), "side_by_side");
+test("normalizeReviewViewMode defaults to two_panels and accepts only two supported modes", () => {
+  assert.equal(normalizeReviewViewMode(undefined), "two_panels");
+  assert.equal(normalizeReviewViewMode(null), "two_panels");
+  assert.equal(normalizeReviewViewMode(""), "two_panels");
+  assert.equal(normalizeReviewViewMode("line_by_line"), "line_by_line");
+  assert.equal(normalizeReviewViewMode(" line-by-line "), "line_by_line");
+  assert.equal(normalizeReviewViewMode("focused_strip"), "line_by_line");
+  assert.equal(normalizeReviewViewMode("two_panels"), "two_panels");
+  assert.equal(normalizeReviewViewMode("two-panels"), "two_panels");
+  assert.equal(normalizeReviewViewMode("side_by_side"), "two_panels");
+  assert.equal(normalizeReviewViewMode("anything-else"), "two_panels");
 });
 
 test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs", () => {

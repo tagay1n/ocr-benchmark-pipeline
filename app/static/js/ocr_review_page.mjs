@@ -40,6 +40,7 @@
         isLineSyncEnabledOutputFormat,
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
+        normalizeReviewViewMode,
         normalizeReconstructedRenderMode,
         resolveViewportScrollSyncUpdate,
         resolveEditorDrawerLayout,
@@ -80,6 +81,7 @@
         zoomPercent: "ocrReview.zoom.percent",
         magnifierZoom: "ocrReview.magnifier.zoom",
         reconstructedRenderMode: "ocrReview.reconstructed.render_mode",
+        reviewViewMode: "ocrReview.review.view_mode",
         editorFontSize: "ocrReview.editor.font_size",
         editorDrawerWidth: "ocrReview.editor.drawer_width",
       };
@@ -107,6 +109,8 @@
       const magnifierToggleBtn = document.getElementById("magnifier-toggle-btn");
       const toggleSourceBtn = document.getElementById("toggle-source-btn");
       const toggleReconstructedBtn = document.getElementById("toggle-reconstructed-btn");
+      const viewTwoPanelsBtn = document.getElementById("view-two-panels-btn");
+      const viewLineByLineBtn = document.getElementById("view-line-by-line-btn");
       const grid = document.querySelector(".grid");
       const sourcePanel = document.getElementById("source-panel");
       const reconstructedPanel = document.getElementById("reconstructed-panel");
@@ -208,7 +212,7 @@
           source: true,
           reconstructed: true,
         },
-        viewMode: "focused_strip",
+        viewMode: "two_panels",
         editorFontSize: EDITOR_FONT_SIZE_DEFAULT,
         editorDrawerWidth: null,
       };
@@ -517,7 +521,7 @@
       }
 
       function applyFocusedStripOverlay() {
-        if (state.viewMode !== "focused_strip") {
+        if (state.viewMode !== "line_by_line") {
           clearFocusedStripOverlay();
           return;
         }
@@ -545,9 +549,59 @@
       }
 
       function applyViewModeControls() {
-        state.viewMode = "focused_strip";
-        grid.classList.add("view-mode-focused-strip");
+        const isLineByLine = state.viewMode === "line_by_line";
+        if (viewTwoPanelsBtn instanceof HTMLButtonElement) {
+          viewTwoPanelsBtn.classList.toggle("active", !isLineByLine);
+          viewTwoPanelsBtn.setAttribute("aria-pressed", isLineByLine ? "false" : "true");
+        }
+        if (viewLineByLineBtn instanceof HTMLButtonElement) {
+          viewLineByLineBtn.classList.toggle("active", isLineByLine);
+          viewLineByLineBtn.setAttribute("aria-pressed", isLineByLine ? "true" : "false");
+        }
+        grid.classList.toggle("view-mode-line-by-line", isLineByLine);
+        grid.classList.toggle("view-mode-two-panels", !isLineByLine);
         applyFocusedStripOverlay();
+        renderLineReviewPanel();
+      }
+
+      function persistReviewViewMode() {
+        writeStorage(STORAGE_KEYS.reviewViewMode, state.viewMode);
+      }
+
+      function setReviewViewMode(mode, { persist = true } = {}) {
+        const nextMode = normalizeReviewViewMode(mode);
+        if (nextMode === state.viewMode) {
+          return;
+        }
+        state.viewMode = nextMode;
+        if (persist) {
+          persistReviewViewMode();
+        }
+        if (state.viewMode !== "line_by_line") {
+          setHoveredLine(null, null, { source: "view_mode" });
+        }
+        applyViewModeControls();
+        updateReviewUiState();
+        const selectedLayoutId = Number(state.selectedLayoutId);
+        const selectedOutput = outputByLayoutId(selectedLayoutId);
+        if (
+          state.viewMode === "line_by_line" &&
+          (!selectedOutput || !lineReviewRequiredOutput(selectedOutput))
+        ) {
+          const firstRequired = state.outputs.find((output) => lineReviewRequiredOutput(output));
+          if (firstRequired) {
+            selectOutput(firstRequired.layout_id, { scrollImageToLayout: true, isUserSelection: true });
+          }
+          return;
+        }
+        if (Number.isInteger(selectedLayoutId) && selectedLayoutId > 0) {
+          if (state.viewMode === "line_by_line") {
+            syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+          }
+          ensureLayoutVisible(selectedLayoutId, 8, {
+            preferVerticalCenter: state.viewMode === "line_by_line",
+          });
+        }
       }
 
       function applyPanelVisibility() {
@@ -1677,7 +1731,7 @@
           reviewBtn.disabled = true;
           return;
         }
-        if (!lineProgress.complete) {
+        if (state.viewMode === "line_by_line" && !lineProgress.complete) {
           reviewBtn.textContent = `Review lines (${lineProgress.missingTotal})`;
           reviewBtn.disabled = true;
           return;
@@ -2598,6 +2652,10 @@
         if (!lineReviewPanel) {
           return;
         }
+        if (state.viewMode !== "line_by_line") {
+          lineReviewPanel.hidden = true;
+          return;
+        }
         const selectedLayoutId = Number(state.selectedLayoutId);
         const selectedOutput = outputByLayoutId(selectedLayoutId);
         if (!selectedOutput || !lineReviewRequiredOutput(selectedOutput)) {
@@ -2835,7 +2893,11 @@
         applyReextractHoverStyles();
         applyLineHoverHighlights();
         applyFocusedStripOverlay();
-        syncHoveredLineFromLineReviewCursor(state.selectedLayoutId);
+        if (state.viewMode === "line_by_line") {
+          syncHoveredLineFromLineReviewCursor(state.selectedLayoutId);
+        } else {
+          setHoveredLine(null, null, { source: "view_mode" });
+        }
         renderLineReviewPanel();
       }
 
@@ -2946,7 +3008,7 @@
           setLineReviewCursor(normalized, firstUnapprovedLineIndex(normalized), { persist: false });
         }
         applySelectedStyles();
-        const preferVerticalCenter = state.viewMode === "focused_strip";
+        const preferVerticalCenter = state.viewMode === "line_by_line";
         const shouldAutoCenter = scrollImageToLayout || (isUserSelection && preferVerticalCenter);
         if (shouldAutoCenter) {
           ensureLayoutVisible(normalized, 8, { preferVerticalCenter });
@@ -3843,6 +3905,7 @@
           readStorage(STORAGE_KEYS.reconstructedRenderMode),
         );
         applyRenderModeUi();
+        state.viewMode = normalizeReviewViewMode(readStorage(STORAGE_KEYS.reviewViewMode));
         state.panelVisibility = normalizePanelVisibility(readStorage(STORAGE_KEYS.panelVisibility));
         applyPanelVisibility();
         state.pageId = pageId;
@@ -3906,6 +3969,12 @@
 
       toggleSourceBtn.addEventListener("click", () => togglePanel("source"));
       toggleReconstructedBtn.addEventListener("click", () => togglePanel("reconstructed"));
+      viewTwoPanelsBtn?.addEventListener("click", () => {
+        setReviewViewMode("two_panels");
+      });
+      viewLineByLineBtn?.addEventListener("click", () => {
+        setReviewViewMode("line_by_line");
+      });
       lineReviewPrevBtn?.addEventListener("click", () => {
         moveLineReviewCursor(-1);
       });
@@ -4250,7 +4319,7 @@
         sourceImageMagnifier.refresh();
         if (state.selectedLayoutId !== null) {
           ensureLayoutVisible(state.selectedLayoutId, 8, {
-            preferVerticalCenter: state.viewMode === "focused_strip",
+            preferVerticalCenter: state.viewMode === "line_by_line",
           });
         }
       });
