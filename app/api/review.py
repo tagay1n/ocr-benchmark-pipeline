@@ -68,6 +68,17 @@ def _extract_ocr_for_page_dynamic():
     return getattr(main_module, "extract_ocr_for_page", _extract_ocr_for_page)
 
 
+def _http_exception_from_value_error(
+    error: ValueError,
+    *,
+    not_found_messages: tuple[str, ...] = (),
+    default_status: int = 400,
+) -> HTTPException:
+    message = str(error)
+    status_code = 404 if message in not_found_messages else int(default_status)
+    return HTTPException(status_code=status_code, detail=message)
+
+
 def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
     emit_event(
         stage=STAGE_LAYOUT_DETECT,
@@ -192,9 +203,10 @@ def patch_layout_order_mode(
     try:
         return update_page_layout_order_mode(page_id, mode=payload.mode)
     except ValueError as error:
-        message = str(error)
-        status_code = 404 if message == "Page not found." else 400
-        raise HTTPException(status_code=status_code, detail=message) from error
+        raise _http_exception_from_value_error(
+            error,
+            not_found_messages=("Page not found.",),
+        ) from error
 
 
 @router.post("/api/pages/{page_id}/layouts/reorder")
@@ -203,9 +215,10 @@ def reorder_layouts(page_id: int, payload: ReorderLayoutsRequest | None = None) 
     try:
         return reorder_page_layouts(page_id, mode=mode)
     except ValueError as error:
-        message = str(error)
-        status_code = 404 if message == "Page not found." else 400
-        raise HTTPException(status_code=status_code, detail=message) from error
+        raise _http_exception_from_value_error(
+            error,
+            not_found_messages=("Page not found.",),
+        ) from error
 
 
 @router.get("/api/layout-review/next")
@@ -251,7 +264,7 @@ def create_page_layout(page_id: int, payload: CreateLayoutRequest) -> dict[str, 
             reading_order=payload.reading_order,
         )
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _http_exception_from_value_error(error) from error
     return {"layout": layout}
 
 
@@ -279,7 +292,7 @@ def put_page_caption_bindings(
     try:
         result = replace_caption_bindings(page_id, bindings_by_caption_id)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _http_exception_from_value_error(error) from error
     return result
 
 
@@ -299,10 +312,10 @@ def patch_layout(layout_id: int, payload: UpdateLayoutRequest) -> dict[str, obje
             y2=None if payload.bbox is None else payload.bbox.y2,
         )
     except ValueError as error:
-        message = str(error)
-        if message == "Layout not found.":
-            raise HTTPException(status_code=404, detail=message) from error
-        raise HTTPException(status_code=400, detail=message) from error
+        raise _http_exception_from_value_error(
+            error,
+            not_found_messages=("Layout not found.",),
+        ) from error
     return {"layout": layout}
 
 
@@ -311,7 +324,7 @@ def remove_layout(layout_id: int) -> dict[str, object]:
     try:
         delete_layout(layout_id)
     except ValueError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+        raise _http_exception_from_value_error(error, default_status=404) from error
     return {"deleted": True, "layout_id": layout_id}
 
 
@@ -332,7 +345,7 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
             page_id=page_id,
             message=f"Layout review completion failed: {error}",
         )
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _http_exception_from_value_error(error) from error
     emit_event(
         stage=STAGE_LAYOUT_REVIEW,
         event_type=EVENT_MANUAL_REVIEW_COMPLETED,
@@ -351,7 +364,7 @@ def page_ocr_outputs(page_id: int) -> dict[str, object]:
     try:
         outputs = list_ocr_outputs(page_id)
     except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _http_exception_from_value_error(error) from error
     return {"page_id": page_id, "count": len(outputs), "outputs": outputs}
 
 
@@ -360,10 +373,10 @@ def patch_ocr_output(layout_id: int, payload: UpdateOcrOutputRequest) -> dict[st
     try:
         output = update_ocr_output(layout_id, content=payload.content)
     except ValueError as error:
-        message = str(error)
-        if message == "OCR output not found.":
-            raise HTTPException(status_code=404, detail=message) from error
-        raise HTTPException(status_code=400, detail=message) from error
+        raise _http_exception_from_value_error(
+            error,
+            not_found_messages=("OCR output not found.",),
+        ) from error
     return {"output": output}
 
 
@@ -384,7 +397,7 @@ def complete_ocr_review(page_id: int) -> dict[str, object]:
             page_id=page_id,
             message=f"OCR review completion failed: {error}",
         )
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _http_exception_from_value_error(error) from error
     emit_event(
         stage=STAGE_OCR_REVIEW,
         event_type=EVENT_MANUAL_REVIEW_COMPLETED,
@@ -418,7 +431,7 @@ def run_final_export(payload: FinalExportRequest) -> dict[str, object]:
             event_type=EVENT_EXPORT_FAILED,
             message=f"Final dataset export failed: {error}",
         )
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        raise _http_exception_from_value_error(error) from error
 
     emit_event(
         stage=STAGE_FINALIZATION,
