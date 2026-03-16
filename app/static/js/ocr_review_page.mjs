@@ -2886,47 +2886,47 @@
         baselineLines,
         approved,
       }) {
+        if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= lineCount) {
+          return null;
+        }
         const slot = document.createElement("div");
-        slot.className = "line-review-slot";
+        slot.className = "line-review-slot is-clickable";
+        slot.dataset.lineIndex = String(lineIndex);
+        const isCurrent = lineIndex === currentIndex;
+        if (isCurrent) {
+          slot.classList.add("current");
+        }
+        if (approved.has(lineIndex)) {
+          slot.classList.add("is-approved");
+        }
 
         const sourceLane = document.createElement("div");
         sourceLane.className = "line-review-source-lane";
         const sourceLine = document.createElement("div");
         sourceLine.className = "line-review-source-line";
         sourceLane.appendChild(sourceLine);
+        slot.appendChild(sourceLane);
+        applyLineReviewHorizontalGeometry(sourceLine, output);
+        const lineBand =
+          resolveLineBandForLayout(output.layout_id, lineIndex) ||
+          lineBandFromLineIndex(lineIndex, lineCount);
+        renderLineReviewSourceLine(sourceLine, output, lineBand);
+
         const geminiLane = document.createElement("div");
         geminiLane.className = "line-review-gemini-lane";
         const geminiLine = document.createElement("div");
         geminiLine.className = "line-review-gemini-line";
         geminiLane.appendChild(geminiLine);
-        slot.appendChild(sourceLane);
         slot.appendChild(geminiLane);
-
-        if (!Number.isInteger(lineIndex) || lineIndex < 0 || lineIndex >= lineCount) {
-          return null;
-        }
-
-        slot.dataset.lineIndex = String(lineIndex);
-        slot.classList.add("is-clickable");
-        const isCurrent = lineIndex === currentIndex;
-        if (isCurrent) {
-          slot.classList.add("current");
-          geminiLine.classList.add("is-editable");
-          geminiLine.title = "Double-click to edit this line";
-        }
-        if (approved.has(lineIndex)) {
-          slot.classList.add("is-approved");
-        }
-
-        applyLineReviewHorizontalGeometry(sourceLine, output);
         applyLineReviewHorizontalGeometry(geminiLine, output);
-        const lineBand = resolveLineBandForLayout(output.layout_id, lineIndex) || lineBandFromLineIndex(lineIndex, lineCount);
-        renderLineReviewSourceLine(sourceLine, output, lineBand);
-
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
         geminiLine.textContent = currentText || " ";
         geminiLine.classList.toggle("is-changed", baselineText !== currentText);
+        if (isCurrent) {
+          geminiLine.classList.add("is-editable");
+          geminiLine.title = "Double-click to edit this line";
+        }
         return slot;
       }
 
@@ -2969,9 +2969,7 @@
         }
         if (state.viewMode !== "line_by_line") {
           lineReviewPanel.hidden = true;
-          if (lineReviewReel) {
-            lineReviewReel.innerHTML = "";
-          }
+          if (lineReviewReel) lineReviewReel.innerHTML = "";
           clearLineStatusHighlights();
           return;
         }
@@ -2979,9 +2977,7 @@
         const selectedOutput = outputByLayoutId(selectedLayoutId);
         if (!selectedOutput || !lineReviewRequiredOutput(selectedOutput)) {
           lineReviewPanel.hidden = true;
-          if (lineReviewReel) {
-            lineReviewReel.innerHTML = "";
-          }
+          if (lineReviewReel) lineReviewReel.innerHTML = "";
           clearLineStatusHighlights();
           return;
         }
@@ -4405,7 +4401,7 @@
       lineReviewResetBboxBtn?.addEventListener("click", () => {
         resetLineApprovalsForSelectedBbox();
       });
-      lineReviewReel?.addEventListener("click", (event) => {
+      const onLineReviewSlotClick = (event) => {
         const target = event.target;
         if (!(target instanceof Element)) {
           return;
@@ -4426,7 +4422,8 @@
         setLineReviewCursor(selectedLayoutId, nextIndex, { persist: true });
         syncHoveredLineFromLineReviewCursor(selectedLayoutId);
         renderLineReviewPanel();
-      });
+      };
+      lineReviewReel?.addEventListener("click", onLineReviewSlotClick);
       lineReviewReel?.addEventListener("dblclick", (event) => {
         const target = event.target;
         if (!(target instanceof Element)) {

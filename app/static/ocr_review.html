@@ -180,7 +180,7 @@
       .line-review-panel {
         margin-top: 8px;
         display: grid;
-        grid-template-columns: minmax(220px, auto) minmax(0, 420px) auto;
+        grid-template-columns: auto minmax(0, 1fr);
         gap: 10px;
         align-items: stretch;
         border: 1px solid var(--border);
@@ -193,11 +193,21 @@
         display: none;
       }
 
+      .line-review-sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+        width: max-content;
+        max-width: 150px;
+      }
+
       .line-review-meta {
         display: flex;
         flex-direction: column;
         gap: 4px;
         min-width: 0;
+        width: 100%;
       }
 
       .line-review-layout {
@@ -211,15 +221,18 @@
       .line-review-progress {
         color: var(--muted);
         font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .line-review-reel {
         display: flex;
         flex-direction: column;
         justify-content: center;
+        align-content: center;
         gap: 4px;
         min-height: 210px;
-        max-height: 260px;
         min-width: 0;
       }
 
@@ -325,9 +338,15 @@
 
       .line-review-actions {
         display: inline-flex;
+        flex-direction: column;
         gap: 6px;
-        align-items: center;
-        flex-wrap: wrap;
+        align-items: stretch;
+        flex-wrap: nowrap;
+        width: max-content;
+      }
+
+      .line-review-actions > button {
+        width: 100%;
       }
 
       .line-review-approve.approved {
@@ -1354,7 +1373,14 @@
         }
 
         .line-review-actions {
+          flex-direction: row;
+          width: 100%;
           justify-content: flex-start;
+          flex-wrap: wrap;
+        }
+
+        .line-review-actions > button {
+          width: auto;
         }
       }
     </style>
@@ -1424,18 +1450,20 @@
       </section>
 
       <section id="line-review-panel" class="line-review-panel" hidden>
-        <div class="line-review-meta">
-          <div id="line-review-layout" class="line-review-layout"></div>
-          <div id="line-review-progress" class="line-review-progress"></div>
+        <div class="line-review-sidebar">
+          <div class="line-review-meta">
+            <div id="line-review-layout" class="line-review-layout"></div>
+            <div id="line-review-progress" class="line-review-progress"></div>
+          </div>
+          <div class="line-review-actions">
+            <button id="line-review-prev-btn" class="secondary" type="button">Prev (↑)</button>
+            <button id="line-review-approve-btn" class="line-review-approve" type="button">Approve (A)</button>
+            <button id="line-review-next-btn" class="secondary" type="button">Next (↓)</button>
+            <button id="line-review-approve-bbox-btn" class="secondary" type="button">Approve bbox</button>
+            <button id="line-review-reset-bbox-btn" class="secondary" type="button">Reset bbox</button>
+          </div>
         </div>
         <div id="line-review-reel" class="line-review-reel" aria-live="polite"></div>
-        <div class="line-review-actions">
-          <button id="line-review-prev-btn" class="secondary" type="button">Prev (↑)</button>
-          <button id="line-review-approve-btn" class="line-review-approve" type="button">Approve (A)</button>
-          <button id="line-review-next-btn" class="secondary" type="button">Next (↓)</button>
-          <button id="line-review-approve-bbox-btn" class="secondary" type="button">Approve bbox</button>
-          <button id="line-review-reset-bbox-btn" class="secondary" type="button">Reset bbox</button>
-        </div>
       </section>
 
       <section class="grid">
