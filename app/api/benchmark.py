@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select, update
 
@@ -22,19 +20,14 @@ from ..pipeline_constants import (
     STAGE_LAYOUT_BENCHMARK,
 )
 from ..pipeline_runtime import emit_event, enqueue_job as _enqueue_job, register_default_handlers
+from .job_control_utils import coerce_int, resolve_main_callable, utc_now_iso
 from .schemas import RunLayoutBenchmarkRequest
 
 router = APIRouter()
 
 
 def _enqueue_job_dynamic():
-    from .. import main as main_module
-
-    return getattr(main_module, "enqueue_job", _enqueue_job)
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()
+    return resolve_main_callable("enqueue_job", _enqueue_job)
 
 
 def _top_layout_detection_configs(
@@ -49,10 +42,7 @@ def _top_layout_detection_configs(
         if not isinstance(row, dict):
             continue
         model_checkpoint = str(row.get("model_checkpoint") or "").strip()
-        try:
-            image_size = int(row.get("image_size"))  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            continue
+        image_size = coerce_int(row.get("image_size"), default=0, minimum=0)
         if not model_checkpoint or image_size <= 0:
             continue
         key = (model_checkpoint, image_size)
@@ -128,7 +118,7 @@ def stop_layout_benchmark_job() -> dict[str, object]:
     register_default_handlers()
     queued_cancelled = 0
     running_found = False
-    now = _utc_now()
+    now = utc_now_iso()
     with get_session() as session:
         running_found = (
             session.execute(

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-import json
 from typing import Any
 
 from fastapi import APIRouter
@@ -16,6 +14,7 @@ from ..pipeline_constants import (
     STAGE_OCR_EXTRACT,
 )
 from ..pipeline_runtime import emit_event, enqueue_job as _enqueue_job, register_default_handlers
+from .job_control_utils import coerce_int, parse_json_object, resolve_main_callable, utc_now_iso
 
 router = APIRouter()
 
@@ -25,33 +24,15 @@ _ACTIVE_JOB_STATUSES = ("queued", "running")
 
 
 def _enqueue_job_dynamic():
-    from .. import main as main_module
-
-    return getattr(main_module, "enqueue_job", _enqueue_job)
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).isoformat()
+    return resolve_main_callable("enqueue_job", _enqueue_job)
 
 
 def _load_job_payload(raw_payload: str | None) -> dict[str, Any]:
-    if not raw_payload:
-        return {}
-    try:
-        payload = json.loads(raw_payload)
-    except json.JSONDecodeError:
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return parse_json_object(raw_payload)
 
 
 def _load_job_result(raw_result: str | None) -> dict[str, Any]:
-    if not raw_result:
-        return {}
-    try:
-        result = json.loads(raw_result)
-    except json.JSONDecodeError:
-        return {}
-    return result if isinstance(result, dict) else {}
+    return parse_json_object(raw_result)
 
 
 def _is_batch_ocr_payload(payload: dict[str, Any]) -> bool:
@@ -84,11 +65,7 @@ def _job_total_layouts(payload: dict[str, Any]) -> int:
     layout_ids = _job_layout_ids(payload)
     if layout_ids:
         return len(layout_ids)
-    try:
-        fallback_total = int(payload.get("batch_total_layouts"))
-    except (TypeError, ValueError):
-        fallback_total = 0
-    return max(0, fallback_total)
+    return coerce_int(payload.get("batch_total_layouts"), default=0, minimum=0)
 
 
 def _job_processed_layouts(*, status: str, payload: dict[str, Any], result: dict[str, Any]) -> int:
@@ -98,21 +75,12 @@ def _job_processed_layouts(*, status: str, payload: dict[str, Any], result: dict
     if status == "running":
         progress = result.get("progress")
         if isinstance(progress, dict):
-            try:
-                processed = int(progress.get("processed_layouts", 0))
-            except (TypeError, ValueError):
-                processed = 0
+            processed = coerce_int(progress.get("processed_layouts"), default=0, minimum=0)
             return max(0, min(total_layouts, processed))
         return 0
     if status == "completed":
-        try:
-            extracted = int(result.get("extracted_count", 0))
-        except (TypeError, ValueError):
-            extracted = 0
-        try:
-            skipped = int(result.get("skipped_count", 0))
-        except (TypeError, ValueError):
-            skipped = 0
+        extracted = coerce_int(result.get("extracted_count"), default=0, minimum=0)
+        skipped = coerce_int(result.get("skipped_count"), default=0, minimum=0)
         completed = extracted + skipped
         if completed <= 0:
             completed = total_layouts
@@ -120,10 +88,7 @@ def _job_processed_layouts(*, status: str, payload: dict[str, Any], result: dict
     if status == "failed":
         progress = result.get("progress")
         if isinstance(progress, dict):
-            try:
-                processed = int(progress.get("processed_layouts", 0))
-            except (TypeError, ValueError):
-                processed = 0
+            processed = coerce_int(progress.get("processed_layouts"), default=0, minimum=0)
             return max(0, min(total_layouts, processed))
         return 0
     return 0
@@ -208,10 +173,7 @@ def _active_batch_run_progress() -> tuple[int, int]:
     for status, payload, result, _job_id in rows_for_run:
         if status not in {"queued", "running", "completed", "failed"}:
             continue
-        try:
-            hint = int(payload.get("batch_total_layouts", 0))
-        except (TypeError, ValueError):
-            hint = 0
+        hint = coerce_int(payload.get("batch_total_layouts"), default=0, minimum=0)
         run_total_hint = max(run_total_hint, hint)
         total_layouts += _job_total_layouts(payload)
         processed_layouts += _job_processed_layouts(status=status, payload=payload, result=result)
@@ -250,7 +212,7 @@ def run_batch_ocr_job() -> dict[str, object]:
     pending_by_page = _pending_layout_ids_by_page()
     considered_pages = len(pending_by_page)
     considered_layouts = sum(len(layout_ids) for layout_ids in pending_by_page.values())
-    batch_run_id = _utc_now()
+    batch_run_id = utc_now_iso()
     queued = 0
     already_queued_or_running = 0
     enqueue_job = _enqueue_job_dynamic()
@@ -317,7 +279,7 @@ def run_batch_ocr_job() -> dict[str, object]:
 @router.post("/api/ocr-batch/stop")
 def stop_batch_ocr_job() -> dict[str, object]:
     register_default_handlers()
-    now = _utc_now()
+    now = utc_now_iso()
     queued_ids: list[int] = []
     running_found = False
 
