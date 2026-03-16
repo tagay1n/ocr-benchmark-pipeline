@@ -2984,12 +2984,12 @@
         const paddingRight = Number.parseFloat(computed.paddingRight) || 0;
         const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
         const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
-        const availableWidth = Math.max(1, lineNode.clientWidth - paddingLeft - paddingRight - 1);
-        const availableHeight = Math.max(1, lineNode.clientHeight - paddingTop - paddingBottom - 1);
+        const availableWidth = Math.max(1, lineNode.clientWidth - paddingLeft - paddingRight);
+        const availableHeight = Math.max(1, lineNode.clientHeight - paddingTop - paddingBottom);
         if (availableWidth <= 2) {
           return;
         }
-        const targetWidth = availableWidth;
+        const targetWidth = Math.max(1, availableWidth - 2);
 
         const baseFontSize = Number.parseFloat(computed.fontSize) || 12;
         const baseLineHeightPx = Number.parseFloat(computed.lineHeight);
@@ -3079,14 +3079,22 @@
         }
 
         const scale = targetWidth / adjustedWidth;
-        const safeScale = Math.max(0.92, Math.min(1.12, scale));
-        lineNode.style.transform = `scaleX(${safeScale})`;
+        let appliedScale = Math.max(0.72, Math.min(1.12, scale));
+        lineNode.style.transform = `scaleX(${appliedScale})`;
 
-        const postScaleWidth = adjustedWidth * safeScale;
-        if (postScaleWidth > availableWidth + 0.5) {
-          const overflowScale = availableWidth / Math.max(1, adjustedWidth);
-          lineNode.style.transform = `scaleX(${Math.max(0.92, Math.min(1.02, overflowScale))})`;
-        } else if (postScaleWidth < availableWidth - 4 && spacesCount > 0) {
+        let postScaleWidth = adjustedWidth * appliedScale;
+        if (postScaleWidth > targetWidth + 0.25) {
+          const overflowScale = targetWidth / Math.max(1, adjustedWidth);
+          appliedScale = Math.max(0.65, Math.min(1.02, overflowScale));
+          lineNode.style.transform = `scaleX(${appliedScale})`;
+          postScaleWidth = adjustedWidth * appliedScale;
+        }
+        if (postScaleWidth > targetWidth + 0.25) {
+          const fontShrink = targetWidth / postScaleWidth;
+          const currentFontSize = Number.parseFloat(lineNode.style.fontSize) || fittedFontSize;
+          const nextFontSize = Math.max(9, currentFontSize * Math.max(0.82, fontShrink));
+          lineNode.style.fontSize = `${nextFontSize}px`;
+        } else if (postScaleWidth < targetWidth - 4 && spacesCount > 0) {
           if (Number.isFinite(currentWordSpacing)) {
             lineNode.style.wordSpacing = `${currentWordSpacing + 0.16}px`;
           }
