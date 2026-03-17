@@ -2642,6 +2642,19 @@
         if (!Number.isFinite(normalizedLineIndex)) {
           return null;
         }
+        const output = outputByLayoutId(normalizedLayoutId);
+        const totalLines = Math.max(
+          1,
+          output && lineReviewRequiredOutput(output)
+            ? logicalLinesForOutput(output).length
+            : outputLineCount(normalizedLayoutId),
+        );
+
+        // For line-review outputs, map line index deterministically to avoid drift from
+        // rendered-height approximation as reviewer moves through lines.
+        if (output && lineReviewRequiredOutput(output)) {
+          return lineBandFromLineIndex(normalizedLineIndex, totalLines);
+        }
 
         const contentNode = reconstructedContentNodeByLayout(normalizedLayoutId);
         if (contentNode) {
@@ -2660,7 +2673,6 @@
           }
         }
 
-        const totalLines = outputLineCount(normalizedLayoutId);
         return lineBandFromLineIndex(normalizedLineIndex, totalLines);
       }
 
@@ -3255,34 +3267,11 @@
             : maxByHeight;
         const fittedFontSize = Math.max(10, Math.min(56, maxByHeight, widthDrivenFontSize));
         const fittedLineHeightPx = fittedFontSize * lineHeightRatio;
-        const requiredScales = [];
-        for (const line of candidates) {
-          const measured = measureLineReviewTextMetrics(lineNode, String(line ?? "") || " ", {
-            fontSize: fittedFontSize,
-            lineHeight: fittedLineHeightPx,
-            wordSpacing: 0,
-            letterSpacing: 0,
-          });
-          const width = Number(measured.width);
-          if (!Number.isFinite(width) || width <= 0) {
-            continue;
-          }
-          requiredScales.push(targetWidth / width);
-        }
-        let commonScale = 1;
-        if (requiredScales.length > 0) {
-          const nonStretchScales = requiredScales
-            .map((scale) => Math.max(0.2, Math.min(1, Number(scale) || 1)))
-            .sort((left, right) => left - right);
-          const p99 = percentileFromSorted(nonStretchScales, 0.99);
-          commonScale = Number.isFinite(p99) ? Math.max(0.9, Math.min(1, p99)) : 1;
-        }
 
         return {
           targetWidth,
           fontSize: fittedFontSize,
           lineHeight: fittedLineHeightPx,
-          commonScale,
         };
       }
 
@@ -3313,7 +3302,7 @@
         });
         let width = Number(measured.width);
         if (!Number.isFinite(width) || width <= 0) {
-          lineNode.style.transform = `scaleX(${profile.commonScale})`;
+          lineNode.style.transform = "scaleX(1)";
           return;
         }
 
@@ -3357,7 +3346,8 @@
         }
 
         const fitScale = profile.targetWidth / Math.max(1e-6, width);
-        const appliedScale = Math.max(0.62, fitScale);
+        const maxExpandScale = 1.12;
+        const appliedScale = Math.max(0.62, Math.min(maxExpandScale, fitScale));
         lineNode.style.transform = `scaleX(${appliedScale})`;
       }
 
@@ -3583,16 +3573,7 @@
         const lines = logicalLinesForOutput(output);
         const currentIndex = currentLineReviewIndex(selectedLayoutId);
         const offset = Number(delta);
-        if (
-          Number.isFinite(offset) &&
-          offset > 0 &&
-          currentIndex >= lines.length - 1
-        ) {
-          updateApprovedLineIndexes(
-            selectedLayoutId,
-            Array.from({ length: lines.length }, (_, index) => index),
-            { persist: true },
-          );
+        if (Number.isFinite(offset) && offset > 0 && currentIndex >= lines.length - 1) {
           if (moveToNextPendingLineReviewOutput(selectedLayoutId)) {
             return;
           }
