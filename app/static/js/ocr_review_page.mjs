@@ -4291,8 +4291,31 @@
           }
         }
 
+        const median = (values, fallback = 0) => {
+          const sorted = (Array.isArray(values) ? values : [])
+            .map((value) => Number(value))
+            .filter((value) => Number.isFinite(value))
+            .sort((left, right) => left - right);
+          if (!sorted.length) {
+            return Number(fallback) || 0;
+          }
+          const middle = Math.floor(sorted.length / 2);
+          if (sorted.length % 2 === 1) {
+            return sorted[middle];
+          }
+          return (sorted[middle - 1] + sorted[middle]) / 2;
+        };
+
+        const nonLastWordSpacings = [];
+        const nonLastLetterSpacings = [];
+        const nonLastScales = [];
         const targetWidth = Math.max(1, availableWidth - 0.5);
-        for (const row of rows) {
+        for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+          const row = rows[rowIndex];
+          const isLastLine = lineCount > 1 && rowIndex === lineCount - 1;
+          if (isLastLine) {
+            continue;
+          }
           const text = row.querySelector(".recon-preserve-line-text");
           if (!(text instanceof HTMLElement)) {
             continue;
@@ -4306,12 +4329,15 @@
 
           text.style.wordSpacing = "0px";
           text.style.letterSpacing = "0px";
+          let appliedWordSpacing = 0;
+          let appliedLetterSpacing = 0;
           if (targetWidth > measuredWidth + 0.25) {
             const spacesCount = countStretchableSpaces(rawLine);
             if (spacesCount > 0) {
               const requiredExtra = targetWidth - measuredWidth;
               const wordSpacing = Math.max(0, Math.min(6, requiredExtra / spacesCount));
               text.style.wordSpacing = `${wordSpacing}px`;
+              appliedWordSpacing = wordSpacing;
               const wsWidth = Number(text.scrollWidth) || 0;
               if (wsWidth > 0) {
                 measuredWidth = wsWidth;
@@ -4324,6 +4350,7 @@
                 const requiredExtra = targetWidth - measuredWidth;
                 const letterSpacing = Math.max(0, Math.min(1.2, requiredExtra / (glyphsCount - 1)));
                 text.style.letterSpacing = `${letterSpacing}px`;
+                appliedLetterSpacing = letterSpacing;
                 const lsWidth = Number(text.scrollWidth) || 0;
                 if (lsWidth > 0) {
                   measuredWidth = lsWidth;
@@ -4337,6 +4364,51 @@
           text.style.transform = `scaleX(${appliedScale})`;
           if (!Number.isFinite(appliedScale) || appliedScale <= 0) {
             text.style.transform = "scaleX(1)";
+          } else {
+            nonLastWordSpacings.push(appliedWordSpacing);
+            nonLastLetterSpacings.push(appliedLetterSpacing);
+            nonLastScales.push(appliedScale);
+          }
+        }
+
+        if (lineCount > 1) {
+          const lastRow = rows[lineCount - 1];
+          const text = lastRow?.querySelector(".recon-preserve-line-text");
+          if (text instanceof HTMLElement) {
+            const rawLine = String(lastRow.dataset.rawLine ?? "").replace(/\u00A0/g, " ");
+            let measuredWidth = Number(text.scrollWidth) || 0;
+            if (Number.isFinite(measuredWidth) && measuredWidth > 0) {
+              const medianWordSpacing = Math.max(0, median(nonLastWordSpacings, 0));
+              const medianLetterSpacing = Math.max(0, median(nonLastLetterSpacings, 0));
+              const medianScale = Math.max(0.18, median(nonLastScales, 1));
+
+              text.style.wordSpacing = `${medianWordSpacing}px`;
+              text.style.letterSpacing = `${medianLetterSpacing}px`;
+              const spacedWidth = Number(text.scrollWidth) || 0;
+              if (Number.isFinite(spacedWidth) && spacedWidth > 0) {
+                measuredWidth = spacedWidth;
+              }
+
+              const fitScale = targetWidth / Math.max(1e-6, measuredWidth);
+              let appliedScale = 1;
+              if (fitScale < 1) {
+                // Overflow guard only.
+                appliedScale = Math.max(0.18, fitScale);
+              } else {
+                // Do not force-fill to full width for the last line in multi-line bbox.
+                appliedScale = Math.max(1, Math.min(medianScale, fitScale));
+              }
+              text.style.transform = `scaleX(${appliedScale})`;
+
+              // If no meaningful reference exists (e.g. all blank refs), fallback to previous behavior.
+              if (!rawLine.trim() || !Number.isFinite(appliedScale) || appliedScale <= 0) {
+                text.style.wordSpacing = "0px";
+                text.style.letterSpacing = "0px";
+                const fallbackWidth = Number(text.scrollWidth) || measuredWidth;
+                const fallbackScale = Math.max(0.18, targetWidth / Math.max(1e-6, fallbackWidth));
+                text.style.transform = `scaleX(${fallbackScale})`;
+              }
+            }
           }
         }
       }
