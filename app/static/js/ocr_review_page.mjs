@@ -2282,6 +2282,21 @@
         return null;
       }
 
+      function previousLineReviewOutputBefore(layoutId) {
+        const currentLayoutId = Number(layoutId);
+        if (!Number.isInteger(currentLayoutId) || currentLayoutId <= 0) {
+          return null;
+        }
+        let previous = null;
+        for (const output of sortedLineReviewOutputs()) {
+          if (Number(output.layout_id) === currentLayoutId) {
+            return previous;
+          }
+          previous = output;
+        }
+        return null;
+      }
+
       function moveToNextPendingLineReviewOutput(currentLayoutId) {
         const nextOutput = nextPendingLineReviewOutputAfter(currentLayoutId);
         if (!nextOutput) {
@@ -2290,6 +2305,19 @@
         const nextLayoutId = Number(nextOutput.layout_id);
         setLineReviewCursor(nextLayoutId, firstUnapprovedLineIndex(nextLayoutId), { persist: true });
         selectOutput(nextLayoutId, { scrollImageToLayout: true, isUserSelection: true });
+        return true;
+      }
+
+      function moveToPreviousLineReviewOutput(currentLayoutId) {
+        const previousOutput = previousLineReviewOutputBefore(currentLayoutId);
+        if (!previousOutput) {
+          return false;
+        }
+        const previousLayoutId = Number(previousOutput.layout_id);
+        const previousLines = logicalLinesForOutput(previousOutput);
+        const previousLastLineIndex = Math.max(0, previousLines.length - 1);
+        setLineReviewCursor(previousLayoutId, previousLastLineIndex, { persist: true });
+        selectOutput(previousLayoutId, { scrollImageToLayout: true, isUserSelection: true });
         return true;
       }
 
@@ -3539,7 +3567,13 @@
           ensureFocusedLineVisible(selectedLayoutId, focusedBand, 8, { preferVerticalCenter: false });
         }
 
-        lineReviewPrevBtn.disabled = currentIndex <= 0 || state.reviewSubmitInProgress || state.reextractInProgress;
+        const previousOutput = previousLineReviewOutputBefore(selectedLayoutId);
+        const canRetreatWithinCurrent = currentIndex > 0;
+        const canRetreatToPreviousOutput = Boolean(previousOutput);
+        lineReviewPrevBtn.disabled =
+          state.reviewSubmitInProgress ||
+          state.reextractInProgress ||
+          (!canRetreatWithinCurrent && !canRetreatToPreviousOutput);
         const nextPendingOutput = nextPendingLineReviewOutputAfter(selectedLayoutId);
         const canAdvanceWithinCurrent = currentIndex < lineCount - 1;
         const canAdvanceToNextOutput = Boolean(nextPendingOutput);
@@ -3578,6 +3612,15 @@
             return;
           }
           setLineReviewCursor(selectedLayoutId, lines.length - 1, { persist: true });
+          syncHoveredLineFromLineReviewCursor(selectedLayoutId);
+          renderLineReviewPanel();
+          return;
+        }
+        if (Number.isFinite(offset) && offset < 0 && currentIndex <= 0) {
+          if (moveToPreviousLineReviewOutput(selectedLayoutId)) {
+            return;
+          }
+          setLineReviewCursor(selectedLayoutId, 0, { persist: true });
           syncHoveredLineFromLineReviewCursor(selectedLayoutId);
           renderLineReviewPanel();
           return;
