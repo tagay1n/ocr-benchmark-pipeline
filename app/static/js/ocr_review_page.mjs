@@ -4276,11 +4276,18 @@
             return true;
           },
         });
-        const resolvedFont = `${bestFontSize}px`;
+        const comfortableLineHeightRatio = 1.18;
+        const comfortableLineHeightPx = Math.max(1, slotHeight * 0.96);
+        const comfortableFontSize = comfortableLineHeightPx / comfortableLineHeightRatio;
+        const resolvedFontSize = Math.max(2, Math.min(bestFontSize, comfortableFontSize));
+        const resolvedLineHeight = Math.min(slotHeight, resolvedFontSize * comfortableLineHeightRatio);
+        const resolvedFont = `${resolvedFontSize}px`;
+        const resolvedLineHeightPx = `${resolvedLineHeight}px`;
         for (const row of rows) {
           const text = row.querySelector(".recon-preserve-line-text");
           if (text instanceof HTMLElement) {
             text.style.fontSize = resolvedFont;
+            text.style.lineHeight = resolvedLineHeightPx;
           }
         }
 
