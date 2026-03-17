@@ -257,6 +257,14 @@ class OcrExtractInternalsTests(unittest.TestCase):
             ocr_extract._apply_section_header_heading_level("\n  ## Existing heading", 2),
             "## Existing heading",
         )
+        self.assertEqual(
+            ocr_extract._apply_section_header_heading_level("***Header***.", 4),
+            "#### Header.",
+        )
+        self.assertEqual(
+            ocr_extract._apply_section_header_heading_level("Header with *term*", 4),
+            "#### Header with *term*",
+        )
 
     def test_list_item_indent_level_and_normalization(self) -> None:
         self.assertEqual(ocr_extract._list_item_indent_level_from_x1(0.20, 0.20), 0)

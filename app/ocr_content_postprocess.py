@@ -13,6 +13,15 @@ SECTION_HEADER_LEVEL_H4 = 4
 LIST_INDENT_EPSILON = 0.03
 ORDERED_LIST_PREFIX_RE = re.compile(r"^\s*((?:\d+|[A-Za-zА-Яа-яЁё])[.)])\s+")
 UNORDERED_LIST_PREFIX_RE = re.compile(r"^\s*([-*•‣▪◦])\s+")
+TRAILING_PUNCT_CHARS = frozenset(".,;:!?…»”'\"\\)]}")
+FULL_EMPHASIS_WRAPPERS: tuple[tuple[str, str], ...] = (
+    ("***", "***"),
+    ("___", "___"),
+    ("**", "**"),
+    ("__", "__"),
+    ("*", "*"),
+    ("_", "_"),
+)
 
 
 def _layout_height_ratio(layout: dict[str, Any]) -> float:
@@ -96,6 +105,32 @@ def strip_markdown_heading_prefix(line: str) -> str:
     return re.sub(r"^\s{0,3}#{1,6}\s*", "", str(line)).strip()
 
 
+def strip_full_line_emphasis(text: str) -> str:
+    value = str(text).strip()
+    if not value:
+        return value
+    split_index = len(value)
+    while split_index > 0 and value[split_index - 1] in TRAILING_PUNCT_CHARS:
+        split_index -= 1
+    core = value[:split_index].strip()
+    trailing = value[split_index:]
+    changed = True
+    while changed and core:
+        changed = False
+        for opening, closing in FULL_EMPHASIS_WRAPPERS:
+            min_length = len(opening) + len(closing) + 1
+            if len(core) < min_length:
+                continue
+            if core.startswith(opening) and core.endswith(closing):
+                inner = core[len(opening) : len(core) - len(closing)].strip()
+                if not inner:
+                    continue
+                core = inner
+                changed = True
+                break
+    return f"{core}{trailing}".strip()
+
+
 def apply_section_header_heading_level(content: str, level: int) -> str:
     text = str(content).strip()
     if not text:
@@ -112,6 +147,7 @@ def apply_section_header_heading_level(content: str, level: int) -> str:
     heading_text = strip_markdown_heading_prefix(lines[first_content_idx])
     if not heading_text:
         heading_text = lines[first_content_idx].strip()
+    heading_text = strip_full_line_emphasis(heading_text)
     lines[first_content_idx] = f"{'#' * safe_level} {heading_text}".strip()
     return "\n".join(lines).strip()
 
@@ -191,4 +227,3 @@ def list_item_indent_levels_by_layout_id(layouts: list[dict[str, Any]]) -> dict[
         layout_id: list_item_indent_level_from_x1(x1, baseline_x1)
         for layout_id, x1 in list_items
     }
-

@@ -11,6 +11,22 @@ class OcrContentPostprocessModuleTests(unittest.TestCase):
         normalized = ocr_content_postprocess.apply_section_header_heading_level(text, 3)
         self.assertEqual(normalized, "### Existing heading")
 
+    def test_apply_section_header_heading_level_strips_full_line_emphasis(self) -> None:
+        self.assertEqual(
+            ocr_content_postprocess.apply_section_header_heading_level("***Header***", 4),
+            "#### Header",
+        )
+        self.assertEqual(
+            ocr_content_postprocess.apply_section_header_heading_level("***Header***.", 4),
+            "#### Header.",
+        )
+
+    def test_apply_section_header_heading_level_keeps_partial_emphasis(self) -> None:
+        self.assertEqual(
+            ocr_content_postprocess.apply_section_header_heading_level("Header with *term*", 3),
+            "### Header with *term*",
+        )
+
     def test_normalize_formula_latex_content_strips_wrappers(self) -> None:
         raw = "```latex\n$$x^2+y^2$$\n```"
         normalized = ocr_content_postprocess.normalize_formula_latex_content(raw)
@@ -29,4 +45,3 @@ class OcrContentPostprocessModuleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
