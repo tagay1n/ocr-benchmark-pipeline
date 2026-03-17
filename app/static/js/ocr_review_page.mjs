@@ -3386,11 +3386,53 @@
             }
           }
         }
+        if (profile.targetWidth < width - 0.25) {
+          const spacesCount = countStretchableSpaces(rawText);
+          if (spacesCount > 0) {
+            const requiredReduce = width - profile.targetWidth;
+            wordSpacing = -Math.max(0, Math.min(1.8, requiredReduce / spacesCount));
+            textNode.style.wordSpacing = `${wordSpacing}px`;
+            const wsMeasured = measureLineReviewTextMetrics(textNode, rawText, {
+              fontSize: profile.fontSize,
+              lineHeight: profile.lineHeight,
+              wordSpacing,
+              letterSpacing,
+            });
+            const wsWidth = Number(wsMeasured.width);
+            if (Number.isFinite(wsWidth) && wsWidth > 0) {
+              width = wsWidth;
+            }
+          }
+          if (profile.targetWidth < width - 0.25) {
+            const glyphsCount = countStretchableGlyphs(rawText);
+            if (glyphsCount > 1) {
+              const requiredReduce = width - profile.targetWidth;
+              letterSpacing = -Math.max(0, Math.min(0.35, requiredReduce / (glyphsCount - 1)));
+              textNode.style.letterSpacing = `${letterSpacing}px`;
+              const lsMeasured = measureLineReviewTextMetrics(textNode, rawText, {
+                fontSize: profile.fontSize,
+                lineHeight: profile.lineHeight,
+                wordSpacing,
+                letterSpacing,
+              });
+              const lsWidth = Number(lsMeasured.width);
+              if (Number.isFinite(lsWidth) && lsWidth > 0) {
+                width = lsWidth;
+              }
+            }
+          }
+        }
 
         const fitScale = profile.targetWidth / Math.max(1e-6, width);
         const maxExpandScale = 1.12;
-        const appliedScale = Math.max(0.62, Math.min(maxExpandScale, fitScale));
+        let appliedScale = Math.max(0.12, Math.min(maxExpandScale, fitScale));
         textNode.style.transform = `scaleX(${appliedScale})`;
+        const renderedWidth = Number(textNode.getBoundingClientRect().width);
+        if (Number.isFinite(renderedWidth) && renderedWidth > profile.targetWidth + 0.25) {
+          const overflowScale = profile.targetWidth / Math.max(1e-6, renderedWidth);
+          appliedScale = Math.max(0.08, appliedScale * overflowScale);
+          textNode.style.transform = `scaleX(${appliedScale})`;
+        }
       }
 
       function openEditorForLine(layoutId, lineIndex) {
