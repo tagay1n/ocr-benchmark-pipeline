@@ -136,10 +136,10 @@
       const LINE_REVIEW_MIN_WIDTH_PX = 120;
       const LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK = 0.08;
       const LINE_REVIEW_MAX_WIDTH_RATIO = 0.94;
-      const SOURCE_INK_MIN_DARK_ALPHA = 20;
+      const SOURCE_INK_MIN_DARK_ALPHA = 24;
       const SOURCE_INK_MIN_CONTRAST = 18;
-      const SOURCE_INK_MEAN_OFFSET = 24;
-      const SOURCE_INK_DARK_PIXEL_RATIO = 0.04;
+      const SOURCE_INK_MEAN_OFFSET = 30;
+      const SOURCE_INK_DARK_PIXEL_RATIO = 0.18;
       const SOURCE_INK_MIN_RATIO = 0.2;
 
       const reviewBtn = document.getElementById("review-btn");
@@ -3008,7 +3008,7 @@
           }
           const rawTopPx = bboxHeightPx * Number(band.topRatio || 0);
           const rawHeightPx = Math.max(1, bboxHeightPx * Number(band.heightRatio || 0));
-          const verticalPadPx = rawHeightPx * 0.1;
+          const verticalPadPx = rawHeightPx * 0.04;
           const cropTop = Math.max(0, bboxTopPx + rawTopPx - verticalPadPx);
           const cropBottom = Math.min(
             analysis.imageHeight,
@@ -3189,7 +3189,104 @@
         };
       }
 
-      function fitLineReviewGeminiText(lineNode, text) {
+      function percentileFromSorted(values, percentile) {
+        if (!Array.isArray(values) || values.length === 0) {
+          return 0;
+        }
+        const clampedPercentile = Math.max(0, Math.min(1, Number(percentile) || 0));
+        if (values.length === 1) {
+          return Number(values[0]) || 0;
+        }
+        const rawIndex = (values.length - 1) * clampedPercentile;
+        const lowerIndex = Math.floor(rawIndex);
+        const upperIndex = Math.ceil(rawIndex);
+        const lower = Number(values[lowerIndex]) || 0;
+        const upper = Number(values[upperIndex]) || 0;
+        if (lowerIndex === upperIndex) {
+          return lower;
+        }
+        const ratio = rawIndex - lowerIndex;
+        return lower + (upper - lower) * ratio;
+      }
+
+      function resolveLineReviewCommonFitProfile(lineNode, allLines) {
+        if (!(lineNode instanceof HTMLElement)) {
+          return null;
+        }
+        const computed = window.getComputedStyle(lineNode);
+        const paddingLeft = Number.parseFloat(computed.paddingLeft) || 0;
+        const paddingRight = Number.parseFloat(computed.paddingRight) || 0;
+        const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
+        const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+        const availableWidth = Math.max(1, lineNode.clientWidth - paddingLeft - paddingRight);
+        const availableHeight = Math.max(1, lineNode.clientHeight - paddingTop - paddingBottom);
+        if (availableWidth <= 2) {
+          return null;
+        }
+        const targetWidth = Math.max(1, availableWidth - 2);
+
+        const baseFontSize = Number.parseFloat(computed.fontSize) || 12;
+        const baseLineHeightPx = Number.parseFloat(computed.lineHeight);
+        const lineHeightRatio =
+          Number.isFinite(baseLineHeightPx) && baseFontSize > 0
+            ? baseLineHeightPx / baseFontSize
+            : 1.2;
+        const maxByHeight = availableHeight / Math.max(1e-6, lineHeightRatio);
+        const candidates = Array.isArray(allLines) ? allLines : [];
+        const baseWidths = [];
+        for (const line of candidates) {
+          const measured = measureLineReviewTextMetrics(lineNode, String(line ?? "") || " ", {
+            fontSize: baseFontSize,
+            lineHeight: baseFontSize * lineHeightRatio,
+            wordSpacing: 0,
+            letterSpacing: 0,
+          });
+          const width = Number(measured.width);
+          if (!Number.isFinite(width) || width <= 0) {
+            continue;
+          }
+          baseWidths.push(width);
+        }
+        const sortedBaseWidths = baseWidths.slice().sort((left, right) => left - right);
+        const dominantBaseWidth = percentileFromSorted(sortedBaseWidths, 0.75);
+        const widthDrivenFontSize =
+          dominantBaseWidth > 0
+            ? baseFontSize * (targetWidth / dominantBaseWidth)
+            : maxByHeight;
+        const fittedFontSize = Math.max(10, Math.min(56, maxByHeight, widthDrivenFontSize));
+        const fittedLineHeightPx = fittedFontSize * lineHeightRatio;
+        const requiredScales = [];
+        for (const line of candidates) {
+          const measured = measureLineReviewTextMetrics(lineNode, String(line ?? "") || " ", {
+            fontSize: fittedFontSize,
+            lineHeight: fittedLineHeightPx,
+            wordSpacing: 0,
+            letterSpacing: 0,
+          });
+          const width = Number(measured.width);
+          if (!Number.isFinite(width) || width <= 0) {
+            continue;
+          }
+          requiredScales.push(targetWidth / width);
+        }
+        let commonScale = 1;
+        if (requiredScales.length > 0) {
+          const nonStretchScales = requiredScales
+            .map((scale) => Math.max(0.2, Math.min(1, Number(scale) || 1)))
+            .sort((left, right) => left - right);
+          const p99 = percentileFromSorted(nonStretchScales, 0.99);
+          commonScale = Number.isFinite(p99) ? Math.max(0.9, Math.min(1, p99)) : 1;
+        }
+
+        return {
+          targetWidth,
+          fontSize: fittedFontSize,
+          lineHeight: fittedLineHeightPx,
+          commonScale,
+        };
+      }
+
+      function fitLineReviewGeminiText(lineNode, text, fitProfile = null) {
         if (!(lineNode instanceof HTMLElement)) {
           return;
         }
@@ -3201,126 +3298,67 @@
         if (!rawText) {
           return;
         }
-        const computed = window.getComputedStyle(lineNode);
-        const paddingLeft = Number.parseFloat(computed.paddingLeft) || 0;
-        const paddingRight = Number.parseFloat(computed.paddingRight) || 0;
-        const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
-        const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
-        const availableWidth = Math.max(1, lineNode.clientWidth - paddingLeft - paddingRight);
-        const availableHeight = Math.max(1, lineNode.clientHeight - paddingTop - paddingBottom);
-        if (availableWidth <= 2) {
+        const profile = fitProfile || resolveLineReviewCommonFitProfile(lineNode, [rawText]);
+        if (!profile) {
           return;
         }
-        const targetWidth = Math.max(1, availableWidth - 2);
+        lineNode.style.fontSize = `${profile.fontSize}px`;
+        lineNode.style.lineHeight = `${profile.lineHeight}px`;
 
-        const baseFontSize = Number.parseFloat(computed.fontSize) || 12;
-        const baseLineHeightPx = Number.parseFloat(computed.lineHeight);
-        const lineHeightRatio =
-          Number.isFinite(baseLineHeightPx) && baseFontSize > 0
-            ? baseLineHeightPx / baseFontSize
-            : 1.2;
-        const baseMetrics = measureLineReviewTextMetrics(lineNode, rawText, {
-          fontSize: baseFontSize,
-          lineHeight: baseFontSize * lineHeightRatio,
+        const measured = measureLineReviewTextMetrics(lineNode, rawText, {
+          fontSize: profile.fontSize,
+          lineHeight: profile.lineHeight,
+          wordSpacing: 0,
+          letterSpacing: 0,
         });
-        if (!Number.isFinite(baseMetrics.width) || baseMetrics.width <= 0) {
+        let width = Number(measured.width);
+        if (!Number.isFinite(width) || width <= 0) {
+          lineNode.style.transform = `scaleX(${profile.commonScale})`;
           return;
         }
-        const maxByWidth = baseFontSize * (targetWidth / baseMetrics.width);
-        const maxByHeight = availableHeight / Math.max(1e-6, lineHeightRatio);
-        const fittedFontSize = Math.max(10, Math.min(56, maxByWidth, maxByHeight));
-        lineNode.style.fontSize = `${fittedFontSize}px`;
 
-        let currentWordSpacing = 0;
-        let currentLetterSpacing = 0;
-        const fittedLineHeightPx = fittedFontSize * lineHeightRatio;
-
-        const tuneSpacing = (property, minValue, maxValue, iterations = 10) => {
-          let low = Number(minValue);
-          let high = Number(maxValue);
-          let best = 0;
-          let bestDiff = Number.POSITIVE_INFINITY;
-          for (let idx = 0; idx < iterations; idx += 1) {
-            const mid = (low + high) / 2;
-            const metrics =
-              property === "wordSpacing"
-                ? measureLineReviewTextMetrics(lineNode, rawText, {
-                    fontSize: fittedFontSize,
-                    lineHeight: fittedLineHeightPx,
-                    wordSpacing: mid,
-                    letterSpacing: currentLetterSpacing,
-                  })
-                : measureLineReviewTextMetrics(lineNode, rawText, {
-                    fontSize: fittedFontSize,
-                    lineHeight: fittedLineHeightPx,
-                    wordSpacing: currentWordSpacing,
-                    letterSpacing: mid,
-                  });
-            const width = Number(metrics.width);
-            if (!Number.isFinite(width) || width <= 0) {
-              continue;
-            }
-            const diff = Math.abs(targetWidth - width);
-            if (diff < bestDiff) {
-              bestDiff = diff;
-              best = mid;
-            }
-            if (width < targetWidth) {
-              low = mid;
-            } else {
-              high = mid;
+        let wordSpacing = 0;
+        let letterSpacing = 0;
+        if (profile.targetWidth > width + 0.25) {
+          const spacesCount = countStretchableSpaces(rawText);
+          if (spacesCount > 0) {
+            const requiredExtra = profile.targetWidth - width;
+            wordSpacing = Math.max(0, Math.min(6, requiredExtra / spacesCount));
+            lineNode.style.wordSpacing = `${wordSpacing}px`;
+            const wsMeasured = measureLineReviewTextMetrics(lineNode, rawText, {
+              fontSize: profile.fontSize,
+              lineHeight: profile.lineHeight,
+              wordSpacing,
+              letterSpacing,
+            });
+            const wsWidth = Number(wsMeasured.width);
+            if (Number.isFinite(wsWidth) && wsWidth > 0) {
+              width = wsWidth;
             }
           }
-          lineNode.style[property] = `${best}px`;
-          if (property === "wordSpacing") {
-            currentWordSpacing = best;
-          } else {
-            currentLetterSpacing = best;
+          if (profile.targetWidth > width + 0.25) {
+            const glyphsCount = countStretchableGlyphs(rawText);
+            if (glyphsCount > 1) {
+              const requiredExtra = profile.targetWidth - width;
+              letterSpacing = Math.max(0, Math.min(1.2, requiredExtra / (glyphsCount - 1)));
+              lineNode.style.letterSpacing = `${letterSpacing}px`;
+              const lsMeasured = measureLineReviewTextMetrics(lineNode, rawText, {
+                fontSize: profile.fontSize,
+                lineHeight: profile.lineHeight,
+                wordSpacing,
+                letterSpacing,
+              });
+              const lsWidth = Number(lsMeasured.width);
+              if (Number.isFinite(lsWidth) && lsWidth > 0) {
+                width = lsWidth;
+              }
+            }
           }
-        };
-
-        const spacesCount = countStretchableSpaces(rawText);
-        if (spacesCount > 0) {
-          tuneSpacing("wordSpacing", -1.8, 4.8, 11);
         }
 
-        const glyphsCount = countStretchableGlyphs(rawText);
-        if (glyphsCount > 0) {
-          tuneSpacing("letterSpacing", -0.22, 0.95, 11);
-        }
-
-        const adjustedMetrics = measureLineReviewTextMetrics(lineNode, rawText, {
-          fontSize: fittedFontSize,
-          lineHeight: fittedLineHeightPx,
-          wordSpacing: currentWordSpacing,
-          letterSpacing: currentLetterSpacing,
-        });
-        const adjustedWidth = Number(adjustedMetrics.width);
-        if (!Number.isFinite(adjustedWidth) || adjustedWidth <= 0) {
-          return;
-        }
-
-        const scale = targetWidth / adjustedWidth;
-        let appliedScale = Math.max(0.72, Math.min(1.12, scale));
+        const fitScale = profile.targetWidth / Math.max(1e-6, width);
+        const appliedScale = Math.max(0.62, fitScale);
         lineNode.style.transform = `scaleX(${appliedScale})`;
-
-        let postScaleWidth = adjustedWidth * appliedScale;
-        if (postScaleWidth > targetWidth + 0.25) {
-          const overflowScale = targetWidth / Math.max(1, adjustedWidth);
-          appliedScale = Math.max(0.65, Math.min(1.02, overflowScale));
-          lineNode.style.transform = `scaleX(${appliedScale})`;
-          postScaleWidth = adjustedWidth * appliedScale;
-        }
-        if (postScaleWidth > targetWidth + 0.25) {
-          const fontShrink = targetWidth / postScaleWidth;
-          const currentFontSize = Number.parseFloat(lineNode.style.fontSize) || fittedFontSize;
-          const nextFontSize = Math.max(9, currentFontSize * Math.max(0.82, fontShrink));
-          lineNode.style.fontSize = `${nextFontSize}px`;
-        } else if (postScaleWidth < targetWidth - 4 && spacesCount > 0) {
-          if (Number.isFinite(currentWordSpacing)) {
-            lineNode.style.wordSpacing = `${currentWordSpacing + 0.16}px`;
-          }
-        }
       }
 
       function openEditorForLine(layoutId, lineIndex) {
@@ -3417,12 +3455,17 @@
         return slot;
       }
 
-      function refitLineReviewGeminiLines() {
+      function refitLineReviewGeminiLines(output, lines) {
         if (!(lineReviewReel instanceof HTMLElement)) {
           return;
         }
+        const firstLineNode = lineReviewReel.querySelector(".line-review-gemini-line[data-raw-text]");
+        const fitProfile =
+          firstLineNode instanceof HTMLElement
+            ? resolveLineReviewCommonFitProfile(firstLineNode, lines)
+            : null;
         for (const lineNode of lineReviewReel.querySelectorAll(".line-review-gemini-line[data-raw-text]")) {
-          fitLineReviewGeminiText(lineNode, lineNode.dataset.rawText || "");
+          fitLineReviewGeminiText(lineNode, lineNode.dataset.rawText || "", fitProfile);
         }
       }
 
@@ -3458,7 +3501,7 @@
           }
         }
         requestAnimationFrame(() => {
-          refitLineReviewGeminiLines();
+          refitLineReviewGeminiLines(output, lines);
         });
       }
 
@@ -4197,7 +4240,7 @@
         const lineCount = rows.length;
         const slotHeight = Math.max(1, availableHeight / lineCount);
         container.style.setProperty("--recon-line-slot-height", `${slotHeight}px`);
-        const sourceWidthRatios = estimateSourceLineWidthRatios(output);
+        void output;
 
         for (const row of rows) {
           const text = row.querySelector(".recon-preserve-line-text");
@@ -4241,23 +4284,52 @@
           }
         }
 
-        for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-          const row = rows[rowIndex];
+        const targetWidth = Math.max(1, availableWidth - 0.5);
+        for (const row of rows) {
           const text = row.querySelector(".recon-preserve-line-text");
-          if (text instanceof HTMLElement) {
-            const textWidth = Number(text.scrollWidth) || 0;
-            let textScale = 1;
-            if (textWidth > 0) {
-              const ratioRaw = Number(sourceWidthRatios[rowIndex]);
-              const sourceRatio =
-                Number.isFinite(ratioRaw) && ratioRaw > 0
-                  ? Math.max(SOURCE_INK_MIN_RATIO, Math.min(1, ratioRaw))
-                  : 1;
-              const targetWidth = Math.max(1, availableWidth * sourceRatio);
-              textScale = (targetWidth - 0.5) / textWidth;
+          if (!(text instanceof HTMLElement)) {
+            continue;
+          }
+          const rawLine = String(row.dataset.rawLine ?? "").replace(/\u00A0/g, " ");
+          let measuredWidth = Number(text.scrollWidth) || 0;
+          if (!Number.isFinite(measuredWidth) || measuredWidth <= 0) {
+            text.style.transform = "scaleX(1)";
+            continue;
+          }
+
+          text.style.wordSpacing = "0px";
+          text.style.letterSpacing = "0px";
+          if (targetWidth > measuredWidth + 0.25) {
+            const spacesCount = countStretchableSpaces(rawLine);
+            if (spacesCount > 0) {
+              const requiredExtra = targetWidth - measuredWidth;
+              const wordSpacing = Math.max(0, Math.min(6, requiredExtra / spacesCount));
+              text.style.wordSpacing = `${wordSpacing}px`;
+              const wsWidth = Number(text.scrollWidth) || 0;
+              if (wsWidth > 0) {
+                measuredWidth = wsWidth;
+              }
             }
-            textScale = Math.max(0.18, Math.min(2.8, textScale));
-            text.style.transform = `scaleX(${textScale})`;
+
+            if (targetWidth > measuredWidth + 0.25) {
+              const glyphsCount = countStretchableGlyphs(rawLine);
+              if (glyphsCount > 1) {
+                const requiredExtra = targetWidth - measuredWidth;
+                const letterSpacing = Math.max(0, Math.min(1.2, requiredExtra / (glyphsCount - 1)));
+                text.style.letterSpacing = `${letterSpacing}px`;
+                const lsWidth = Number(text.scrollWidth) || 0;
+                if (lsWidth > 0) {
+                  measuredWidth = lsWidth;
+                }
+              }
+            }
+          }
+
+          const fitScale = targetWidth / Math.max(1e-6, measuredWidth);
+          const appliedScale = Math.max(0.18, fitScale);
+          text.style.transform = `scaleX(${appliedScale})`;
+          if (!Number.isFinite(appliedScale) || appliedScale <= 0) {
+            text.style.transform = "scaleX(1)";
           }
         }
       }
