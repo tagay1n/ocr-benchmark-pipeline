@@ -2416,36 +2416,45 @@
           return;
         }
         const selectedLayoutId = Number(state.selectedLayoutId);
-        const output = outputByLayoutId(selectedLayoutId);
-        if (!output || !lineReviewRequiredOutput(output)) {
-          return;
-        }
-        const lineCount = logicalLinesForOutput(output).length;
-        if (lineCount <= 0) {
-          return;
-        }
-        const approved = approvedLineSet(selectedLayoutId, lineCount);
-        const currentIndex = currentLineReviewIndex(selectedLayoutId);
-        const reconItem = reconstructionSurface.querySelector(`.recon-item[data-layout-id="${selectedLayoutId}"]`);
-        const sourceBox = sourceOverlay.querySelector(`.box[data-layout-id="${selectedLayoutId}"]`);
-        if (!reconItem && !sourceBox) {
-          return;
-        }
-        for (let index = 0; index < lineCount; index += 1) {
-          let statusClass = "";
-          if (index === currentIndex) {
-            statusClass = "current";
-          } else if (approved.has(index)) {
-            statusClass = "approved";
-          } else {
+        for (const output of state.outputs) {
+          if (!lineReviewRequiredOutput(output)) {
             continue;
           }
-          const band = resolveLineBandForLayout(selectedLayoutId, index);
-          if (!band) {
+          const layoutId = Number(output.layout_id);
+          if (!Number.isInteger(layoutId) || layoutId <= 0) {
             continue;
           }
-          appendLineStatusMarker(reconItem, `recon-line-status ${statusClass}`, band);
-          appendLineStatusMarker(sourceBox, `box-line-status ${statusClass}`, band);
+          const lineCount = logicalLinesForOutput(output).length;
+          if (lineCount <= 0) {
+            continue;
+          }
+          const approved = approvedLineSet(layoutId, lineCount);
+          const currentIndex = layoutId === selectedLayoutId ? currentLineReviewIndex(layoutId) : -1;
+          const reconItem = reconstructionSurface.querySelector(`.recon-item[data-layout-id="${layoutId}"]`);
+          const sourceBox = sourceOverlay.querySelector(`.box[data-layout-id="${layoutId}"]`);
+          if (!reconItem && !sourceBox) {
+            continue;
+          }
+
+          for (let index = 0; index < lineCount; index += 1) {
+            if (!approved.has(index) || index === currentIndex) {
+              continue;
+            }
+            const band = resolveLineBandForLayout(layoutId, index);
+            if (!band) {
+              continue;
+            }
+            appendLineStatusMarker(reconItem, "recon-line-status approved", band);
+            appendLineStatusMarker(sourceBox, "box-line-status approved", band);
+          }
+
+          if (currentIndex >= 0) {
+            const currentBand = resolveLineBandForLayout(layoutId, currentIndex);
+            if (currentBand) {
+              appendLineStatusMarker(reconItem, "recon-line-status current", currentBand);
+              appendLineStatusMarker(sourceBox, "box-line-status current", currentBand);
+            }
+          }
         }
       }
 
@@ -3307,11 +3316,16 @@
         if (!(lineNode instanceof HTMLElement)) {
           return;
         }
+        const textNode = lineNode.querySelector(".line-review-gemini-line-text");
+        if (!(textNode instanceof HTMLElement)) {
+          return;
+        }
         const rawText = String(text ?? "");
-        lineNode.style.wordSpacing = "0px";
-        lineNode.style.letterSpacing = "0px";
-        lineNode.style.transform = "scaleX(1)";
-        lineNode.style.fontSize = "";
+        textNode.style.wordSpacing = "0px";
+        textNode.style.letterSpacing = "0px";
+        textNode.style.transform = "scaleX(1)";
+        textNode.style.fontSize = "";
+        textNode.style.lineHeight = "";
         if (!rawText) {
           return;
         }
@@ -3319,10 +3333,10 @@
         if (!profile) {
           return;
         }
-        lineNode.style.fontSize = `${profile.fontSize}px`;
-        lineNode.style.lineHeight = `${profile.lineHeight}px`;
+        textNode.style.fontSize = `${profile.fontSize}px`;
+        textNode.style.lineHeight = `${profile.lineHeight}px`;
 
-        const measured = measureLineReviewTextMetrics(lineNode, rawText, {
+        const measured = measureLineReviewTextMetrics(textNode, rawText, {
           fontSize: profile.fontSize,
           lineHeight: profile.lineHeight,
           wordSpacing: 0,
@@ -3330,7 +3344,7 @@
         });
         let width = Number(measured.width);
         if (!Number.isFinite(width) || width <= 0) {
-          lineNode.style.transform = "scaleX(1)";
+          textNode.style.transform = "scaleX(1)";
           return;
         }
 
@@ -3341,8 +3355,8 @@
           if (spacesCount > 0) {
             const requiredExtra = profile.targetWidth - width;
             wordSpacing = Math.max(0, Math.min(6, requiredExtra / spacesCount));
-            lineNode.style.wordSpacing = `${wordSpacing}px`;
-            const wsMeasured = measureLineReviewTextMetrics(lineNode, rawText, {
+            textNode.style.wordSpacing = `${wordSpacing}px`;
+            const wsMeasured = measureLineReviewTextMetrics(textNode, rawText, {
               fontSize: profile.fontSize,
               lineHeight: profile.lineHeight,
               wordSpacing,
@@ -3358,8 +3372,8 @@
             if (glyphsCount > 1) {
               const requiredExtra = profile.targetWidth - width;
               letterSpacing = Math.max(0, Math.min(1.2, requiredExtra / (glyphsCount - 1)));
-              lineNode.style.letterSpacing = `${letterSpacing}px`;
-              const lsMeasured = measureLineReviewTextMetrics(lineNode, rawText, {
+              textNode.style.letterSpacing = `${letterSpacing}px`;
+              const lsMeasured = measureLineReviewTextMetrics(textNode, rawText, {
                 fontSize: profile.fontSize,
                 lineHeight: profile.lineHeight,
                 wordSpacing,
@@ -3376,7 +3390,7 @@
         const fitScale = profile.targetWidth / Math.max(1e-6, width);
         const maxExpandScale = 1.12;
         const appliedScale = Math.max(0.62, Math.min(maxExpandScale, fitScale));
-        lineNode.style.transform = `scaleX(${appliedScale})`;
+        textNode.style.transform = `scaleX(${appliedScale})`;
       }
 
       function openEditorForLine(layoutId, lineIndex) {
@@ -3456,6 +3470,9 @@
         geminiLane.className = "line-review-gemini-lane";
         const geminiLine = document.createElement("div");
         geminiLine.className = "line-review-gemini-line";
+        const geminiLineText = document.createElement("span");
+        geminiLineText.className = "line-review-gemini-line-text";
+        geminiLine.appendChild(geminiLineText);
         geminiLane.appendChild(geminiLine);
         slot.appendChild(geminiLane);
         applyLineReviewLaneHeights(sourceLane, geminiLane, displayGeometry.heightPx);
@@ -3463,7 +3480,7 @@
         applyLineReviewHorizontalGeometry(geminiLine, output, displayGeometry);
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
-        geminiLine.textContent = currentText || " ";
+        geminiLineText.textContent = currentText || " ";
         geminiLine.dataset.rawText = currentText;
         geminiLine.classList.toggle("is-changed", baselineText !== currentText);
         if (isCurrent) {
