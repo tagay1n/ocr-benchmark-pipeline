@@ -208,6 +208,37 @@ export function renderMarkdownInto(container, markdown, { onRendered } = {}) {
   });
 }
 
+export function renderMarkdownInlineInto(container, markdown, { onRendered } = {}) {
+  renderFallbackMarkdown(container, markdown);
+  void loadRendererDeps().then((deps) => {
+    if (!deps || !container) {
+      return;
+    }
+    const markdownText = String(markdown ?? "");
+    const inlineHtml =
+      typeof deps.marked.parseInline === "function"
+        ? deps.marked.parseInline(markdownText, {
+            gfm: true,
+            breaks: true,
+            headerIds: false,
+            mangle: false,
+          })
+        : deps.marked.parse(markdownText, {
+            gfm: true,
+            breaks: true,
+            headerIds: false,
+            mangle: false,
+          });
+    const safeHtml = sanitizeMarkdownHtml(deps.domPurify, inlineHtml);
+    container.innerHTML = safeHtml;
+    container.classList.add("markdown-rendered");
+    normalizeLinks(container);
+    if (typeof onRendered === "function") {
+      onRendered();
+    }
+  });
+}
+
 export function renderLatexInto(container, latexSource, { onRendered } = {}) {
   if (!container) {
     return;

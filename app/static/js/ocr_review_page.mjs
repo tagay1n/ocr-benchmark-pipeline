@@ -22,6 +22,7 @@
       import {
         containsMarkdownTable,
         renderLatexInto,
+        renderMarkdownInlineInto,
         renderMarkdownInto,
       } from "./reconstructed_markdown.mjs";
       import {
@@ -4359,7 +4360,7 @@
         return String(content ?? "").replace(/\r\n/g, "\n").split("\n");
       }
 
-      function renderPreserveLinesContent(container, content) {
+      function renderPreserveLinesContent(container, content, { renderMarkdown = false, onRendered = null } = {}) {
         if (!container) {
           return;
         }
@@ -4371,7 +4372,11 @@
           row.dataset.rawLine = line;
           const text = document.createElement("span");
           text.className = "recon-preserve-line-text";
-          text.textContent = line.length > 0 ? line : "\u00A0";
+          if (renderMarkdown && line.length > 0) {
+            renderMarkdownInlineInto(text, line, { onRendered });
+          } else {
+            text.textContent = line.length > 0 ? line : "\u00A0";
+          }
           row.appendChild(text);
           container.appendChild(row);
         }
@@ -4668,11 +4673,18 @@
         if (format === "markdown") {
           const mode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
           const className = mode === "markdown" ? "markdown" : "markdown raw-view";
-          const preserveLines = lineReviewRequiredOutput(output) && mode !== "markdown";
+          const preserveLines = lineReviewRequiredOutput(output);
           const block = appendPlainContent(container, preserveLines ? "" : content, className);
           if (preserveLines) {
             block.classList.add("preserve-lines");
-            renderPreserveLinesContent(block, content);
+            const renderMarkdownLines = mode === "markdown";
+            renderPreserveLinesContent(block, content, {
+              renderMarkdown: renderMarkdownLines,
+              onRendered: renderMarkdownLines ? scheduleReconstructionRefit : null,
+            });
+            if (renderMarkdownLines) {
+              block.classList.add("markdown-rendered");
+            }
           }
           const hasMarkdownTable = containsMarkdownTable(content);
           if (hasMarkdownTable) {
@@ -4692,7 +4704,7 @@
             badge.title = `${lookalikeCount} suspicious lookalike token(s) detected`;
             container.appendChild(badge);
           }
-          if (mode === "markdown") {
+          if (mode === "markdown" && !preserveLines) {
             renderMarkdownInto(block, content, { onRendered: scheduleReconstructionRefit });
           }
           return block;
