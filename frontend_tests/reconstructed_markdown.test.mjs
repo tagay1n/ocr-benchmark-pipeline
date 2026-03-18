@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   containsMarkdownTable,
+  hasInlineMarkdownMath,
   normalizeLatexForRender,
   renderLatexInto,
   renderMarkdownInto,
@@ -87,4 +88,10 @@ test("normalizeLatexForRender strips wrappers and fences", () => {
   assert.equal(normalizeLatexForRender("$$\n\\frac{a}{b}\n$$"), "\\frac{a}{b}");
   assert.equal(normalizeLatexForRender("\\[z^2\\]"), "z^2");
   assert.equal(normalizeLatexForRender("```latex\nx^2+y^2\n```"), "x^2+y^2");
+});
+
+test("hasInlineMarkdownMath detects inline formulas and ignores escaped dollars", () => {
+  assert.equal(hasInlineMarkdownMath("x = $a+b$"), true);
+  assert.equal(hasInlineMarkdownMath("price is \\$10"), false);
+  assert.equal(hasInlineMarkdownMath("$$x+y$$"), false);
 });

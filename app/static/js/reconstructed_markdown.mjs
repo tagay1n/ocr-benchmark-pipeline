@@ -185,6 +185,70 @@ function normalizeLinks(container) {
   }
 }
 
+function isEscaped(text, index) {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor -= 1) {
+    slashCount += 1;
+  }
+  return slashCount % 2 === 1;
+}
+
+function splitInlineMathSegments(markdown) {
+  const text = String(markdown ?? "");
+  const segments = [];
+  let cursor = 0;
+  let index = 0;
+  while (index < text.length) {
+    if (
+      text[index] !== "$" ||
+      isEscaped(text, index) ||
+      text[index + 1] === "$" ||
+      text[index - 1] === "$"
+    ) {
+      index += 1;
+      continue;
+    }
+    let close = index + 1;
+    while (close < text.length) {
+      if (
+        text[close] === "$" &&
+        !isEscaped(text, close) &&
+        text[close - 1] !== "$" &&
+        text[close + 1] !== "$"
+      ) {
+        break;
+      }
+      close += 1;
+    }
+    if (close >= text.length) {
+      index += 1;
+      continue;
+    }
+    if (cursor < index) {
+      segments.push({ type: "text", value: text.slice(cursor, index) });
+    }
+    const math = text.slice(index + 1, close).trim();
+    if (math) {
+      segments.push({ type: "math", value: math });
+    } else {
+      segments.push({ type: "text", value: "$$" });
+    }
+    cursor = close + 1;
+    index = close + 1;
+  }
+  if (cursor < text.length) {
+    segments.push({ type: "text", value: text.slice(cursor) });
+  }
+  if (!segments.length) {
+    segments.push({ type: "text", value: text });
+  }
+  return segments;
+}
+
+export function hasInlineMarkdownMath(markdown) {
+  return splitInlineMathSegments(markdown).some((segment) => segment.type === "math");
+}
+
 export function renderMarkdownInto(container, markdown, { onRendered } = {}) {
   renderFallbackMarkdown(container, markdown);
   void loadRendererDeps().then((deps) => {
@@ -231,6 +295,63 @@ export function renderMarkdownInlineInto(container, markdown, { onRendered } = {
           });
     const safeHtml = sanitizeMarkdownHtml(deps.domPurify, inlineHtml);
     container.innerHTML = safeHtml;
+    container.classList.add("markdown-rendered");
+    normalizeLinks(container);
+    if (typeof onRendered === "function") {
+      onRendered();
+    }
+  });
+}
+
+export function renderMarkdownInlineWithMathInto(container, markdown, { onRendered } = {}) {
+  renderFallbackMarkdown(container, markdown);
+  void loadRendererDeps().then((deps) => {
+    if (!deps || !container) {
+      return;
+    }
+    const segments = splitInlineMathSegments(markdown);
+    container.innerHTML = "";
+    for (const segment of segments) {
+      if (segment.type !== "math") {
+        const inlineHtml =
+          typeof deps.marked.parseInline === "function"
+            ? deps.marked.parseInline(String(segment.value ?? ""), {
+                gfm: true,
+                breaks: true,
+                headerIds: false,
+                mangle: false,
+              })
+            : deps.marked.parse(String(segment.value ?? ""), {
+                gfm: true,
+                breaks: true,
+                headerIds: false,
+                mangle: false,
+              });
+        const safeHtml = sanitizeMarkdownHtml(deps.domPurify, inlineHtml);
+        const span = document.createElement("span");
+        span.innerHTML = safeHtml;
+        container.appendChild(span);
+        continue;
+      }
+      const token = document.createElement("span");
+      token.className = "inline-math-token";
+      if (!deps.katex || typeof deps.katex.render !== "function") {
+        token.textContent = `$${segment.value}$`;
+        container.appendChild(token);
+        continue;
+      }
+      try {
+        deps.katex.render(String(segment.value ?? ""), token, {
+          displayMode: false,
+          throwOnError: false,
+          strict: "ignore",
+          trust: false,
+        });
+      } catch {
+        token.textContent = `$${segment.value}$`;
+      }
+      container.appendChild(token);
+    }
     container.classList.add("markdown-rendered");
     normalizeLinks(container);
     if (typeof onRendered === "function") {

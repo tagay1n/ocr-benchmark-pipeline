@@ -21,8 +21,10 @@
       } from "./layout_review_utils.mjs";
       import {
         containsMarkdownTable,
+        hasInlineMarkdownMath,
         renderLatexInto,
         renderMarkdownInlineInto,
+        renderMarkdownInlineWithMathInto,
         renderMarkdownInto,
       } from "./reconstructed_markdown.mjs";
       import {
@@ -3480,6 +3482,74 @@
         latexNode.style.transform = `scale(${appliedScale})`;
       }
 
+      function fitLineReviewGeminiInlineMarkdownMath(lineNode, rawText, fitProfile = null) {
+        if (!(lineNode instanceof HTMLElement)) {
+          return;
+        }
+        const textNode = lineNode.querySelector(".line-review-gemini-line-text");
+        if (!(textNode instanceof HTMLElement)) {
+          return;
+        }
+        textNode.style.wordSpacing = "0px";
+        textNode.style.letterSpacing = "0px";
+        textNode.style.transform = "scaleX(1)";
+        textNode.style.fontSize = "";
+        textNode.style.lineHeight = "";
+
+        const profile = fitProfile || resolveLineReviewCommonFitProfile(lineNode, [String(rawText ?? "") || " "]);
+        if (!profile) {
+          return;
+        }
+        textNode.style.fontSize = `${profile.fontSize}px`;
+        textNode.style.lineHeight = `${profile.lineHeight}px`;
+
+        const computed = window.getComputedStyle(lineNode);
+        const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
+        const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+        const availableHeight = Math.max(1, lineNode.clientHeight - paddingTop - paddingBottom);
+
+        let rect = textNode.getBoundingClientRect();
+        if (Number.isFinite(rect.height) && rect.height > availableHeight + 0.25) {
+          const shrinkRatio = availableHeight / Math.max(1e-6, rect.height);
+          const nextFont = Math.max(6, profile.fontSize * shrinkRatio);
+          const nextLineHeight = Math.max(6, profile.lineHeight * shrinkRatio);
+          textNode.style.fontSize = `${nextFont}px`;
+          textNode.style.lineHeight = `${nextLineHeight}px`;
+          rect = textNode.getBoundingClientRect();
+        }
+
+        const width = Number(rect.width);
+        if (!Number.isFinite(width) || width <= 0) {
+          textNode.style.transform = "scaleX(1)";
+          return;
+        }
+        const fitScale = profile.targetWidth / Math.max(1e-6, width);
+        let appliedScale = Math.max(0.04, Math.min(1.4, fitScale));
+        textNode.style.transform = `scaleX(${appliedScale})`;
+
+        // Strict overflow guard: if the right edge is still clipped, keep shrinking.
+        let renderedWidth = Number(textNode.getBoundingClientRect().width);
+        if (Number.isFinite(renderedWidth) && renderedWidth > profile.targetWidth + 0.25) {
+          const overflowScale = profile.targetWidth / Math.max(1e-6, renderedWidth);
+          appliedScale = Math.max(0.02, appliedScale * overflowScale);
+          textNode.style.transform = `scaleX(${appliedScale})`;
+          renderedWidth = Number(textNode.getBoundingClientRect().width);
+        }
+        if (Number.isFinite(renderedWidth) && renderedWidth > profile.targetWidth + 0.25) {
+          const shrinkRatio = profile.targetWidth / Math.max(1e-6, renderedWidth);
+          const currentFontSize = Number.parseFloat(textNode.style.fontSize) || profile.fontSize;
+          const currentLineHeight = Number.parseFloat(textNode.style.lineHeight) || profile.lineHeight;
+          textNode.style.fontSize = `${Math.max(5, currentFontSize * shrinkRatio)}px`;
+          textNode.style.lineHeight = `${Math.max(5, currentLineHeight * shrinkRatio)}px`;
+          textNode.style.transform = "scaleX(1)";
+          const finalWidth = Number(textNode.getBoundingClientRect().width);
+          if (Number.isFinite(finalWidth) && finalWidth > profile.targetWidth + 0.25) {
+            const finalScale = Math.max(0.02, profile.targetWidth / Math.max(1e-6, finalWidth));
+            textNode.style.transform = `scaleX(${finalScale})`;
+          }
+        }
+      }
+
       function openEditorForLine(layoutId, lineIndex) {
         const normalizedLayoutId = Number(layoutId);
         const normalizedLineIndex = Number(lineIndex);
@@ -3572,8 +3642,13 @@
         }
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
+        const isInlineMathLine = !isFormulaLine && hasInlineMarkdownMath(currentText);
         geminiLine.dataset.rawText = currentText;
-        geminiLine.dataset.renderFormat = isFormulaLine ? "latex" : "text";
+        geminiLine.dataset.renderFormat = isFormulaLine
+          ? "latex"
+          : isInlineMathLine
+            ? "inline_markdown_math"
+            : "text";
         if (isFormulaLine) {
           geminiLine.classList.add("latex");
           const geminiLineLatex = document.createElement("div");
@@ -3581,6 +3656,13 @@
           geminiLine.appendChild(geminiLineLatex);
           renderLatexInto(geminiLineLatex, currentText, {
             onRendered: () => fitLineReviewGeminiLatex(geminiLine),
+          });
+        } else if (isInlineMathLine) {
+          const geminiLineText = document.createElement("span");
+          geminiLineText.className = "line-review-gemini-line-text";
+          geminiLine.appendChild(geminiLineText);
+          renderMarkdownInlineWithMathInto(geminiLineText, currentText, {
+            onRendered: () => fitLineReviewGeminiInlineMarkdownMath(geminiLine, currentText),
           });
         } else {
           const geminiLineText = document.createElement("span");
@@ -3609,6 +3691,10 @@
           const format = String(lineNode.dataset.renderFormat || "").toLowerCase();
           if (format === "latex") {
             fitLineReviewGeminiLatex(lineNode);
+            continue;
+          }
+          if (format === "inline_markdown_math") {
+            fitLineReviewGeminiInlineMarkdownMath(lineNode, lineNode.dataset.rawText || "", fitProfile);
             continue;
           }
           fitLineReviewGeminiText(lineNode, lineNode.dataset.rawText || "", fitProfile);
