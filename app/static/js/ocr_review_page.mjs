@@ -4694,7 +4694,7 @@
       }
 
       function cloneAllowedTableNode(node) {
-        const allowedTags = new Set(["table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption"]);
+        const allowedTags = new Set(["table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "br"]);
         if (!(node instanceof Element)) {
           return null;
         }
