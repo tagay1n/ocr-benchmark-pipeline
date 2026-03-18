@@ -983,6 +983,20 @@
         font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
       }
 
+      .recon-item-content.latex:not(.raw-view) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: normal;
+      }
+
+      .recon-item-content.latex:not(.raw-view) .katex-display {
+        margin: 0;
+      }
+
       .recon-item-content.skip {
         color: #8a8578;
         font-style: italic;

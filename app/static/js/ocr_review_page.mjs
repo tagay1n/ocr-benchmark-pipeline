@@ -4706,6 +4706,42 @@
         return contentNode.scrollWidth <= maxWidth && contentNode.scrollHeight <= maxHeight;
       }
 
+      function fitReconstructedLatexContent(contentNode, availableWidth, availableHeight) {
+        if (!(contentNode instanceof HTMLElement)) {
+          return false;
+        }
+        if (contentNode.classList.contains("raw-view")) {
+          return false;
+        }
+        const katexDisplay = contentNode.querySelector(".katex-display");
+        const scaleTarget =
+          (katexDisplay instanceof HTMLElement && katexDisplay.querySelector(".katex")) ||
+          (contentNode.querySelector(".katex") instanceof HTMLElement
+            ? contentNode.querySelector(".katex")
+            : null);
+        if (!(scaleTarget instanceof HTMLElement)) {
+          return false;
+        }
+
+        scaleTarget.style.transform = "scale(1)";
+        scaleTarget.style.transformOrigin = "center center";
+
+        const measuredWidth = Math.max(1, scaleTarget.scrollWidth || scaleTarget.getBoundingClientRect().width || 0);
+        const measuredHeight = Math.max(
+          1,
+          scaleTarget.scrollHeight || scaleTarget.getBoundingClientRect().height || 0
+        );
+        if (!Number.isFinite(measuredWidth) || !Number.isFinite(measuredHeight)) {
+          return false;
+        }
+
+        const scaleX = Math.max(0.01, (availableWidth - 1) / measuredWidth);
+        const scaleY = Math.max(0.01, (availableHeight - 1) / measuredHeight);
+        const appliedScale = Math.max(0.14, Math.min(12, Math.min(scaleX, scaleY)));
+        scaleTarget.style.transform = `scale(${appliedScale})`;
+        return true;
+      }
+
       function measureIntrinsicContentWidth(contentNode) {
         if (!contentNode) {
           return 0;
@@ -4876,6 +4912,10 @@
         contentNode.style.whiteSpace = "";
         contentNode.style.wordBreak = "";
         contentNode.style.overflowWrap = "";
+
+        if (format === "latex" && fitReconstructedLatexContent(contentNode, availableWidth, availableHeight)) {
+          return;
+        }
 
         const lineHeight = reconstructionLineHeight(format);
         contentNode.style.lineHeight = String(lineHeight);
