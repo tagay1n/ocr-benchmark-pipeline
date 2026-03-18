@@ -50,6 +50,34 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         self.assertEqual(len(pages), 1)
         return int(pages[0]["id"])
 
+    def _seed_page_ocr_outputs(
+        self,
+        page_id: int,
+        rows: list[dict[str, object]],
+        *,
+        page_status: str = "ocr_done",
+    ) -> None:
+        now = main._utc_now()
+        with db.get_session() as session:
+            for row in rows:
+                session.add(
+                    main.OcrOutput(
+                        layout_id=int(row["layout_id"]),
+                        page_id=page_id,
+                        class_name=str(row["class_name"]),
+                        output_format=str(row["output_format"]),
+                        content=str(row.get("content", "seed")),
+                        model_name="test",
+                        key_alias="k",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = page_status
+            page.updated_at = now
+
     def test_status_helpers_normalize_and_api_convert(self) -> None:
         self.assertEqual(statuses.normalize_db_status(" layout reviewed "), "LAYOUT_REVIEWED")
         self.assertEqual(statuses.normalize_db_status("ocr-done"), "OCR_DONE")
@@ -647,6 +675,328 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
         )
         reviewed = main.complete_layout_review(page_id)
         self.assertEqual(reviewed["status"], "layout_reviewed")
+
+    def test_layout_rereview_invalidates_only_bbox_changed_layout_output(self) -> None:
+        self._write_image("layout/rereview-bbox-change.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        first = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.4, y2=0.2),
+            ),
+        )["layout"]
+        second = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.3, x2=0.4, y2=0.4),
+            ),
+        )["layout"]
+        main.complete_layout_review(page_id)
+        self._seed_page_ocr_outputs(
+            page_id,
+            [
+                {
+                    "layout_id": int(first["id"]),
+                    "class_name": "text",
+                    "output_format": "markdown",
+                    "content": "first",
+                },
+                {
+                    "layout_id": int(second["id"]),
+                    "class_name": "text",
+                    "output_format": "markdown",
+                    "content": "second",
+                },
+            ],
+            page_status="ocr_done",
+        )
+
+        main.patch_layout(
+            int(first["id"]),
+            main.UpdateLayoutRequest(
+                class_name=None,
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.12, y1=0.1, x2=0.42, y2=0.2),
+            ),
+        )
+
+        result = main.complete_layout_review(page_id)
+        self.assertEqual(result["status"], "layout_reviewed")
+        self.assertEqual(int(result["ocr_invalidated_count"]), 1)
+        self.assertEqual(result["ocr_invalidated_layout_ids"], [int(first["id"])])
+
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 1)
+        self.assertEqual(int(outputs[0]["layout_id"]), int(second["id"]))
+
+    def test_layout_rereview_keeps_outputs_for_reading_order_only_changes(self) -> None:
+        self._write_image("layout/rereview-order-change.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        first = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.4, y2=0.2),
+            ),
+        )["layout"]
+        second = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.3, x2=0.4, y2=0.4),
+            ),
+        )["layout"]
+        main.complete_layout_review(page_id)
+        self._seed_page_ocr_outputs(
+            page_id,
+            [
+                {"layout_id": int(first["id"]), "class_name": "text", "output_format": "markdown"},
+                {"layout_id": int(second["id"]), "class_name": "text", "output_format": "markdown"},
+            ],
+            page_status="ocr_reviewed",
+        )
+
+        main.patch_layout(
+            int(first["id"]),
+            main.UpdateLayoutRequest(
+                class_name=None,
+                reading_order=2,
+                bbox=None,
+            ),
+        )
+
+        result = main.complete_layout_review(page_id)
+        self.assertEqual(result["status"], "ocr_reviewed")
+        self.assertEqual(int(result["ocr_invalidated_count"]), 0)
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 2)
+
+    def test_layout_rereview_keeps_outputs_when_only_caption_binding_changes(self) -> None:
+        self._write_image("layout/rereview-caption-bindings.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        caption = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="caption",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.8, x2=0.9, y2=0.9),
+            ),
+        )["layout"]
+        table = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="table",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.2, x2=0.45, y2=0.7),
+            ),
+        )["layout"]
+        formula = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="formula",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.55, y1=0.2, x2=0.9, y2=0.35),
+            ),
+        )["layout"]
+
+        main.put_page_caption_bindings(
+            page_id,
+            main.ReplaceCaptionBindingsRequest(
+                bindings=[
+                    main.CaptionBindingPayload(
+                        caption_layout_id=int(caption["id"]),
+                        target_layout_ids=[int(table["id"])],
+                    )
+                ]
+            ),
+        )
+        main.complete_layout_review(page_id)
+        self._seed_page_ocr_outputs(
+            page_id,
+            [
+                {"layout_id": int(caption["id"]), "class_name": "caption", "output_format": "markdown"},
+                {"layout_id": int(table["id"]), "class_name": "table", "output_format": "html"},
+                {"layout_id": int(formula["id"]), "class_name": "formula", "output_format": "latex"},
+            ],
+            page_status="ocr_done",
+        )
+
+        main.put_page_caption_bindings(
+            page_id,
+            main.ReplaceCaptionBindingsRequest(
+                bindings=[
+                    main.CaptionBindingPayload(
+                        caption_layout_id=int(caption["id"]),
+                        target_layout_ids=[int(table["id"]), int(formula["id"])],
+                    )
+                ]
+            ),
+        )
+
+        result = main.complete_layout_review(page_id)
+        self.assertEqual(result["status"], "ocr_done")
+        self.assertEqual(int(result["ocr_invalidated_count"]), 0)
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 3)
+
+    def test_layout_rereview_class_change_rules_for_ocr_invalidation(self) -> None:
+        self._write_image("layout/rereview-class-change.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.2),
+            ),
+        )["layout"]
+        layout_id = int(layout["id"])
+        main.complete_layout_review(page_id)
+        self._seed_page_ocr_outputs(
+            page_id,
+            [
+                {
+                    "layout_id": layout_id,
+                    "class_name": "text",
+                    "output_format": "markdown",
+                    "content": "seed",
+                }
+            ],
+            page_status="ocr_done",
+        )
+
+        main.patch_layout(
+            layout_id,
+            main.UpdateLayoutRequest(
+                class_name="section_header",
+                reading_order=None,
+                bbox=None,
+            ),
+        )
+        keep_result = main.complete_layout_review(page_id)
+        self.assertEqual(keep_result["status"], "ocr_done")
+        self.assertEqual(int(keep_result["ocr_invalidated_count"]), 0)
+        keep_outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(keep_outputs), 1)
+        self.assertEqual(str(keep_outputs[0]["class_name"]), "section_header")
+
+        main.patch_layout(
+            layout_id,
+            main.UpdateLayoutRequest(
+                class_name="formula",
+                reading_order=None,
+                bbox=None,
+            ),
+        )
+        invalidate_result = main.complete_layout_review(page_id)
+        self.assertEqual(invalidate_result["status"], "layout_reviewed")
+        self.assertEqual(int(invalidate_result["ocr_invalidated_count"]), 1)
+        self.assertEqual(invalidate_result["ocr_invalidated_layout_ids"], [layout_id])
+        invalidate_outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(invalidate_outputs), 0)
+
+    def test_layout_rereview_downgrades_from_ocr_reviewed_when_bbox_changes(self) -> None:
+        self._write_image("layout/rereview-downgrade-from-ocr-reviewed.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.2, y1=0.2, x2=0.8, y2=0.4),
+            ),
+        )["layout"]
+        layout_id = int(layout["id"])
+        main.complete_layout_review(page_id)
+        self._seed_page_ocr_outputs(
+            page_id,
+            [
+                {
+                    "layout_id": layout_id,
+                    "class_name": "text",
+                    "output_format": "markdown",
+                    "content": "seed",
+                }
+            ],
+            page_status="ocr_reviewed",
+        )
+
+        main.patch_layout(
+            layout_id,
+            main.UpdateLayoutRequest(
+                class_name=None,
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.21, y1=0.2, x2=0.81, y2=0.4),
+            ),
+        )
+        result = main.complete_layout_review(page_id)
+        self.assertEqual(result["status"], "layout_reviewed")
+        self.assertEqual(int(result["ocr_invalidated_count"]), 1)
+        self.assertEqual(result["ocr_invalidated_layout_ids"], [layout_id])
+        self.assertEqual(int(result["ocr_missing_layout_count"]), 1)
+        self.assertEqual(main.page_ocr_outputs(page_id)["count"], 0)
+
+    def test_layout_rereview_after_adding_layout_keeps_existing_outputs(self) -> None:
+        self._write_image("layout/rereview-added-layout-missing-output.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        first = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.2),
+            ),
+        )["layout"]
+        second = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.3, x2=0.9, y2=0.4),
+            ),
+        )["layout"]
+        main.complete_layout_review(page_id)
+        self._seed_page_ocr_outputs(
+            page_id,
+            [
+                {"layout_id": int(first["id"]), "class_name": "text", "output_format": "markdown"},
+                {"layout_id": int(second["id"]), "class_name": "text", "output_format": "markdown"},
+            ],
+            page_status="ocr_done",
+        )
+
+        created = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.1, y1=0.5, x2=0.9, y2=0.6),
+            ),
+        )["layout"]
+
+        result = main.complete_layout_review(page_id)
+        self.assertEqual(result["status"], "layout_reviewed")
+        self.assertEqual(int(result["ocr_invalidated_count"]), 0)
+        self.assertEqual(int(result["ocr_missing_layout_count"]), 1)
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 2)
+        self.assertEqual(
+            sorted(int(row["layout_id"]) for row in outputs),
+            sorted([int(first["id"]), int(second["id"])]),
+        )
+        self.assertNotIn(int(created["id"]), [int(row["layout_id"]) for row in outputs])
 
     def test_detect_layouts_replace_existing_false_appends_orders(self) -> None:
         self._write_image("layout/detect-append.png")

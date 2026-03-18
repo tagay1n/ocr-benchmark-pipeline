@@ -353,7 +353,12 @@ def complete_layout_review(page_id: int) -> dict[str, object]:
         event_type=EVENT_MANUAL_REVIEW_COMPLETED,
         page_id=page_id,
         message="Layout review completed.",
-        data={"layout_count": result["layout_count"]},
+        data={
+            "layout_count": result["layout_count"],
+            "status": result["status"],
+            "ocr_invalidated_count": result.get("ocr_invalidated_count", 0),
+            "ocr_missing_layout_count": result.get("ocr_missing_layout_count", 0),
+        },
     )
     return result
 

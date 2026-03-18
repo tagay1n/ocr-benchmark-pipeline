@@ -9,6 +9,7 @@ from .db import get_session
 from .layouts import get_page
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import CaptionBinding, OcrOutput, Page, Layout
+from .ocr_output_rules import layout_class_requires_ocr, output_matches_layout_class
 
 
 def _utc_now() -> str:
@@ -123,11 +124,43 @@ def mark_ocr_reviewed(page_id: int) -> dict[str, Any]:
         )
 
     with get_session() as session:
-        outputs_count = int(
-            session.query(OcrOutput).filter(OcrOutput.page_id == page_id).count()
-        )
+        layout_rows = session.execute(
+            select(Layout).where(Layout.page_id == page_id)
+        ).scalars().all()
+        if not layout_rows:
+            raise ValueError("No layouts found for this page.")
+
+        outputs = session.execute(
+            select(OcrOutput).where(OcrOutput.page_id == page_id)
+        ).scalars().all()
+        outputs_count = len(outputs)
         if outputs_count == 0:
             raise ValueError("No OCR outputs found for this page.")
+
+        layout_by_id = {int(layout.id): layout for layout in layout_rows}
+        required_layout_ids = {
+            int(layout.id)
+            for layout in layout_rows
+            if layout_class_requires_ocr(str(layout.class_name))
+        }
+
+        matched_layout_ids: set[int] = set()
+        for output in outputs:
+            layout_id = int(output.layout_id)
+            layout = layout_by_id.get(layout_id)
+            if layout is None:
+                continue
+            if output_matches_layout_class(
+                output_class_name=str(output.class_name),
+                output_format=str(output.output_format),
+                layout_class_name=str(layout.class_name),
+            ):
+                matched_layout_ids.add(layout_id)
+        missing_layout_ids = sorted(required_layout_ids.difference(matched_layout_ids))
+        if missing_layout_ids:
+            raise ValueError(
+                "Missing OCR outputs for one or more layouts; run OCR extraction before marking reviewed."
+            )
 
         page_row = session.get(Page, page_id)
         if page_row is None:

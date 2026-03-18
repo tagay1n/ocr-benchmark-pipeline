@@ -183,6 +183,49 @@ class ReviewApiEventContractsTests(unittest.TestCase):
         self.assertIn("requested", str(started_events[-1].message).lower())
         self.assertIn("completed", str(completed_events[-1].message).lower())
 
+    def test_complete_layout_review_completed_event_contains_invalidation_fields(self) -> None:
+        page_id, layout_id = self._prepare_layout_reviewed_page()
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=layout_id,
+                    page_id=page_id,
+                    class_name="text",
+                    output_format="markdown",
+                    content="seed",
+                    model_name="test-model",
+                    key_alias="k",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "ocr_done"
+            page.updated_at = now
+
+        main.patch_layout(
+            layout_id,
+            main.UpdateLayoutRequest(
+                class_name=None,
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.11, y1=0.1, x2=0.9, y2=0.3),
+            ),
+        )
+        payload = main.complete_layout_review(page_id)
+        self.assertEqual(payload["status"], "layout_reviewed")
+        self.assertEqual(int(payload["ocr_invalidated_count"]), 1)
+        self.assertEqual(int(payload["ocr_missing_layout_count"]), 1)
+
+        completed_events = self._events_for_page(page_id, "manual_review_completed")
+        self.assertGreaterEqual(len(completed_events), 1)
+        completed_payload = json.loads(str(completed_events[-1].data_json or "{}"))
+        self.assertEqual(completed_payload["status"], "layout_reviewed")
+        self.assertEqual(int(completed_payload["layout_count"]), 1)
+        self.assertEqual(int(completed_payload["ocr_invalidated_count"]), 1)
+        self.assertEqual(int(completed_payload["ocr_missing_layout_count"]), 1)
+
     def test_complete_ocr_review_emits_started_and_completed_events(self) -> None:
         page_id, _layout_id = self._prepare_ocr_done_page()
 

@@ -277,6 +277,72 @@ class OcrReviewLookalikesTests(unittest.TestCase):
         self.assertEqual(reviewed["output_count"], 1)
         self.assertEqual(main.page_details(page_id)["page"]["status"], "ocr_reviewed")
 
+    def test_mark_ocr_reviewed_requires_outputs_for_all_extractable_layouts(self) -> None:
+        self._write_image("review/ocr-review-missing-required-output.png")
+        main.scan_images()
+        page_id = int(main.list_pages()["pages"][0]["id"])
+        first = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=0.5, y2=0.5),
+            ),
+        )["layout"]
+        second = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.5, y1=0.5, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=int(first["id"]),
+                    page_id=page_id,
+                    class_name="text",
+                    output_format="markdown",
+                    content="Only first output",
+                    model_name="test",
+                    key_alias="k",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "layout_reviewed"
+            page.updated_at = now
+
+        with self.assertRaises(main.HTTPException) as review_error:
+            main.complete_ocr_review(page_id)
+        self.assertEqual(review_error.exception.status_code, 400)
+        self.assertIn("missing ocr outputs", str(review_error.exception.detail).lower())
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=int(second["id"]),
+                    page_id=page_id,
+                    class_name="text",
+                    output_format="markdown",
+                    content="Second output",
+                    model_name="test",
+                    key_alias="k",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        reviewed = main.complete_ocr_review(page_id)
+        self.assertEqual(reviewed["status"], "ocr_reviewed")
+        self.assertEqual(reviewed["output_count"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

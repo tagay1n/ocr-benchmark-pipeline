@@ -1141,7 +1141,7 @@ class PipelineStagesTests(unittest.TestCase):
         with self.assertRaises(main.HTTPException) as review_error:
             main.complete_ocr_review(page_id)
         self.assertEqual(review_error.exception.status_code, 400)
-        self.assertIn("ocr_done", str(review_error.exception.detail))
+        self.assertIn("no ocr outputs", str(review_error.exception.detail).lower())
 
         layouts_payload = main.page_layouts(page_id)
         self.assertEqual(layouts_payload["count"], 1)

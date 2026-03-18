@@ -39,11 +39,34 @@ from .layout_classes import (
     normalize_detected_class_name,
     normalize_persisted_class_name,
 )
-from .models import CaptionBinding, Layout, Page
+from .models import CaptionBinding, Layout, OcrOutput, Page
+from .ocr_output_rules import (
+    can_preserve_output_for_class_transition,
+    expected_output_format_for_layout_class,
+    layout_class_requires_ocr,
+    output_matches_layout_class,
+)
 
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _parse_iso_timestamp(value: str | None) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        return datetime.min.replace(tzinfo=UTC)
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _status_key(value: str | None) -> str:
+    return str(value or "").strip().replace("-", "_").replace(" ", "_").lower()
 
 
 def _clamp01(value: float) -> float:
@@ -576,6 +599,15 @@ def update_layout(
         if next_reading_order < 1:
             raise ValueError("reading_order must be >= 1.")
 
+        previous_class_name = normalize_class_name(str(layout.class_name))
+        class_changed = next_class_name != str(layout.class_name)
+        bbox_changed = (
+            abs(next_x1 - float(layout.x1)) > 1e-12
+            or abs(next_y1 - float(layout.y1)) > 1e-12
+            or abs(next_x2 - float(layout.x2)) > 1e-12
+            or abs(next_y2 - float(layout.y2)) > 1e-12
+        )
+
         layout.class_name = next_class_name
         if next_reading_order != int(layout.reading_order):
             next_reading_order = _move_layout_to_reading_order(session, layout, next_reading_order)
@@ -584,7 +616,18 @@ def update_layout(
         layout.y1 = next_y1
         layout.x2 = next_x2
         layout.y2 = next_y2
-        layout.updated_at = now
+        if class_changed or bbox_changed:
+            layout.updated_at = now
+
+        if class_changed and not bbox_changed:
+            output = session.get(OcrOutput, int(layout.id))
+            if output is not None and can_preserve_output_for_class_transition(
+                previous_class_name=previous_class_name,
+                next_class_name=next_class_name,
+                output_format=str(output.output_format),
+            ):
+                output.class_name = next_class_name
+                output.updated_at = now
 
         page_row = session.get(Page, int(layout.page_id))
         if page_row is not None:
@@ -714,7 +757,75 @@ def mark_layout_reviewed(page_id: int) -> dict[str, Any]:
                     "All caption layouts must be bound to at least one table, picture, or formula before review."
                 )
 
-        page_row.status = "layout_reviewed"
+        outputs = session.execute(select(OcrOutput).where(OcrOutput.page_id == page_id)).scalars().all()
+        output_by_layout_id = {int(output.layout_id): output for output in outputs}
+
+        invalidated_layout_ids: set[int] = set()
+        extractable_layout_ids: set[int] = set()
+        valid_output_layout_ids: set[int] = set()
+        for layout in layouts:
+            layout_id = int(layout.id)
+            layout_class_name = normalize_class_name(str(layout.class_name))
+            if layout_class_requires_ocr(layout_class_name):
+                extractable_layout_ids.add(layout_id)
+
+            output = output_by_layout_id.get(layout_id)
+            if output is None:
+                continue
+
+            output_class_name = normalize_class_name(str(output.class_name))
+            output_format = str(output.output_format)
+            if not output_matches_layout_class(
+                output_class_name=output_class_name,
+                output_format=output_format,
+                layout_class_name=layout_class_name,
+            ):
+                if can_preserve_output_for_class_transition(
+                    previous_class_name=output_class_name,
+                    next_class_name=layout_class_name,
+                    output_format=output_format,
+                ):
+                    output.class_name = layout_class_name
+                    output.updated_at = now
+                    valid_output_layout_ids.add(layout_id)
+                    continue
+                invalidated_layout_ids.add(layout_id)
+                continue
+
+            if _parse_iso_timestamp(str(layout.updated_at)) > _parse_iso_timestamp(str(output.updated_at)):
+                invalidated_layout_ids.add(layout_id)
+                continue
+
+            valid_output_layout_ids.add(layout_id)
+
+        if invalidated_layout_ids:
+            session.execute(
+                delete(OcrOutput).where(
+                    OcrOutput.page_id == page_id,
+                    OcrOutput.layout_id.in_(sorted(invalidated_layout_ids)),
+                )
+            )
+            valid_output_layout_ids.difference_update(invalidated_layout_ids)
+
+        missing_extractable_layout_ids = sorted(extractable_layout_ids.difference(valid_output_layout_ids))
+        current_status = _status_key(str(page_row.status))
+        if missing_extractable_layout_ids:
+            next_status = "layout_reviewed"
+        elif current_status == "ocr_reviewed":
+            next_status = "ocr_reviewed"
+        elif current_status == "ocr_done":
+            next_status = "ocr_done"
+        else:
+            next_status = "ocr_done" if extractable_layout_ids else "layout_reviewed"
+
+        page_row.status = next_status
         page_row.updated_at = now
 
-    return {"page_id": page_id, "status": "layout_reviewed", "layout_count": layout_count}
+    return {
+        "page_id": page_id,
+        "status": next_status,
+        "layout_count": layout_count,
+        "ocr_invalidated_count": len(invalidated_layout_ids),
+        "ocr_invalidated_layout_ids": sorted(invalidated_layout_ids),
+        "ocr_missing_layout_count": len(missing_extractable_layout_ids),
+    }

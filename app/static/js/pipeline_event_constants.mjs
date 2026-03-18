@@ -50,7 +50,8 @@ export function stageDisplayName(stage, toSentenceCaseLabel) {
 export function inferPageStatusFromPipelineEvent(event) {
   const stage = String(event?.stage || "");
   const eventType = String(event?.event_type || "");
-  const result = event?.data && typeof event.data === "object" ? event.data.result : null;
+  const eventData = event?.data && typeof event.data === "object" ? event.data : null;
+  const result = eventData ? eventData.result : null;
   if (stage === PIPELINE_STAGE.LAYOUT_DETECT) {
     if (eventType === PIPELINE_EVENT.JOB_STARTED) return "layout_detecting";
     if (eventType === PIPELINE_EVENT.JOB_COMPLETED && !(result && result.skipped)) return "layout_detected";
@@ -59,7 +60,10 @@ export function inferPageStatusFromPipelineEvent(event) {
     return null;
   }
   if (stage === PIPELINE_STAGE.LAYOUT_REVIEW) {
-    if (eventType === PIPELINE_EVENT.MANUAL_REVIEW_COMPLETED) return "layout_reviewed";
+    if (eventType === PIPELINE_EVENT.MANUAL_REVIEW_COMPLETED) {
+      const status = typeof eventData?.status === "string" ? eventData.status : "layout_reviewed";
+      return String(status).toLowerCase();
+    }
     return null;
   }
   if (stage === PIPELINE_STAGE.OCR_EXTRACT) {

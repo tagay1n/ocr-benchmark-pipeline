@@ -101,6 +101,14 @@ test("inferPageStatusFromPipelineEvent maps OCR extraction/review transitions", 
   );
   assert.equal(
     inferPageStatusFromPipelineEvent({
+      stage: PIPELINE_STAGE.LAYOUT_REVIEW,
+      event_type: PIPELINE_EVENT.MANUAL_REVIEW_COMPLETED,
+      data: { status: "OCR_DONE" },
+    }),
+    "ocr_done",
+  );
+  assert.equal(
+    inferPageStatusFromPipelineEvent({
       stage: PIPELINE_STAGE.LAYOUT_BENCHMARK,
       event_type: PIPELINE_EVENT.JOB_PROGRESS,
     }),
