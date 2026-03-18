@@ -3572,10 +3572,9 @@
         }
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
-        const renderFormulaAsLatex = isFormulaLine;
         geminiLine.dataset.rawText = currentText;
-        geminiLine.dataset.renderFormat = renderFormulaAsLatex ? "latex" : "text";
-        if (renderFormulaAsLatex) {
+        geminiLine.dataset.renderFormat = isFormulaLine ? "latex" : "text";
+        if (isFormulaLine) {
           geminiLine.classList.add("latex");
           const geminiLineLatex = document.createElement("div");
           geminiLineLatex.className = "line-review-gemini-line-latex";
