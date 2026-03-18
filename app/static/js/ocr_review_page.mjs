@@ -42,6 +42,7 @@
         lineIndexFromTextOffset,
         normalizeReviewViewMode,
         normalizeReconstructedRenderMode,
+        reconstructedLayerRankForOutputClass,
         resolveViewportScrollSyncUpdate,
         resolveEditorDrawerLayout,
         tokenBoundsAtOffset,
@@ -4497,7 +4498,7 @@
       }
 
       function isPictureOutput(output) {
-        const className = String(output?.class_name || "").trim().toLowerCase();
+        const className = normalizeClassName(output?.class_name);
         return className === "picture";
       }
 
@@ -4595,7 +4596,7 @@
         if (format === "markdown") {
           const mode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
           const className = mode === "markdown" ? "markdown" : "markdown raw-view";
-          const preserveLines = lineReviewRequiredOutput(output);
+          const preserveLines = lineReviewRequiredOutput(output) && mode !== "markdown";
           const block = appendPlainContent(container, preserveLines ? "" : content, className);
           if (preserveLines) {
             block.classList.add("preserve-lines");
@@ -4619,7 +4620,7 @@
             badge.title = `${lookalikeCount} suspicious lookalike token(s) detected`;
             container.appendChild(badge);
           }
-          if (mode === "markdown" && !preserveLines) {
+          if (mode === "markdown") {
             renderMarkdownInto(block, content, { onRendered: scheduleReconstructionRefit });
           }
           return block;
@@ -4983,6 +4984,7 @@
           item.style.top = style.top;
           item.style.width = style.width;
           item.style.height = style.height;
+          item.style.zIndex = String(reconstructedLayerRankForOutputClass(output.class_name));
           item.style.borderColor = hexToRgba(color, 0.6);
           item.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) return;

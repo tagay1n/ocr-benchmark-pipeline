@@ -19,6 +19,7 @@ import {
   lineIndexFromTextOffset,
   normalizeReviewViewMode,
   normalizeReconstructedRenderMode,
+  reconstructedLayerRankForOutputClass,
   resolveViewportScrollSyncUpdate,
   resolveEditorDrawerLayout,
   tokenBoundsAtOffset,
@@ -98,6 +99,13 @@ test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs"
   assert.equal(isLineSyncEnabledOutputFormat("latex"), false);
   assert.equal(isLineSyncEnabledOutputFormat("skip"), false);
   assert.equal(isLineSyncEnabledOutputFormat(""), false);
+});
+
+test("reconstructedLayerRankForOutputClass keeps picture below picture_text and text-like content", () => {
+  assert.equal(reconstructedLayerRankForOutputClass("picture"), 1);
+  assert.equal(reconstructedLayerRankForOutputClass("Picture Text"), 3);
+  assert.equal(reconstructedLayerRankForOutputClass("text"), 2);
+  assert.equal(reconstructedLayerRankForOutputClass("table"), 2);
 });
 
 test("resolveViewportScrollSyncUpdate returns null for already synced scroll and next values otherwise", () => {

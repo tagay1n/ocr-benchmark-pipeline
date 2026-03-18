@@ -21,6 +21,24 @@ export function isLineSyncEnabledOutputFormat(outputFormat) {
   return String(outputFormat || "").trim().toLowerCase() === "markdown";
 }
 
+function normalizeOutputClassName(className) {
+  return String(className || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[-/\s]+/g, "_");
+}
+
+export function reconstructedLayerRankForOutputClass(className) {
+  const normalized = normalizeOutputClassName(className);
+  if (normalized === "picture") {
+    return 1;
+  }
+  if (normalized === "picture_text") {
+    return 3;
+  }
+  return 2;
+}
+
 function toFiniteScroll(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
