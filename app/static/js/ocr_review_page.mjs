@@ -3571,8 +3571,7 @@
         }
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
-        const currentRenderMode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
-        const renderFormulaAsLatex = isFormulaLine && currentRenderMode === "markdown";
+        const renderFormulaAsLatex = isFormulaLine;
         geminiLine.dataset.rawText = currentText;
         geminiLine.dataset.renderFormat = renderFormulaAsLatex ? "latex" : "text";
         if (renderFormulaAsLatex) {
@@ -4658,9 +4657,13 @@
           return appendPlainContent(container, content, "html");
         }
         if (format === "latex") {
-          const block = appendPlainContent(container, content, "latex");
-          renderLatexInto(block, content, { onRendered: scheduleReconstructionRefit });
-          return block;
+          const mode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
+          if (mode === "markdown") {
+            const block = appendPlainContent(container, content, "latex");
+            renderLatexInto(block, content, { onRendered: scheduleReconstructionRefit });
+            return block;
+          }
+          return appendPlainContent(container, content, "latex raw-view");
         }
         if (format === "markdown") {
           const mode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
