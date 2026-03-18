@@ -387,6 +387,7 @@
         persistReconstructedRenderMode();
         applyRenderModeUi();
         renderReconstruction();
+        renderLineReviewPanel();
       }
 
       function clearReconstructedControlsIdleTimer() {
@@ -3570,9 +3571,11 @@
         }
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
+        const currentRenderMode = normalizeReconstructedRenderMode(state.reconstructedRenderMode);
+        const renderFormulaAsLatex = isFormulaLine && currentRenderMode === "markdown";
         geminiLine.dataset.rawText = currentText;
-        geminiLine.dataset.renderFormat = String(output?.output_format || "").toLowerCase();
-        if (isFormulaLine) {
+        geminiLine.dataset.renderFormat = renderFormulaAsLatex ? "latex" : "text";
+        if (renderFormulaAsLatex) {
           geminiLine.classList.add("latex");
           const geminiLineLatex = document.createElement("div");
           geminiLineLatex.className = "line-review-gemini-line-latex";
