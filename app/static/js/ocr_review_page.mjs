@@ -37,6 +37,7 @@
         hasLocalDraftForLayout,
         isRectOnscreen,
         isReconstructedRestoreDisabled,
+        isLineReviewRequiredOutput as isLineReviewRequiredOutputShared,
         isLineSyncEnabledOutputFormat,
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
@@ -2106,7 +2107,10 @@
       }
 
       function lineReviewRequiredOutput(output) {
-        return isTextLikeOutput(output) && String(output?.output_format || "").toLowerCase() !== "skip";
+        return isLineReviewRequiredOutputShared({
+          className: output?.class_name,
+          outputFormat: output?.output_format,
+        });
       }
 
       function normalizeApprovedLineIndexes(layoutId, lineCount) {
@@ -3436,6 +3440,44 @@
         }
       }
 
+      function fitLineReviewGeminiLatex(lineNode) {
+        if (!(lineNode instanceof HTMLElement)) {
+          return;
+        }
+        const latexNode = lineNode.querySelector(".line-review-gemini-line-latex");
+        if (!(latexNode instanceof HTMLElement)) {
+          return;
+        }
+        latexNode.style.transform = "scale(1)";
+        latexNode.style.transformOrigin = "center center";
+
+        const computed = window.getComputedStyle(lineNode);
+        const paddingLeft = Number.parseFloat(computed.paddingLeft) || 0;
+        const paddingRight = Number.parseFloat(computed.paddingRight) || 0;
+        const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
+        const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+        const availableWidth = Math.max(1, lineNode.clientWidth - paddingLeft - paddingRight);
+        const availableHeight = Math.max(1, lineNode.clientHeight - paddingTop - paddingBottom);
+
+        const renderedNode =
+          latexNode.querySelector(".katex-display") ||
+          latexNode.querySelector(".katex") ||
+          latexNode;
+        if (!(renderedNode instanceof HTMLElement)) {
+          return;
+        }
+        const rect = renderedNode.getBoundingClientRect();
+        const width = Number(rect.width);
+        const height = Number(rect.height);
+        if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+          return;
+        }
+        const scaleX = availableWidth / width;
+        const scaleY = availableHeight / height;
+        const appliedScale = Math.max(0.12, Math.min(8, scaleX, scaleY));
+        latexNode.style.transform = `scale(${appliedScale})`;
+      }
+
       function openEditorForLine(layoutId, lineIndex) {
         const normalizedLayoutId = Number(layoutId);
         const normalizedLineIndex = Number(lineIndex);
@@ -3513,18 +3555,37 @@
         geminiLane.className = "line-review-gemini-lane";
         const geminiLine = document.createElement("div");
         geminiLine.className = "line-review-gemini-line";
-        const geminiLineText = document.createElement("span");
-        geminiLineText.className = "line-review-gemini-line-text";
-        geminiLine.appendChild(geminiLineText);
         geminiLane.appendChild(geminiLine);
         slot.appendChild(geminiLane);
         applyLineReviewLaneHeights(sourceLane, geminiLane, displayGeometry.heightPx);
         renderLineReviewSourceLine(sourceLine, sourceCrop);
-        applyLineReviewHorizontalGeometry(geminiLine, output, displayGeometry);
+        const isFormulaLine = String(output?.output_format || "").toLowerCase() === "latex";
+        if (isFormulaLine) {
+          applyLineReviewHorizontalGeometry(geminiLine, output, {
+            leftRatio: Number(displayGeometry?.leftRatio),
+            widthRatio: Number(displayGeometry?.widthRatio),
+          });
+        } else {
+          applyLineReviewHorizontalGeometry(geminiLine, output, displayGeometry);
+        }
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
-        geminiLineText.textContent = currentText || " ";
         geminiLine.dataset.rawText = currentText;
+        geminiLine.dataset.renderFormat = String(output?.output_format || "").toLowerCase();
+        if (isFormulaLine) {
+          geminiLine.classList.add("latex");
+          const geminiLineLatex = document.createElement("div");
+          geminiLineLatex.className = "line-review-gemini-line-latex";
+          geminiLine.appendChild(geminiLineLatex);
+          renderLatexInto(geminiLineLatex, currentText, {
+            onRendered: () => fitLineReviewGeminiLatex(geminiLine),
+          });
+        } else {
+          const geminiLineText = document.createElement("span");
+          geminiLineText.className = "line-review-gemini-line-text";
+          geminiLineText.textContent = currentText || " ";
+          geminiLine.appendChild(geminiLineText);
+        }
         geminiLine.classList.toggle("is-changed", baselineText !== currentText);
         if (isCurrent) {
           geminiLine.classList.add("is-editable");
@@ -3543,6 +3604,11 @@
             ? resolveLineReviewCommonFitProfile(firstLineNode, lines)
             : null;
         for (const lineNode of lineReviewReel.querySelectorAll(".line-review-gemini-line[data-raw-text]")) {
+          const format = String(lineNode.dataset.renderFormat || "").toLowerCase();
+          if (format === "latex") {
+            fitLineReviewGeminiLatex(lineNode);
+            continue;
+          }
           fitLineReviewGeminiText(lineNode, lineNode.dataset.rawText || "", fitProfile);
         }
       }

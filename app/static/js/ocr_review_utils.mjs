@@ -21,6 +21,30 @@ export function isLineSyncEnabledOutputFormat(outputFormat) {
   return String(outputFormat || "").trim().toLowerCase() === "markdown";
 }
 
+export function isLineReviewRequiredOutput({ className, outputFormat } = {}) {
+  const normalizedClassName = String(className || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[-/\s]+/g, "_");
+  const normalizedFormat = String(outputFormat || "").trim().toLowerCase();
+  if (normalizedFormat === "skip" || !normalizedClassName) {
+    return false;
+  }
+  if (normalizedClassName === "formula") {
+    return normalizedFormat === "latex";
+  }
+  return (
+    normalizedClassName === "text" ||
+    normalizedClassName === "section_header" ||
+    normalizedClassName === "list_item" ||
+    normalizedClassName === "caption" ||
+    normalizedClassName === "footnote" ||
+    normalizedClassName === "page_header" ||
+    normalizedClassName === "page_footer" ||
+    normalizedClassName === "picture_text"
+  );
+}
+
 function normalizeOutputClassName(className) {
   return String(className || "")
     .trim()

@@ -13,6 +13,7 @@ import {
   findBestTokenOccurrence,
   hasLocalDraftForLayout,
   isRectOnscreen,
+  isLineReviewRequiredOutput,
   isReconstructedRestoreDisabled,
   isLineSyncEnabledOutputFormat,
   lineBandFromLineIndex,
@@ -99,6 +100,29 @@ test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs"
   assert.equal(isLineSyncEnabledOutputFormat("latex"), false);
   assert.equal(isLineSyncEnabledOutputFormat("skip"), false);
   assert.equal(isLineSyncEnabledOutputFormat(""), false);
+});
+
+test("isLineReviewRequiredOutput includes formula/latex and text-like classes", () => {
+  assert.equal(
+    isLineReviewRequiredOutput({ className: "formula", outputFormat: "latex" }),
+    true,
+  );
+  assert.equal(
+    isLineReviewRequiredOutput({ className: "formula", outputFormat: "markdown" }),
+    false,
+  );
+  assert.equal(
+    isLineReviewRequiredOutput({ className: "picture_text", outputFormat: "markdown" }),
+    true,
+  );
+  assert.equal(
+    isLineReviewRequiredOutput({ className: "picture", outputFormat: "skip" }),
+    false,
+  );
+  assert.equal(
+    isLineReviewRequiredOutput({ className: "table", outputFormat: "html" }),
+    false,
+  );
 });
 
 test("reconstructedLayerRankForOutputClass keeps picture below picture_text and text-like content", () => {
