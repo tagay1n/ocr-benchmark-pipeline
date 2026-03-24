@@ -527,6 +527,55 @@ export function reorderReadingOrderIds({
   return nextIds;
 }
 
+export function swapReadingOrderIds({
+  orderedIds,
+  movedId,
+  targetOrder,
+}) {
+  if (!Array.isArray(orderedIds)) {
+    return null;
+  }
+
+  const normalizedIds = [];
+  const seen = new Set();
+  for (const rawId of orderedIds) {
+    const id = Number(rawId);
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    normalizedIds.push(id);
+  }
+  if (normalizedIds.length === 0) {
+    return null;
+  }
+
+  const layoutId = Number(movedId);
+  if (!Number.isInteger(layoutId) || layoutId <= 0) {
+    return null;
+  }
+  const fromIndex = normalizedIds.indexOf(layoutId);
+  if (fromIndex < 0) {
+    return null;
+  }
+
+  const target = Number(targetOrder);
+  if (!Number.isInteger(target)) {
+    return null;
+  }
+  const clampedTarget = Math.max(1, Math.min(normalizedIds.length, target));
+  const toIndex = clampedTarget - 1;
+  if (toIndex === fromIndex) {
+    return normalizedIds;
+  }
+
+  const next = [...normalizedIds];
+  const [fromValue, toValue] = [next[fromIndex], next[toIndex]];
+  next[fromIndex] = toValue;
+  next[toIndex] = fromValue;
+  return next;
+}
+
 export function mergeLayoutsForReview({
   layouts,
   localEditsById = {},

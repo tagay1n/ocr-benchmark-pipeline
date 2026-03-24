@@ -10,6 +10,7 @@
         hasContiguousUniqueReadingOrders,
         isLayoutNotFoundErrorMessage,
         mergeLayoutsForReview,
+        nextManualReadingOrder,
         nextHistoryPageId,
         normalizeReviewHistory,
         nextLayoutReviewUrl,
@@ -18,6 +19,7 @@
         pointHandleForCoordinateKey,
         previousHistoryPageId,
         reorderReadingOrderIds,
+        swapReadingOrderIds,
         shiftDraftReadingOrdersAfterInsertion,
         ZOOM_PRESET_PERCENTS,
         updateReviewHistoryOnVisit,
@@ -1203,9 +1205,14 @@
         if (targetOrder === currentIndex + 1) {
           return false;
         }
-        const nextOrder = [...orderedIds];
-        nextOrder.splice(currentIndex, 1);
-        nextOrder.splice(targetOrder - 1, 0, normalizedLayoutId);
+        const nextOrder = swapReadingOrderIds({
+          orderedIds,
+          movedId: normalizedLayoutId,
+          targetOrder,
+        });
+        if (!nextOrder) {
+          return false;
+        }
         return applySequentialReadingOrder(nextOrder);
       }
 
@@ -2851,19 +2858,26 @@
         try {
           const orderingMode = currentLayoutOrderMode();
           const className = normalizeClassName(state.lastAddedClass) || "text";
+          const inferredReadingOrder = nextManualReadingOrder(state.layouts);
           const payload = await createPageLayout(pageId, {
             class_name: className,
             bbox,
+            reading_order: inferredReadingOrder,
           });
           const insertedOrder = Number(payload?.layout?.reading_order);
+          const draftInsertedOrder = Number.isInteger(inferredReadingOrder)
+            ? inferredReadingOrder
+            : Number.isInteger(insertedOrder)
+              ? insertedOrder
+              : null;
           state.localEditsById = shiftDraftReadingOrdersAfterInsertion({
             layouts: state.layouts,
             localEditsById: state.localEditsById,
-            insertedOrder: Number.isInteger(insertedOrder) ? insertedOrder : null,
+            insertedOrder: draftInsertedOrder,
           });
           persistLayoutDraftState();
           rememberLastAddedClass(className);
-          setStatus(`Manual layout added (${orderingMode} mode).`);
+          setStatus(`Manual layout added at order ${inferredReadingOrder} (${orderingMode} mode).`);
           await loadPage();
           await loadLayouts();
           await refreshNextReviewButton();

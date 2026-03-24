@@ -387,10 +387,100 @@ def insertion_reading_order_by_mode(
     if not items:
         return 1
     normalized_mode = normalize_layout_order_mode(mode)
-    pseudo_id = -1
-    items_with_candidate = list(items)
-    items_with_candidate.append(_layout_item_from_bbox(bbox=bbox, pseudo_id=pseudo_id))
-    ordered_ids = order_layout_items_by_mode(items_with_candidate, normalized_mode)
-    if pseudo_id not in ordered_ids:
-        return len(items) + 1
-    return ordered_ids.index(pseudo_id) + 1
+    candidate = _layout_item_from_bbox(bbox=bbox, pseudo_id=-1)
+
+    def _fallback_with_pseudo() -> int:
+        pseudo_id = -1
+        items_with_candidate = list(items)
+        items_with_candidate.append(candidate)
+        ordered_ids = order_layout_items_by_mode(items_with_candidate, normalized_mode)
+        if pseudo_id not in ordered_ids:
+            return len(items) + 1
+        return ordered_ids.index(pseudo_id) + 1
+
+    def _stable_multi_column_insertion() -> int | None:
+        widths = [float(item["width"]) for item in items if float(item["width"]) > 0]
+        typical_width = float(median(widths)) if widths else 0.35
+        spanning_threshold = max(0.58, min(0.92, typical_width * 1.45))
+        regular_items = [item for item in items if float(item["width"]) < spanning_threshold]
+        base_items = regular_items if len(regular_items) >= 2 else list(items)
+        if not base_items:
+            return None
+
+        candidate_x1 = float(candidate["x1"])
+        candidate_x2 = float(candidate["x2"])
+        candidate_width = max(1e-6, float(candidate["width"]))
+        candidate_center_x = float(candidate["center_x"])
+
+        def horizontally_related(row: dict[str, float | int]) -> bool:
+            row_x1 = float(row["x1"])
+            row_x2 = float(row["x2"])
+            row_width = max(1e-6, float(row["width"]))
+            overlap = max(0.0, min(row_x2, candidate_x2) - max(row_x1, candidate_x1))
+            overlap_ratio = overlap / max(1e-6, min(row_width, candidate_width))
+            row_center_x = float(row["center_x"])
+            center_tolerance = max(0.03, min(0.22, max(row_width, candidate_width) * 0.7))
+            center_close = abs(row_center_x - candidate_center_x) <= center_tolerance
+            center_in_row = row_x1 <= candidate_center_x <= row_x2
+            row_center_in_candidate = candidate_x1 <= row_center_x <= candidate_x2
+            return overlap_ratio >= 0.2 or center_close or center_in_row or row_center_in_candidate
+
+        column_items = [item for item in base_items if horizontally_related(item)]
+        if not column_items:
+            nearest = min(
+                base_items,
+                key=lambda row: (
+                    abs(float(row["center_x"]) - candidate_center_x),
+                    float(row["center_y"]),
+                    int(row["id"]),
+                ),
+            )
+            column_items = [nearest]
+
+        candidate_center_y = float(candidate["center_y"])
+        above_items = [item for item in column_items if float(item["center_y"]) <= candidate_center_y]
+        if above_items:
+            anchor = max(
+                above_items,
+                key=lambda row: (
+                    float(row["center_y"]),
+                    int(row["reading_order"]),
+                    int(row["id"]),
+                ),
+            )
+            return min(len(items) + 1, int(anchor["reading_order"]) + 1)
+
+        first_in_column = min(
+            column_items,
+            key=lambda row: (
+                int(row["reading_order"]),
+                float(row["center_y"]),
+                int(row["id"]),
+            ),
+        )
+        return max(1, int(first_in_column["reading_order"]))
+
+    def _supports_multi_column_insertion_shape() -> bool:
+        widths = [float(item["width"]) for item in items if float(item["width"]) > 0]
+        typical_width = float(median(widths)) if widths else 0.35
+        spanning_threshold = max(0.58, min(0.92, typical_width * 1.45))
+        regular_items = [item for item in items if float(item["width"]) < spanning_threshold]
+        base_items = regular_items if len(regular_items) >= 2 else list(items)
+        if len(base_items) < 2:
+            return False
+        return len(_cluster_column_centers(base_items)) >= 2
+
+    if normalized_mode == LAYOUT_ORDER_MODE_MULTI_COLUMN:
+        stable_order = _stable_multi_column_insertion()
+        if stable_order is not None:
+            return stable_order
+        return _fallback_with_pseudo()
+
+    if normalized_mode == LAYOUT_ORDER_MODE_AUTO:
+        if _supports_multi_column_insertion_shape():
+            stable_order = _stable_multi_column_insertion()
+            if stable_order is not None:
+                return stable_order
+        return _fallback_with_pseudo()
+
+    return _fallback_with_pseudo()

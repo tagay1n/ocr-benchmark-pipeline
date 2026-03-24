@@ -251,6 +251,120 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
             [int(top_left["id"]), int(inserted["id"]), int(lower_left["id"])],
         )
 
+    def test_create_layout_multi_column_inserts_after_same_column_anchor(self) -> None:
+        self._write_image("layout/multi-column-insert.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        left_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.10, x2=0.38, y2=0.18),
+            ),
+        )["layout"]
+        right_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.56, y1=0.12, x2=0.86, y2=0.20),
+            ),
+        )["layout"]
+        left_mid = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.28, x2=0.38, y2=0.36),
+            ),
+        )["layout"]
+        _right_mid = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=4,
+                bbox=main.BBoxPayload(x1=0.56, y1=0.30, x2=0.86, y2=0.38),
+            ),
+        )["layout"]
+        _left_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=5,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.46, x2=0.38, y2=0.54),
+            ),
+        )["layout"]
+
+        mode_payload = main.patch_layout_order_mode(
+            page_id,
+            main.UpdateLayoutOrderModeRequest(mode="multi-column"),
+        )
+        self.assertEqual(mode_payload["layout_order_mode"], "multi-column")
+
+        inserted = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.40, x2=0.38, y2=0.48),
+            ),
+        )["layout"]
+        self.assertEqual(int(inserted["reading_order"]), 4)
+
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual(
+            [int(row["id"]) for row in page_layouts[:4]],
+            [int(left_top["id"]), int(right_top["id"]), int(left_mid["id"]), int(inserted["id"])],
+        )
+
+    def test_create_layout_auto_borderline_two_column_uses_same_column_anchor(self) -> None:
+        self._write_image("layout/auto-borderline-insert.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        left_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.10, x2=0.38, y2=0.18),
+            ),
+        )["layout"]
+        right_top = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                bbox=main.BBoxPayload(x1=0.56, y1=0.14, x2=0.86, y2=0.22),
+            ),
+        )["layout"]
+        left_bottom = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=3,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.42, x2=0.38, y2=0.50),
+            ),
+        )["layout"]
+
+        inserted = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                bbox=main.BBoxPayload(x1=0.08, y1=0.28, x2=0.38, y2=0.36),
+            ),
+        )["layout"]
+        self.assertEqual(int(inserted["reading_order"]), 2)
+
+        page_layouts = main.page_layouts(page_id)["layouts"]
+        self.assertEqual(
+            [int(row["id"]) for row in page_layouts],
+            [int(left_top["id"]), int(inserted["id"]), int(right_top["id"]), int(left_bottom["id"])],
+        )
+
     def test_reorder_layouts_applies_multi_column_strategy(self) -> None:
         self._write_image("layout/multi-column-reorder.png")
         main.scan_images()

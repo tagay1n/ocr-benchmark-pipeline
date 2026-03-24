@@ -36,6 +36,7 @@ import {
   reconstructionLineHeight,
   reconstructionWordSpacing,
   reorderReadingOrderIds,
+  swapReadingOrderIds,
   shiftDraftReadingOrdersAfterInsertion,
   updateReviewHistoryOnVisit,
   ZOOM_PRESET_PERCENTS,
@@ -491,6 +492,73 @@ test("reorderReadingOrderIds supports drop to end and rejects invalid payload", 
       orderedIds: [1, 2, 3],
       draggedId: 99,
       targetId: 2,
+    }),
+    null,
+  );
+});
+
+test("swapReadingOrderIds swaps moved item with target order item", () => {
+  assert.deepEqual(
+    swapReadingOrderIds({
+      orderedIds: [10, 20, 30, 40],
+      movedId: 20,
+      targetOrder: 4,
+    }),
+    [10, 40, 30, 20],
+  );
+
+  assert.deepEqual(
+    swapReadingOrderIds({
+      orderedIds: [10, 20, 30, 40],
+      movedId: 40,
+      targetOrder: 2,
+    }),
+    [10, 40, 30, 20],
+  );
+});
+
+test("swapReadingOrderIds clamps target order and normalizes unchanged target", () => {
+  assert.deepEqual(
+    swapReadingOrderIds({
+      orderedIds: [1, 2, 3],
+      movedId: 1,
+      targetOrder: 999,
+    }),
+    [3, 2, 1],
+  );
+
+  assert.deepEqual(
+    swapReadingOrderIds({
+      orderedIds: [1, 2, 3],
+      movedId: 2,
+      targetOrder: 2,
+    }),
+    [1, 2, 3],
+  );
+});
+
+test("swapReadingOrderIds rejects invalid payload", () => {
+  assert.equal(
+    swapReadingOrderIds({
+      orderedIds: [1, 2, 3],
+      movedId: 99,
+      targetOrder: 1,
+    }),
+    null,
+  );
+  assert.equal(
+    swapReadingOrderIds({
+      orderedIds: [1, 2, 3],
+      movedId: 1,
+      targetOrder: "x",
+    }),
+    null,
+  );
+  assert.equal(
+    swapReadingOrderIds({
+      orderedIds: null,
+      movedId: 1,
+      targetOrder: 1,
     }),
     null,
   );
