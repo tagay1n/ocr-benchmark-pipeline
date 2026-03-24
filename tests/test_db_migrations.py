@@ -111,6 +111,7 @@ class DbMigrationsTests(unittest.TestCase):
             ).lower().replace(" ", "")
             self.assertIn("check(reading_order>=1)", table_sql)
             self.assertIn("unique(page_id,reading_order)", table_sql)
+            self.assertIn("orientation", table_sql)
 
             page_table_sql = str(
                 verify.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='pages'").fetchone()[0]

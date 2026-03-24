@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from .db import get_session
 from .layouts import get_page
+from .layout_orientation import is_effective_vertical, normalize_layout_orientation
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import CaptionBinding, OcrOutput, Page, Layout
 from .ocr_output_rules import layout_class_requires_ocr, output_matches_layout_class
@@ -25,6 +26,14 @@ def _output_row_to_dict(output: OcrOutput, layout: Layout, *, bound_target_ids: 
         else []
     )
     lookalike_line_indexes = sorted({int(item["line_index"]) for item in lookalike_warnings})
+    bbox = {
+        "x1": float(layout.x1),
+        "y1": float(layout.y1),
+        "x2": float(layout.x2),
+        "y2": float(layout.y2),
+    }
+    orientation = normalize_layout_orientation(getattr(layout, "orientation", None))
+    effective_orientation = "vertical" if is_effective_vertical(orientation=orientation, bbox=bbox) else "horizontal"
     return {
         "layout_id": int(output.layout_id),
         "page_id": int(output.page_id),
@@ -39,12 +48,9 @@ def _output_row_to_dict(output: OcrOutput, layout: Layout, *, bound_target_ids: 
         "lookalike_warning_line_indexes": lookalike_line_indexes,
         "lookalike_warnings": lookalike_warnings,
         "reading_order": int(layout.reading_order),
-        "bbox": {
-            "x1": float(layout.x1),
-            "y1": float(layout.y1),
-            "x2": float(layout.x2),
-            "y2": float(layout.y2),
-        },
+        "orientation": orientation,
+        "effective_orientation": effective_orientation,
+        "bbox": bbox,
         "bound_target_ids": [] if bound_target_ids is None else [int(value) for value in bound_target_ids],
     }
 

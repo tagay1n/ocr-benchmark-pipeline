@@ -173,6 +173,12 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertTrue(ocr_extract._is_quota_error("RESOURCE_EXHAUSTED"))
         self.assertTrue(ocr_extract._is_quota_error("rate limit reached"))
         self.assertFalse(ocr_extract._is_quota_error("HTTP 500 internal error"))
+        self.assertTrue(
+            ocr_extract._is_daily_quota_exhausted_error(
+                "HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+            )
+        )
+        self.assertFalse(ocr_extract._is_daily_quota_exhausted_error("HTTP 429 rate limit reached"))
 
     def test_is_gemini_server_error_matches_timeout_and_http_5xx(self) -> None:
         self.assertTrue(ocr_extract._is_gemini_server_error("The read operation timed out"))
@@ -202,6 +208,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
     def test_next_available_key_skips_exhausted_and_raises_when_empty(self) -> None:
         self.assertEqual(ocr_extract._next_available_key([]), "k1")
         self.assertEqual(ocr_extract._next_available_key(["k1"]), "k2")
+        self.assertEqual(ocr_extract._next_available_key([], exclude_keys={"k1"}), "k2")
         with self.assertRaises(ocr_extract.GeminiQuotaExhaustedError):
             ocr_extract._next_available_key(["k1", "k2"])
 
@@ -577,7 +584,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         def fake_call(api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0) -> str:
             del prompt, image_bytes, temperature
             if api_key == "k1":
-                raise RuntimeError("HTTP 429 quota exceeded")
+                raise RuntimeError("HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier")
             return "from-k2"
 
         with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
@@ -591,6 +598,38 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(outputs[0]["key_alias"], "k2")
         usage_path = Path(self.test_settings.gemini_usage_path or "")
         self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), ["k1"])
+
+    def test_extract_ocr_rate_limit_rotates_without_persisting_exhausted_key(self) -> None:
+        self._write_image("ocr/rate-limit.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        def fake_call(api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0) -> str:
+            del prompt, image_bytes, temperature
+            if api_key == "k1":
+                raise RuntimeError("HTTP 429 rate limit reached")
+            return "from-k2"
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", side_effect=fake_call
+        ):
+            result = ocr_extract.extract_ocr_for_page(page_id, layout_ids=[int(layout["id"])], max_retries_per_layout=2)
+
+        self.assertEqual(result["requests_count"], 1)
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(outputs[0]["content"], "from-k2")
+        self.assertEqual(outputs[0]["key_alias"], "k2")
+        usage_path = Path(self.test_settings.gemini_usage_path or "")
+        if usage_path.exists():
+            self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), [])
 
     def test_extract_ocr_non_quota_error_does_not_mark_key_exhausted(self) -> None:
         self._write_image("ocr/non-quota.png")

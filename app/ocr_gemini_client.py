@@ -123,6 +123,25 @@ def is_quota_error(message: str) -> bool:
     )
 
 
+def is_daily_quota_exhausted_error(message: str) -> bool:
+    normalized = str(message or "").strip().lower()
+    if not normalized:
+        return False
+    if not is_quota_error(normalized):
+        return False
+    daily_markers = (
+        "perday",
+        "per_day",
+        "per day",
+        "daily",
+        "requestsperday",
+        "generaterequestsperday",
+        "requests per day",
+        "free_tier_requests",
+    )
+    return any(marker in normalized for marker in daily_markers)
+
+
 def is_gemini_server_error(message: str) -> bool:
     normalized = str(message).strip().lower()
     if not normalized:
@@ -143,4 +162,3 @@ def is_gemini_server_error(message: str) -> bool:
         "gateway timeout",
     )
     return any(marker in normalized for marker in server_error_markers)
-

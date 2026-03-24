@@ -159,6 +159,7 @@ def _migrate_sqlite_layouts_order_constraints(engine: Engine) -> None:
         try:
             with connection.begin():
                 _sqlite_normalize_layout_reading_orders(connection)
+                has_orientation_column = _sqlite_table_has_column(connection, "layouts", "orientation")
                 connection.exec_driver_sql("DROP TABLE IF EXISTS layouts_new;")
                 connection.exec_driver_sql(
                     """
@@ -171,6 +172,7 @@ def _migrate_sqlite_layouts_order_constraints(engine: Engine) -> None:
                       x2 FLOAT NOT NULL,
                       y2 FLOAT NOT NULL,
                       reading_order INTEGER NOT NULL CHECK (reading_order >= 1),
+                      orientation VARCHAR NOT NULL DEFAULT 'horizontal',
                       confidence FLOAT,
                       source VARCHAR NOT NULL DEFAULT 'manual',
                       created_at VARCHAR NOT NULL,
@@ -179,17 +181,30 @@ def _migrate_sqlite_layouts_order_constraints(engine: Engine) -> None:
                     )
                     """
                 )
-                connection.exec_driver_sql(
-                    """
-                    INSERT INTO layouts_new (
-                      id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
+                if has_orientation_column:
+                    connection.exec_driver_sql(
+                        """
+                        INSERT INTO layouts_new (
+                          id, page_id, class_name, x1, y1, x2, y2, reading_order, orientation, confidence, source, created_at, updated_at
+                        )
+                        SELECT
+                          id, page_id, class_name, x1, y1, x2, y2, reading_order, orientation, confidence, source, created_at, updated_at
+                        FROM layouts
+                        ORDER BY id ASC
+                        """
                     )
-                    SELECT
-                      id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
-                    FROM layouts
-                    ORDER BY id ASC
-                    """
-                )
+                else:
+                    connection.exec_driver_sql(
+                        """
+                        INSERT INTO layouts_new (
+                          id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
+                        )
+                        SELECT
+                          id, page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at
+                        FROM layouts
+                        ORDER BY id ASC
+                        """
+                    )
                 connection.exec_driver_sql("DROP TABLE layouts;")
                 connection.exec_driver_sql("ALTER TABLE layouts_new RENAME TO layouts;")
                 connection.exec_driver_sql(
@@ -258,10 +273,45 @@ def _migrate_sqlite_pages_layout_order_mode_column(engine: Engine) -> None:
             connection.commit()
 
 
+def _migrate_sqlite_layout_orientation_column(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.connect() as connection:
+        if not _sqlite_table_exists(connection, "layouts"):
+            return
+        if not _sqlite_table_has_column(connection, "layouts", "orientation"):
+            if connection.in_transaction():
+                connection.commit()
+            connection.exec_driver_sql(
+                "ALTER TABLE layouts ADD COLUMN orientation VARCHAR NOT NULL DEFAULT 'horizontal';"
+            )
+            if connection.in_transaction():
+                connection.commit()
+
+        connection.exec_driver_sql(
+            """
+            UPDATE layouts
+            SET orientation = CASE
+                WHEN lower(trim(replace(coalesce(orientation, ''), '_', '-'))) IN ('vertical', 'v', 'ver')
+                    THEN 'vertical'
+                WHEN lower(trim(replace(coalesce(orientation, ''), '_', '-'))) IN ('horizontal', 'h', 'hor')
+                    THEN 'horizontal'
+                WHEN (y2 - y1) >= ((x2 - x1) * 2.0)
+                    THEN 'vertical'
+                ELSE 'horizontal'
+            END
+            """
+        )
+        if connection.in_transaction():
+            connection.commit()
+
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
     _migrate_sqlite_layouts_order_constraints(engine)
+    _migrate_sqlite_layout_orientation_column(engine)
     _migrate_sqlite_layout_benchmark_predictions_column(engine)
     _migrate_sqlite_pages_layout_order_mode_column(engine)
     # Ensure metadata-defined indexes/constraints are present after migrations.

@@ -254,6 +254,9 @@ def create_page_layout(page_id: int, payload: CreateLayoutRequest) -> dict[str, 
     class_name = payload.class_name.strip()
     if not class_name:
         raise HTTPException(status_code=400, detail="class_name cannot be empty.")
+    orientation = None if payload.orientation is None else payload.orientation.strip()
+    if orientation == "":
+        raise HTTPException(status_code=400, detail="orientation cannot be empty.")
     try:
         layout = create_layout(
             page_id,
@@ -263,6 +266,7 @@ def create_page_layout(page_id: int, payload: CreateLayoutRequest) -> dict[str, 
             x2=payload.bbox.x2,
             y2=payload.bbox.y2,
             reading_order=payload.reading_order,
+            orientation=orientation,
         )
     except ValueError as error:
         raise _http_exception_from_value_error(error) from error
@@ -302,11 +306,15 @@ def patch_layout(layout_id: int, payload: UpdateLayoutRequest) -> dict[str, obje
     class_name = None if payload.class_name is None else payload.class_name.strip()
     if class_name == "":
         raise HTTPException(status_code=400, detail="class_name cannot be empty.")
+    orientation = None if payload.orientation is None else payload.orientation.strip()
+    if orientation == "":
+        raise HTTPException(status_code=400, detail="orientation cannot be empty.")
     try:
         layout = update_layout(
             layout_id,
             class_name=class_name,
             reading_order=payload.reading_order,
+            orientation=orientation,
             x1=None if payload.bbox is None else payload.bbox.x1,
             y1=None if payload.bbox is None else payload.bbox.y1,
             x2=None if payload.bbox is None else payload.bbox.x2,

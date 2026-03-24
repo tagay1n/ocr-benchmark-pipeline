@@ -113,6 +113,11 @@
         reviewNavIndex: "layout.review_nav.index",
         lastAddedClass: "layout.last_added_class",
       };
+      const LAYOUT_ORIENTATION_VALUES = ["horizontal", "vertical"];
+      const LAYOUT_ORIENTATION_GLYPH_BY_VALUE = {
+        horizontal: "↔",
+        vertical: "↕",
+      };
 
       const pageMeta = document.getElementById("page-meta");
       const imageViewport = document.getElementById("image-viewport");
@@ -546,6 +551,7 @@
         return {
           class_name: normalizeClassName(layout.class_name) || "text",
           reading_order: layout.reading_order === null ? null : Number(layout.reading_order),
+          orientation: normalizeLayoutOrientationValue(layout.orientation),
           bbox: {
             x1: roundTo4(layout.bbox.x1),
             y1: roundTo4(layout.bbox.y1),
@@ -559,11 +565,23 @@
         return (
           a.class_name === b.class_name &&
           a.reading_order === b.reading_order &&
+          normalizeLayoutOrientationValue(a.orientation) === normalizeLayoutOrientationValue(b.orientation) &&
           a.bbox.x1 === b.bbox.x1 &&
           a.bbox.y1 === b.bbox.y1 &&
           a.bbox.x2 === b.bbox.x2 &&
           a.bbox.y2 === b.bbox.y2
         );
+      }
+
+      function normalizeLayoutOrientationValue(value) {
+        const normalized = String(value || "").trim().toLowerCase().replaceAll("_", "-");
+        if (normalized === "horizontal" || normalized === "h") {
+          return "horizontal";
+        }
+        if (normalized === "vertical" || normalized === "v") {
+          return "vertical";
+        }
+        return "horizontal";
       }
 
       function parseStoredDraft(rawDraft) {
@@ -602,6 +620,7 @@
         return {
           class_name: className,
           reading_order: readingOrder,
+          orientation: normalizeLayoutOrientationValue(rawDraft.orientation),
           bbox: { x1, y1, x2, y2 },
         };
       }
@@ -869,8 +888,13 @@
         if (!exists) {
           return;
         }
+        const previousSelectedLayoutId = Number(state.selectedLayoutId);
         state.selectedLayoutId = normalizedId;
-        applySelectedLayoutStyles({ scrollRowIntoView });
+        if (previousSelectedLayoutId !== normalizedId) {
+          renderOverlay();
+        } else {
+          applySelectedLayoutStyles({ scrollRowIntoView });
+        }
         if (scrollImageToLayout) {
           ensureLayoutVisible(normalizedId);
         }
@@ -880,10 +904,15 @@
         if (state.selectedLayoutId === null && state.activePointHighlight === null) {
           return;
         }
+        const hadSelectedLayout = state.selectedLayoutId !== null;
         state.selectedLayoutId = null;
         state.activePointHighlight = null;
-        applySelectedLayoutStyles();
-        applyActivePointHighlightStyles();
+        if (hadSelectedLayout) {
+          renderOverlay();
+        } else {
+          applySelectedLayoutStyles();
+          applyActivePointHighlightStyles();
+        }
         imageMagnifier.refresh();
       }
 
@@ -993,6 +1022,7 @@
 
         layout.class_name = draft.class_name;
         layout.reading_order = draft.reading_order;
+        layout.orientation = normalizeLayoutOrientationValue(draft.orientation);
         layout.bbox = { ...draft.bbox };
 
         const serverLayout = state.serverLayoutsById[String(layoutId)];
@@ -1487,6 +1517,7 @@
         cursorGuideVertical = verticalGuide;
 
         const activeBindingCaptionId = Number(state.activeBindingCaptionId);
+        const selectedLayoutId = Number(state.selectedLayoutId);
         const activeBindingTargetIds = Number.isInteger(activeBindingCaptionId) && activeBindingCaptionId > 0
           ? new Set(captionTargetIds(activeBindingCaptionId))
           : new Set();
@@ -1515,7 +1546,7 @@
               return;
             }
             const target = event.target;
-            if (target instanceof Element && target.closest(".box-handle, .box-bind-btn")) {
+            if (target instanceof Element && target.closest(".box-handle, .box-overlay-btn")) {
               return;
             }
 
@@ -1549,8 +1580,11 @@
           box.appendChild(label);
 
           if (isCaptionClass(layout.class_name)) {
+            const cornerControls = document.createElement("div");
+            cornerControls.className = "box-corner-controls";
+
             const bindBtn = document.createElement("button");
-            bindBtn.className = "box-bind-btn";
+            bindBtn.className = "box-bind-btn box-overlay-btn";
             bindBtn.type = "button";
             bindBtn.textContent = "🔗︎";
             const isActiveCaption = layoutId === activeBindingCaptionId;
@@ -1571,7 +1605,74 @@
                 setStatus("Bind mode enabled. Click table, picture, or formula boxes to toggle binding.");
               }
             });
-            box.appendChild(bindBtn);
+            cornerControls.appendChild(bindBtn);
+
+            if (layoutId === selectedLayoutId) {
+              const orientationBtn = document.createElement("button");
+              orientationBtn.className = "box-orientation-btn box-overlay-btn";
+              orientationBtn.type = "button";
+              const currentOrientation = normalizeLayoutOrientationValue(layout.orientation);
+              const currentIndex = LAYOUT_ORIENTATION_VALUES.indexOf(currentOrientation);
+              const nextOrientation =
+                LAYOUT_ORIENTATION_VALUES[(currentIndex + 1 + LAYOUT_ORIENTATION_VALUES.length) % LAYOUT_ORIENTATION_VALUES.length];
+              orientationBtn.textContent = LAYOUT_ORIENTATION_GLYPH_BY_VALUE[currentOrientation] || "◌";
+              orientationBtn.title = `Orientation: ${currentOrientation}. Click to set ${nextOrientation}.`;
+              orientationBtn.setAttribute("aria-label", `Set orientation ${nextOrientation}`);
+              orientationBtn.addEventListener("pointerdown", (event) => {
+                event.stopPropagation();
+              });
+              orientationBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const latestLayout = findLayoutById(layoutId);
+                if (!latestLayout) {
+                  return;
+                }
+                const draft = toDraftShape(latestLayout);
+                draft.orientation = nextOrientation;
+                if (!upsertDraftForLayout(layoutId, draft)) {
+                  return;
+                }
+                renderLayouts();
+                setStatus(`Orientation set to ${nextOrientation}.`);
+              });
+              cornerControls.appendChild(orientationBtn);
+            }
+
+            box.appendChild(cornerControls);
+          } else if (layoutId === selectedLayoutId) {
+            const cornerControls = document.createElement("div");
+            cornerControls.className = "box-corner-controls";
+            const orientationBtn = document.createElement("button");
+            orientationBtn.className = "box-orientation-btn box-overlay-btn";
+            orientationBtn.type = "button";
+            const currentOrientation = normalizeLayoutOrientationValue(layout.orientation);
+            const currentIndex = LAYOUT_ORIENTATION_VALUES.indexOf(currentOrientation);
+            const nextOrientation =
+              LAYOUT_ORIENTATION_VALUES[(currentIndex + 1 + LAYOUT_ORIENTATION_VALUES.length) % LAYOUT_ORIENTATION_VALUES.length];
+            orientationBtn.textContent = LAYOUT_ORIENTATION_GLYPH_BY_VALUE[currentOrientation] || "◌";
+            orientationBtn.title = `Orientation: ${currentOrientation}. Click to set ${nextOrientation}.`;
+            orientationBtn.setAttribute("aria-label", `Set orientation ${nextOrientation}`);
+            orientationBtn.addEventListener("pointerdown", (event) => {
+              event.stopPropagation();
+            });
+            orientationBtn.addEventListener("click", (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const latestLayout = findLayoutById(layoutId);
+              if (!latestLayout) {
+                return;
+              }
+              const draft = toDraftShape(latestLayout);
+              draft.orientation = nextOrientation;
+              if (!upsertDraftForLayout(layoutId, draft)) {
+                return;
+              }
+              renderLayouts();
+              setStatus(`Orientation set to ${nextOrientation}.`);
+            });
+            cornerControls.appendChild(orientationBtn);
+            box.appendChild(cornerControls);
           }
 
           const resizeHandles = adaptiveResizeHandlesForBBox(layout.bbox, overlayWidth, overlayHeight);
@@ -2174,6 +2275,7 @@
             reading_order: Number.isInteger(Number(layout.reading_order))
               ? Number(layout.reading_order)
               : null,
+            orientation: normalizeLayoutOrientationValue(layout.orientation),
             bbox: {
               x1: parseBoundedNumber(bboxFields[0][1].value),
               y1: parseBoundedNumber(bboxFields[1][1].value),
@@ -2197,6 +2299,7 @@
             id: layoutId,
             class_name: draft.class_name,
             reading_order: draft.reading_order,
+            orientation: normalizeLayoutOrientationValue(draft.orientation),
             bbox: { ...draft.bbox },
           });
         }

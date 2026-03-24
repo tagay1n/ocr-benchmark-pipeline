@@ -39,6 +39,11 @@ from .layout_classes import (
     normalize_detected_class_name,
     normalize_persisted_class_name,
 )
+from .layout_orientation import (
+    infer_layout_orientation_from_bbox,
+    is_effective_vertical,
+    normalize_layout_orientation,
+)
 from .models import CaptionBinding, Layout, OcrOutput, Page
 from .ocr_output_rules import (
     can_preserve_output_for_class_transition,
@@ -171,17 +176,22 @@ def _page_to_dict(page_row: Page) -> dict[str, Any]:
 
 
 def _layout_to_dict(layout: Layout, *, bound_target_ids: list[int] | None = None) -> dict[str, Any]:
+    bbox = {
+        "x1": float(layout.x1),
+        "y1": float(layout.y1),
+        "x2": float(layout.x2),
+        "y2": float(layout.y2),
+    }
+    orientation = normalize_layout_orientation(getattr(layout, "orientation", None))
+    effective_orientation = "vertical" if is_effective_vertical(orientation=orientation, bbox=bbox) else "horizontal"
     return {
         "id": int(layout.id),
         "page_id": int(layout.page_id),
         "class_name": layout.class_name,
-        "bbox": {
-            "x1": float(layout.x1),
-            "y1": float(layout.y1),
-            "x2": float(layout.x2),
-            "y2": float(layout.y2),
-        },
+        "bbox": bbox,
         "reading_order": int(layout.reading_order),
+        "orientation": orientation,
+        "effective_orientation": effective_orientation,
         "confidence": layout.confidence,
         "source": layout.source,
         "created_at": layout.created_at,
@@ -473,6 +483,9 @@ def detect_layouts_for_page(
                     x2=row["x2"],
                     y2=row["y2"],
                     reading_order=existing_count + idx,
+                    orientation=infer_layout_orientation_from_bbox(
+                        bbox={"x1": row["x1"], "y1": row["y1"], "x2": row["x2"], "y2": row["y2"]}
+                    ),
                     confidence=row["confidence"],
                     source=detector_source,
                     created_at=now,
@@ -516,9 +529,15 @@ def create_layout(
     x2: float,
     y2: float,
     reading_order: int | None,
+    orientation: str | None = None,
 ) -> dict[str, Any]:
     validate_bbox(x1, y1, x2, y2)
     class_name = normalize_persisted_class_name(class_name)
+    orientation = (
+        infer_layout_orientation_from_bbox(bbox={"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+        if orientation is None
+        else normalize_layout_orientation(orientation)
+    )
     now = _utc_now()
 
     with get_session() as session:
@@ -556,6 +575,7 @@ def create_layout(
             x2=x2,
             y2=y2,
             reading_order=append_order,
+            orientation=orientation,
             confidence=None,
             source="manual",
             created_at=now,
@@ -580,9 +600,11 @@ def update_layout(
     y1: float | None,
     x2: float | None,
     y2: float | None,
+    orientation: str | None = None,
 ) -> dict[str, Any]:
     now = _utc_now()
     next_class_name_input = None if class_name is None else normalize_persisted_class_name(class_name)
+    next_orientation_input = None if orientation is None else normalize_layout_orientation(orientation)
     with get_session() as session:
         layout = session.get(Layout, layout_id)
         if layout is None:
@@ -590,6 +612,11 @@ def update_layout(
 
         next_class_name = layout.class_name if next_class_name_input is None else next_class_name_input
         next_reading_order = int(layout.reading_order) if reading_order is None else int(reading_order)
+        next_orientation = (
+            normalize_layout_orientation(getattr(layout, "orientation", None))
+            if next_orientation_input is None
+            else next_orientation_input
+        )
         next_x1 = float(layout.x1) if x1 is None else x1
         next_y1 = float(layout.y1) if y1 is None else y1
         next_x2 = float(layout.x2) if x2 is None else x2
@@ -601,6 +628,7 @@ def update_layout(
 
         previous_class_name = normalize_class_name(str(layout.class_name))
         class_changed = next_class_name != str(layout.class_name)
+        orientation_changed = next_orientation != normalize_layout_orientation(getattr(layout, "orientation", None))
         bbox_changed = (
             abs(next_x1 - float(layout.x1)) > 1e-12
             or abs(next_y1 - float(layout.y1)) > 1e-12
@@ -612,11 +640,12 @@ def update_layout(
         if next_reading_order != int(layout.reading_order):
             next_reading_order = _move_layout_to_reading_order(session, layout, next_reading_order)
         layout.reading_order = next_reading_order
+        layout.orientation = next_orientation
         layout.x1 = next_x1
         layout.y1 = next_y1
         layout.x2 = next_x2
         layout.y2 = next_y2
-        if class_changed or bbox_changed:
+        if class_changed or orientation_changed or bbox_changed:
             layout.updated_at = now
 
         if class_changed and not bbox_changed:

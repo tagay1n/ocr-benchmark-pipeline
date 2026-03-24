@@ -4445,6 +4445,30 @@
         return String(content ?? "").replace(/\r\n/g, "\n").split("\n");
       }
 
+      function isMarkdownHeadingLine(line) {
+        return /^\s{0,3}#{1,6}[ \t]+\S/.test(String(line ?? ""));
+      }
+
+      function renderPreserveHeadingLine(container, line, { onRendered = null } = {}) {
+        const text = String(line ?? "");
+        const match = text.match(/^\s{0,3}(#{1,6})[ \t]+(.+)$/);
+        if (!match) {
+          return false;
+        }
+        const level = Math.max(1, Math.min(6, Number(match[1].length)));
+        const headingText = String(match[2] ?? "").trim();
+        const heading = document.createElement("span");
+        heading.className = `recon-preserve-heading recon-preserve-heading-l${level}`;
+        if (!headingText) {
+          heading.textContent = "\u00A0";
+          container.appendChild(heading);
+          return true;
+        }
+        renderMarkdownInlineInto(heading, headingText, { onRendered });
+        container.appendChild(heading);
+        return true;
+      }
+
       function renderPreserveLinesContent(container, content, { renderMarkdown = false, onRendered = null } = {}) {
         if (!container) {
           return;
@@ -4458,7 +4482,13 @@
           const text = document.createElement("span");
           text.className = "recon-preserve-line-text";
           if (renderMarkdown && line.length > 0) {
-            renderMarkdownInlineInto(text, line, { onRendered });
+            if (isMarkdownHeadingLine(line)) {
+              if (!renderPreserveHeadingLine(text, line, { onRendered })) {
+                renderMarkdownInlineInto(text, line, { onRendered });
+              }
+            } else {
+              renderMarkdownInlineInto(text, line, { onRendered });
+            }
           } else {
             text.textContent = line.length > 0 ? line : "\u00A0";
           }

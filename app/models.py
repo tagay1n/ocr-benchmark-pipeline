@@ -52,6 +52,7 @@ class Layout(Base):
     x2: Mapped[float] = mapped_column(Float, nullable=False)
     y2: Mapped[float] = mapped_column(Float, nullable=False)
     reading_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    orientation: Mapped[str] = mapped_column(String, nullable=False, default="horizontal")
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     source: Mapped[str] = mapped_column(String, nullable=False, default="manual")
     created_at: Mapped[str] = mapped_column(String, nullable=False)

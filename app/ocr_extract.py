@@ -28,6 +28,7 @@ from .ocr_gemini_client import (
     extract_content_from_json_response,
     extract_text_from_response,
     gemini_generate_content,
+    is_daily_quota_exhausted_error,
     is_gemini_server_error,
     is_quota_error,
     key_alias,
@@ -82,12 +83,13 @@ def _save_usage_state(exhausted_keys: list[str]) -> None:
     path.write_text(json.dumps(exhausted_keys, ensure_ascii=True, indent=2), encoding="utf-8")
 
 
-def _next_available_key(exhausted_keys: list[str]) -> str:
+def _next_available_key(exhausted_keys: list[str], *, exclude_keys: set[str] | None = None) -> str:
     configured = list(settings.gemini_keys)
     if not configured:
         raise GeminiQuotaExhaustedError("No Gemini API keys configured.")
+    excluded = exclude_keys or set()
     exhausted_set = set(exhausted_keys)
-    candidates = [key for key in configured if key not in exhausted_set]
+    candidates = [key for key in configured if key not in exhausted_set and key not in excluded]
     if not candidates:
         raise GeminiQuotaExhaustedError("All configured Gemini keys are exhausted for today.")
     return candidates[0]
@@ -112,6 +114,7 @@ _extract_text_from_response = extract_text_from_response
 _extract_content_from_json_response = extract_content_from_json_response
 _gemini_generate_content = gemini_generate_content
 _is_quota_error = is_quota_error
+_is_daily_quota_exhausted_error = is_daily_quota_exhausted_error
 _is_gemini_server_error = is_gemini_server_error
 _key_alias = key_alias
 
@@ -261,6 +264,7 @@ def extract_ocr_for_page(
     exhausted_keys = _load_usage_state()
     section_header_levels = _section_header_levels_by_layout_id(layouts)
     list_item_indent_levels = _list_item_indent_levels_by_layout_id(layouts)
+    revalidated_exhausted_pool = False
 
     pending_outputs: list[dict[str, Any]] = []
     prompt_debug_rows: list[dict[str, Any]] = []
@@ -311,8 +315,19 @@ def extract_ocr_for_page(
         last_error: str | None = None
         response_text = ""
         used_key = ""
+        retry_excluded_keys: set[str] = set()
         for _ in range(resolved_max_retries):
-            key = _next_available_key(exhausted_keys)
+            try:
+                key = _next_available_key(exhausted_keys, exclude_keys=retry_excluded_keys)
+            except GeminiQuotaExhaustedError as error:
+                if not revalidated_exhausted_pool and exhausted_keys:
+                    exhausted_keys = []
+                    _save_usage_state(exhausted_keys)
+                    retry_excluded_keys.clear()
+                    revalidated_exhausted_pool = True
+                    continue
+                last_error = str(error)
+                break
             try:
                 response_text = _gemini_generate_content(
                     key,
@@ -327,7 +342,9 @@ def extract_ocr_for_page(
             except Exception as error:
                 error_text = str(error)
                 if _is_quota_error(error_text):
-                    _mark_key_exhausted(exhausted_keys, key)
+                    retry_excluded_keys.add(key)
+                    if _is_daily_quota_exhausted_error(error_text):
+                        _mark_key_exhausted(exhausted_keys, key)
                     last_error = error_text
                     continue
                 last_error = error_text

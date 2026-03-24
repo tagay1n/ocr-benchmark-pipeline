@@ -24,11 +24,13 @@ class CreateLayoutRequest(BaseModel):
     class_name: str = Field(min_length=1, max_length=120)
     bbox: BBoxPayload
     reading_order: int | None = Field(default=None, ge=1)
+    orientation: str | None = Field(default=None, min_length=1, max_length=32)
 
 
 class UpdateLayoutRequest(BaseModel):
     class_name: str | None = Field(default=None, min_length=1, max_length=120)
     reading_order: int | None = Field(default=None, ge=1)
+    orientation: str | None = Field(default=None, min_length=1, max_length=32)
     bbox: BBoxPayload | None = None
 
 

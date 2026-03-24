@@ -593,7 +593,7 @@ class PipelineStagesTests(unittest.TestCase):
         ) -> str:
             del prompt, image_bytes
             if api_key == "k1":
-                raise RuntimeError("HTTP 429 quota exceeded")
+                raise RuntimeError("HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier")
             self.assertEqual(temperature, 0.0)
             return "Extracted text"
 

@@ -621,6 +621,7 @@ export function mergeLayoutsForReview({
       ...serverLayout,
       class_name: draft.class_name,
       reading_order: draft.reading_order,
+      orientation: draft.orientation,
       bbox: { ...draft.bbox },
     });
   }

@@ -251,6 +251,28 @@ class LayoutsAndRuntimeInternalsTests(unittest.TestCase):
             [int(top_left["id"]), int(inserted["id"]), int(lower_left["id"])],
         )
 
+    def test_layout_orientation_create_and_patch_roundtrip(self) -> None:
+        self._write_image("layout/orientation-roundtrip.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+
+        created = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=None,
+                orientation="vertical",
+                bbox=main.BBoxPayload(x1=0.10, y1=0.10, x2=0.20, y2=0.60),
+            ),
+        )["layout"]
+        self.assertEqual(str(created["orientation"]), "vertical")
+
+        patched = main.patch_layout(
+            int(created["id"]),
+            main.UpdateLayoutRequest(orientation="horizontal"),
+        )["layout"]
+        self.assertEqual(str(patched["orientation"]), "horizontal")
+
     def test_create_layout_multi_column_inserts_after_same_column_anchor(self) -> None:
         self._write_image("layout/multi-column-insert.png")
         main.scan_images()
