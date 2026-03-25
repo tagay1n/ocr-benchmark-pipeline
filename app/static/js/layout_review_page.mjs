@@ -188,7 +188,6 @@
         drawPreviewBBox: null,
         draggingLayoutId: null,
         dragOverLayoutId: null,
-        dragOverPosition: null,
         reviewSubmitInProgress: false,
         detectInProgress: false,
         layoutOrderModeUpdateInProgress: false,
@@ -1037,24 +1036,15 @@
         return true;
       }
 
-      function rowDropPosition(row, event) {
-        const rect = row.getBoundingClientRect();
-        if (!rect.height) {
-          return "after";
-        }
-        return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-      }
-
       function clearRowDragUi() {
-        for (const row of layoutsBody.querySelectorAll("tr.layout-dragging, tr.layout-drop-before, tr.layout-drop-after")) {
-          row.classList.remove("layout-dragging", "layout-drop-before", "layout-drop-after");
+        for (const row of layoutsBody.querySelectorAll("tr.layout-dragging, tr.layout-drop-target")) {
+          row.classList.remove("layout-dragging", "layout-drop-target");
         }
       }
 
       function resetRowDragState() {
         state.draggingLayoutId = null;
         state.dragOverLayoutId = null;
-        state.dragOverPosition = null;
         clearRowDragUi();
       }
 
@@ -1165,7 +1155,7 @@
         return true;
       }
 
-      function setRowDropIndicator(targetLayoutId, position) {
+      function setRowDropIndicator(targetLayoutId) {
         const targetId = Number(targetLayoutId);
         if (!Number.isInteger(targetId) || targetId <= 0) {
           return;
@@ -1173,7 +1163,7 @@
         if (targetId === Number(state.draggingLayoutId)) {
           return;
         }
-        if (state.dragOverLayoutId === targetId && state.dragOverPosition === position) {
+        if (state.dragOverLayoutId === targetId) {
           return;
         }
 
@@ -1185,12 +1175,11 @@
         if (!row) {
           return;
         }
-        row.classList.add(position === "before" ? "layout-drop-before" : "layout-drop-after");
+        row.classList.add("layout-drop-target");
         state.dragOverLayoutId = targetId;
-        state.dragOverPosition = position;
       }
 
-      function finishRowReorder(targetLayoutId, position) {
+      function finishRowReorder(targetLayoutId) {
         const draggingLayoutId = Number(state.draggingLayoutId);
         if (!Number.isInteger(draggingLayoutId) || draggingLayoutId <= 0) {
           resetRowDragState();
@@ -1202,7 +1191,7 @@
           orderedIds,
           draggedId: draggingLayoutId,
           targetId: targetLayoutId,
-          position,
+          position: targetLayoutId === null || targetLayoutId === undefined ? "after" : "before",
         });
         resetRowDragState();
         if (!nextOrder) {
@@ -1264,7 +1253,6 @@
 
         state.draggingLayoutId = normalizedLayoutId;
         state.dragOverLayoutId = null;
-        state.dragOverPosition = null;
         clearRowDragUi();
 
         const row = event.currentTarget;
@@ -1287,8 +1275,7 @@
         if (!(row instanceof HTMLTableRowElement)) {
           return;
         }
-        const position = rowDropPosition(row, event);
-        setRowDropIndicator(layoutId, position);
+        setRowDropIndicator(layoutId);
         if (event.dataTransfer) {
           event.dataTransfer.dropEffect = "move";
         }
@@ -1300,10 +1287,7 @@
         }
         event.preventDefault();
         event.stopPropagation();
-        const row = event.currentTarget;
-        const position =
-          row instanceof HTMLTableRowElement ? rowDropPosition(row, event) : "after";
-        finishRowReorder(layoutId, position);
+        finishRowReorder(layoutId);
       }
 
       function bboxWithMinSize(bbox, handle) {
@@ -3350,11 +3334,10 @@
           return;
         }
         event.preventDefault();
-        const orderedIds = layoutIdsInCurrentOrder();
-        const lastId = orderedIds.length > 0 ? orderedIds[orderedIds.length - 1] : null;
-        if (Number.isInteger(lastId) && lastId !== draggingLayoutId) {
-          setRowDropIndicator(lastId, "after");
-        }
+        clearRowDragUi();
+        const draggingRow = layoutsBody.querySelector(`tr[data-layout-id="${draggingLayoutId}"]`);
+        draggingRow?.classList.add("layout-dragging");
+        state.dragOverLayoutId = null;
         if (event.dataTransfer) {
           event.dataTransfer.dropEffect = "move";
         }
@@ -3373,7 +3356,7 @@
           return;
         }
         event.preventDefault();
-        finishRowReorder(null, "after");
+        finishRowReorder(null);
       });
       zoomTrigger.addEventListener("click", () => {
         if (zoomMenu.hidden) {
