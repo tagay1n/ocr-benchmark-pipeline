@@ -4302,6 +4302,9 @@
         if (!viewport || !content || !bbox) {
           return false;
         }
+        if (!preferVerticalCenter) {
+          return ensureViewportBBoxVisible(bbox, viewport, content, { paddingPx: 24 });
+        }
         const target = computeViewportAutoCenterTarget({
           bbox,
           contentWidth: content.clientWidth,
@@ -4319,7 +4322,7 @@
         if (!target) return false;
         viewport.scrollLeft = target.left;
         viewport.scrollTop = target.top;
-        return true;
+        return ensureViewportBBoxVisible(bbox, viewport, content, { paddingPx: 24 }) || true;
       }
 
       function scrollVisiblePreviewToLayout(layoutId, { preferVerticalCenter = false } = {}) {
@@ -4539,8 +4542,8 @@
           setLineReviewCursor(normalized, firstUnapprovedLineIndex(normalized), { persist: false });
         }
         applySelectedStyles();
-        const preferVerticalCenter = state.viewMode === "line_by_line";
-        const shouldAutoCenter = scrollImageToLayout || (isUserSelection && preferVerticalCenter);
+        const preferVerticalCenter = false;
+        const shouldAutoCenter = scrollImageToLayout || isUserSelection;
         if (shouldAutoCenter) {
           ensureLayoutVisible(normalized, 8, { preferVerticalCenter });
         }
