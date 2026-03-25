@@ -4676,9 +4676,6 @@
               if (text.scrollHeight > maxRowHeight) {
                 return false;
               }
-              if (verticalFlow && text.scrollWidth > Math.ceil(availableWidth + 0.5)) {
-                return false;
-              }
             }
             return true;
           },
@@ -4686,8 +4683,12 @@
         const comfortableLineHeightRatio = 1.18;
         const comfortableLineHeightPx = Math.max(1, slotHeight * 0.96);
         const comfortableFontSize = comfortableLineHeightPx / comfortableLineHeightRatio;
-        const resolvedFontSize = Math.max(2, Math.min(bestFontSize, comfortableFontSize));
-        const resolvedLineHeight = Math.min(slotHeight, resolvedFontSize * comfortableLineHeightRatio);
+        const resolvedFontSize = verticalFlow
+          ? Math.max(2, bestFontSize)
+          : Math.max(2, Math.min(bestFontSize, comfortableFontSize));
+        const resolvedLineHeight = verticalFlow
+          ? Math.max(1, resolvedFontSize)
+          : Math.min(slotHeight, resolvedFontSize * comfortableLineHeightRatio);
         const resolvedFont = `${resolvedFontSize}px`;
         const resolvedLineHeightPx = `${resolvedLineHeight}px`;
         for (const row of rows) {
@@ -4699,11 +4700,15 @@
         }
 
         if (verticalFlow) {
+          const targetWidth = Math.max(1, availableWidth - 0.5);
           for (const row of rows) {
             const text = row.querySelector(".recon-preserve-line-text");
             if (text instanceof HTMLElement) {
-              text.style.transform = "";
-              text.style.transformOrigin = "";
+              const measuredWidth = Number(text.scrollWidth) || 0;
+              const fitScaleX =
+                measuredWidth > 0 ? Math.max(0.12, targetWidth / Math.max(1e-6, measuredWidth)) : 1;
+              text.style.transform = `rotate(180deg) scaleX(${fitScaleX})`;
+              text.style.transformOrigin = "center center";
               text.style.wordSpacing = "0px";
               text.style.letterSpacing = "0px";
             }
