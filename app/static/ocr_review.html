@@ -918,6 +918,28 @@
         align-items: stretch;
       }
 
+      .recon-item-content.preserve-lines.vertical-flow {
+        flex-direction: column;
+      }
+
+      .recon-item-content.preserve-lines.vertical-flow .recon-preserve-line {
+        align-items: center;
+        justify-content: center;
+      }
+
+      .recon-item-content.preserve-lines.vertical-flow .recon-preserve-line-text {
+        writing-mode: vertical-rl;
+        text-orientation: mixed;
+        transform: rotate(180deg);
+        transform-origin: center center;
+        white-space: pre;
+      }
+
+      .recon-item-content.preserve-lines.vertical-rotated {
+        transform-origin: top left;
+        transform: translateX(var(--recon-vertical-shift-x, 0px)) rotate(90deg);
+      }
+
       .recon-item-content.preserve-lines.markdown-rendered,
       .recon-item-content.preserve-lines.markdown-rendered p,
       .recon-item-content.preserve-lines.markdown-rendered ul,

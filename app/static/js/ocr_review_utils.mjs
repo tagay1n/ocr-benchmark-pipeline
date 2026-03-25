@@ -45,6 +45,28 @@ export function isLineReviewRequiredOutput({ className, outputFormat } = {}) {
   );
 }
 
+export function resolveReconstructedLineFlow({
+  className,
+  outputFormat,
+  orientation = null,
+  effectiveOrientation = null,
+  bbox = null,
+} = {}) {
+  const normalizedFormat = String(outputFormat || "").trim().toLowerCase();
+  if (normalizedFormat !== "markdown") {
+    return "horizontal";
+  }
+  if (!isLineReviewRequiredOutput({ className, outputFormat: normalizedFormat })) {
+    return "horizontal";
+  }
+  const effective = resolveOutputEffectiveOrientation({
+    orientation,
+    effectiveOrientation,
+    bbox,
+  });
+  return effective === "vertical" ? "vertical" : "horizontal";
+}
+
 function normalizeOutputClassName(className) {
   return String(className || "")
     .trim()

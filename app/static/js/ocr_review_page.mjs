@@ -49,6 +49,7 @@
         normalizeReconstructedRenderMode,
         normalizeLayoutOrientationValue,
         reconstructedLayerRankForOutputClass,
+        resolveReconstructedLineFlow,
         resolveLineBandAxisRect,
         resolveOutputEffectiveOrientation,
         resolveViewportScrollSyncUpdate,
@@ -2121,6 +2122,13 @@
         });
       }
 
+      function useVerticalLineAxis(_output) {
+        // Current OCR outputs do not carry explicit writing-direction metadata.
+        // "vertical" orientation is bbox geometry, not guaranteed vertical text flow.
+        // Keep line logic row-based unless we introduce a dedicated vertical-text signal.
+        return false;
+      }
+
       function outputEffectiveOrientation(output) {
         return resolveOutputEffectiveOrientation({
           orientation: output?.orientation,
@@ -2129,13 +2137,20 @@
         });
       }
 
-      function outputIsVertical(output) {
-        return normalizeLayoutOrientationValue(outputEffectiveOrientation(output)) === "vertical";
+      function shouldRenderReconstructedVertical(output) {
+        return (
+          resolveReconstructedLineFlow({
+            className: output?.class_name,
+            outputFormat: output?.output_format,
+            orientation: output?.orientation,
+            effectiveOrientation: output?.effective_orientation,
+            bbox: output?.bbox,
+          }) === "vertical"
+        );
       }
 
       function lineBandAxisRectForOutput(output, lineBand) {
-        const orientation = outputEffectiveOrientation(output);
-        return resolveLineBandAxisRect(lineBand, orientation);
+        return resolveLineBandAxisRect(lineBand, useVerticalLineAxis(output) ? "vertical" : "horizontal");
       }
 
       function applyLineBandAxisStyle(marker, output, lineBand) {
@@ -2150,7 +2165,7 @@
         marker.style.top = `${Math.max(0, Math.min(1, Number(axisRect.topRatio))) * 100}%`;
         marker.style.width = `${Math.max(0, Math.min(1, Number(axisRect.widthRatio))) * 100}%`;
         marker.style.height = `${Math.max(0, Math.min(1, Number(axisRect.heightRatio))) * 100}%`;
-        marker.dataset.lineOrientation = outputIsVertical(output) ? "vertical" : "horizontal";
+        marker.dataset.lineOrientation = useVerticalLineAxis(output) ? "vertical" : "horizontal";
         return true;
       }
 
@@ -2898,10 +2913,19 @@
         const rawTop = contentHeight * Number(axisRect.topRatio);
         const rawWidth = Math.max(1e-6, contentWidth * Number(axisRect.widthRatio));
         const rawHeight = Math.max(1e-6, contentHeight * Number(axisRect.heightRatio));
-        if (![rawLeft, rawTop, rawWidth, rawHeight].every((value) => Number.isFinite(value) && value > 0)) {
+        if (
+          !Number.isFinite(rawLeft) ||
+          !Number.isFinite(rawTop) ||
+          !Number.isFinite(rawWidth) ||
+          !Number.isFinite(rawHeight) ||
+          rawLeft < 0 ||
+          rawTop < 0 ||
+          rawWidth <= 0 ||
+          rawHeight <= 0
+        ) {
           return null;
         }
-        const isVertical = outputIsVertical(output);
+        const isVertical = useVerticalLineAxis(output);
         const context = (isVertical ? rawWidth : rawHeight) * LINE_REVIEW_CONTEXT_RATIO;
         const localLeft = isVertical ? Math.max(0, rawLeft - context) : 0;
         const localTop = isVertical ? 0 : Math.max(0, rawTop - context);
@@ -2911,7 +2935,16 @@
         const cropHeight = Math.max(1e-6, localBottom - localTop);
         const cropLeft = normalizedRect.x1 + localLeft;
         const cropTop = normalizedRect.y1 + localTop;
-        if (![cropLeft, cropTop, cropWidth, cropHeight].every((value) => Number.isFinite(value) && value > 0)) {
+        if (
+          !Number.isFinite(cropLeft) ||
+          !Number.isFinite(cropTop) ||
+          !Number.isFinite(cropWidth) ||
+          !Number.isFinite(cropHeight) ||
+          cropLeft < 0 ||
+          cropTop < 0 ||
+          cropWidth <= 0 ||
+          cropHeight <= 0
+        ) {
           return null;
         }
         return {
@@ -3081,7 +3114,7 @@
           return [];
         }
         const lineCount = Math.max(1, outputLineCount(output.layout_id));
-        if (outputIsVertical(output)) {
+        if (useVerticalLineAxis(output)) {
           return Array.from({ length: lineCount }, () => 1);
         }
         const analysis = ensureSourceAnalysisContext();
@@ -4581,7 +4614,8 @@
           return;
         }
         const lineCount = rows.length;
-        const isVertical = outputIsVertical(output);
+        const verticalFlow = container.classList.contains("vertical-flow");
+        const isVertical = useVerticalLineAxis(output);
         const slotHeight = isVertical ? Math.max(1, availableHeight) : Math.max(1, availableHeight / lineCount);
         const slotWidth = isVertical ? Math.max(1, availableWidth / lineCount) : Math.max(1, availableWidth);
         container.style.setProperty("--recon-line-slot-height", `${slotHeight}px`);
@@ -4617,6 +4651,9 @@
               if (text.scrollHeight > maxRowHeight) {
                 return false;
               }
+              if (verticalFlow && text.scrollWidth > Math.ceil(availableWidth + 0.5)) {
+                return false;
+              }
             }
             return true;
           },
@@ -4634,6 +4671,19 @@
             text.style.fontSize = resolvedFont;
             text.style.lineHeight = resolvedLineHeightPx;
           }
+        }
+
+        if (verticalFlow) {
+          for (const row of rows) {
+            const text = row.querySelector(".recon-preserve-line-text");
+            if (text instanceof HTMLElement) {
+              text.style.transform = "";
+              text.style.transformOrigin = "";
+              text.style.wordSpacing = "0px";
+              text.style.letterSpacing = "0px";
+            }
+          }
+          return;
         }
 
         const median = (values, fallback = 0) => {
@@ -4869,7 +4919,7 @@
             renderPreserveLinesContent(block, content, {
               renderMarkdown: renderMarkdownLines,
               onRendered: renderMarkdownLines ? scheduleReconstructionRefit : null,
-              orientation: outputEffectiveOrientation(output),
+              orientation: useVerticalLineAxis(output) ? "vertical" : "horizontal",
             });
             if (renderMarkdownLines) {
               block.classList.add("markdown-rendered");
@@ -5018,7 +5068,7 @@
           return;
         }
         const totalLines = outputLineCount(layoutId);
-        const isVertical = outputIsVertical(output);
+        const isVertical = useVerticalLineAxis(output);
         let band = null;
         if (!isVertical) {
           const offsetY = Number(clientY) - rect.top;
@@ -5106,12 +5156,19 @@
         }
         const preserveLines = contentNode.classList.contains("preserve-lines");
         if (preserveLines) {
+          const verticalFlow = shouldRenderReconstructedVertical(output);
+          contentNode.classList.toggle("vertical-flow", verticalFlow);
+          contentNode.classList.remove("vertical-rotated");
+          contentNode.style.removeProperty("--recon-vertical-shift-x");
           contentNode.style.width = `${availableWidth}px`;
           contentNode.style.height = `${availableHeight}px`;
           contentNode.style.transform = "scaleX(1)";
           fitPreserveLinesContent(contentNode, availableWidth, availableHeight, output);
           return;
         }
+        contentNode.classList.remove("vertical-rotated");
+        contentNode.classList.remove("vertical-flow");
+        contentNode.style.removeProperty("--recon-vertical-shift-x");
 
         contentNode.style.width = `${availableWidth}px`;
         contentNode.style.height = `${availableHeight}px`;
@@ -5437,7 +5494,7 @@
               return;
             }
             const totalLines = outputLineCount(output.layout_id);
-            const roughIndex = outputIsVertical(output)
+            const roughIndex = useVerticalLineAxis(output)
               ? lineIndexFromPointerOffset({
                   offset: Number(event.clientX) - rect.left,
                   axisSize: rect.width,

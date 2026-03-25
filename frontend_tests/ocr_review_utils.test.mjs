@@ -23,6 +23,7 @@ import {
   normalizeReviewViewMode,
   normalizeReconstructedRenderMode,
   reconstructedLayerRankForOutputClass,
+  resolveReconstructedLineFlow,
   resolveLineBandAxisRect,
   resolveOutputEffectiveOrientation,
   resolveViewportScrollSyncUpdate,
@@ -338,6 +339,39 @@ test("resolveLineBandAxisRect maps line bands to row or column geometry", () => 
     widthRatio: 0.2,
     heightRatio: 1,
   });
+});
+
+test("resolveReconstructedLineFlow enables vertical flow only for vertical text-like markdown outputs", () => {
+  assert.equal(
+    resolveReconstructedLineFlow({
+      className: "page_footer",
+      outputFormat: "markdown",
+      orientation: "vertical",
+      effectiveOrientation: "vertical",
+      bbox: { x1: 0.92, y1: 0.71, x2: 0.94, y2: 0.92 },
+    }),
+    "vertical",
+  );
+  assert.equal(
+    resolveReconstructedLineFlow({
+      className: "page_footer",
+      outputFormat: "latex",
+      orientation: "vertical",
+      effectiveOrientation: "vertical",
+      bbox: { x1: 0.92, y1: 0.71, x2: 0.94, y2: 0.92 },
+    }),
+    "horizontal",
+  );
+  assert.equal(
+    resolveReconstructedLineFlow({
+      className: "picture",
+      outputFormat: "markdown",
+      orientation: "vertical",
+      effectiveOrientation: "vertical",
+      bbox: { x1: 0.92, y1: 0.71, x2: 0.94, y2: 0.92 },
+    }),
+    "horizontal",
+  );
 });
 
 test("detectEditorValidationIssues detects markdown table and fence problems", () => {
