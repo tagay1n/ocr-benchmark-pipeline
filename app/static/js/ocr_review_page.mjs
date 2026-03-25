@@ -49,6 +49,8 @@
         normalizeReconstructedRenderMode,
         normalizeLayoutOrientationValue,
         reconstructedLayerRankForOutputClass,
+        resolveLineMatchingBandCount,
+        resolveLineMatchingOrientation,
         resolveReconstructedLineFlow,
         resolveLineBandAxisRect,
         resolveOutputEffectiveOrientation,
@@ -2122,11 +2124,34 @@
         });
       }
 
-      function useVerticalLineAxis(_output) {
-        // Current OCR outputs do not carry explicit writing-direction metadata.
-        // "vertical" orientation is bbox geometry, not guaranteed vertical text flow.
-        // Keep line logic row-based unless we introduce a dedicated vertical-text signal.
-        return false;
+      function useVerticalLineAxis(output) {
+        const orientation = resolveLineMatchingOrientation({
+          className: output?.class_name,
+          outputFormat: output?.output_format,
+          orientation: output?.orientation,
+          effectiveOrientation: output?.effective_orientation,
+          bbox: output?.bbox,
+          totalLines: outputLineCount(output?.layout_id),
+        });
+        return orientation === "vertical";
+      }
+
+      function outputLineBandCount(outputOrLayoutId) {
+        const output =
+          typeof outputOrLayoutId === "object" && outputOrLayoutId !== null
+            ? outputOrLayoutId
+            : outputByLayoutId(Number(outputOrLayoutId));
+        if (!output) {
+          return 1;
+        }
+        return resolveLineMatchingBandCount({
+          className: output.class_name,
+          outputFormat: output.output_format,
+          orientation: output.orientation,
+          effectiveOrientation: output.effective_orientation,
+          bbox: output.bbox,
+          totalLines: outputLineCount(output.layout_id),
+        });
       }
 
       function outputEffectiveOrientation(output) {
@@ -2737,7 +2762,7 @@
         const totalLines = Math.max(
           1,
           output && lineReviewRequiredOutput(output)
-            ? logicalLinesForOutput(output).length
+            ? outputLineBandCount(output)
             : outputLineCount(normalizedLayoutId),
         );
 
@@ -4615,7 +4640,7 @@
         }
         const lineCount = rows.length;
         const verticalFlow = container.classList.contains("vertical-flow");
-        const isVertical = useVerticalLineAxis(output);
+        const isVertical = !verticalFlow && useVerticalLineAxis(output);
         const slotHeight = isVertical ? Math.max(1, availableHeight) : Math.max(1, availableHeight / lineCount);
         const slotWidth = isVertical ? Math.max(1, availableWidth / lineCount) : Math.max(1, availableWidth);
         container.style.setProperty("--recon-line-slot-height", `${slotHeight}px`);
@@ -5067,7 +5092,7 @@
         if (!rect || rect.height <= 0 || rect.width <= 0) {
           return;
         }
-        const totalLines = outputLineCount(layoutId);
+        const totalLines = outputLineBandCount(output);
         const isVertical = useVerticalLineAxis(output);
         let band = null;
         if (!isVertical) {
@@ -5493,7 +5518,7 @@
             if (!rect || rect.height <= 0 || rect.width <= 0) {
               return;
             }
-            const totalLines = outputLineCount(output.layout_id);
+            const totalLines = outputLineBandCount(output);
             const roughIndex = useVerticalLineAxis(output)
               ? lineIndexFromPointerOffset({
                   offset: Number(event.clientX) - rect.left,

@@ -23,6 +23,8 @@ import {
   normalizeReviewViewMode,
   normalizeReconstructedRenderMode,
   reconstructedLayerRankForOutputClass,
+  resolveLineMatchingOrientation,
+  resolveLineMatchingBandCount,
   resolveReconstructedLineFlow,
   resolveLineBandAxisRect,
   resolveOutputEffectiveOrientation,
@@ -371,6 +373,94 @@ test("resolveReconstructedLineFlow enables vertical flow only for vertical text-
       bbox: { x1: 0.92, y1: 0.71, x2: 0.94, y2: 0.92 },
     }),
     "horizontal",
+  );
+});
+
+test("resolveLineMatchingOrientation keeps vertical axis for vertical text-like outputs", () => {
+  const base = {
+    className: "page_footer",
+    outputFormat: "markdown",
+    orientation: "vertical",
+    effectiveOrientation: "vertical",
+    bbox: { x1: 0.92, y1: 0.71, x2: 0.94, y2: 0.92 },
+  };
+  assert.equal(resolveLineMatchingOrientation({ ...base, totalLines: 1 }), "vertical");
+  assert.equal(resolveLineMatchingOrientation({ ...base, totalLines: 3 }), "vertical");
+  assert.equal(
+    resolveLineMatchingOrientation({
+      className: "picture",
+      outputFormat: "markdown",
+      orientation: "vertical",
+      effectiveOrientation: "vertical",
+      bbox: base.bbox,
+      totalLines: 2,
+    }),
+    "horizontal",
+  );
+  assert.equal(
+    resolveLineMatchingOrientation({
+      className: "text",
+      outputFormat: "markdown",
+      orientation: "horizontal",
+      effectiveOrientation: "horizontal",
+      bbox: { x1: 0.1, y1: 0.1, x2: 0.9, y2: 0.2 },
+      totalLines: 2,
+    }),
+    "horizontal",
+  );
+});
+
+test("vertical matching with a single line maps to full bbox", () => {
+  const orientation = resolveLineMatchingOrientation({
+    className: "page_footer",
+    outputFormat: "markdown",
+    orientation: "vertical",
+    effectiveOrientation: "vertical",
+    bbox: { x1: 0.92, y1: 0.71, x2: 0.94, y2: 0.92 },
+    totalLines: 1,
+  });
+  const fullBand = lineBandFromLineIndex(0, 1);
+  assert.deepEqual(resolveLineBandAxisRect(fullBand, orientation), {
+    leftRatio: 0,
+    topRatio: 0,
+    widthRatio: 1,
+    heightRatio: 1,
+  });
+});
+
+test("resolveLineMatchingBandCount collapses tall narrow vertical boxes to single matching band", () => {
+  const base = {
+    className: "page_footer",
+    outputFormat: "markdown",
+    orientation: "vertical",
+    effectiveOrientation: "vertical",
+  };
+  assert.equal(
+    resolveLineMatchingBandCount({
+      ...base,
+      bbox: { x1: 0.9234, y1: 0.7155, x2: 0.941, y2: 0.9204 },
+      totalLines: 3,
+    }),
+    1,
+  );
+  assert.equal(
+    resolveLineMatchingBandCount({
+      ...base,
+      bbox: { x1: 0.7, y1: 0.3, x2: 0.95, y2: 0.95 },
+      totalLines: 3,
+    }),
+    3,
+  );
+  assert.equal(
+    resolveLineMatchingBandCount({
+      className: "text",
+      outputFormat: "markdown",
+      orientation: "horizontal",
+      effectiveOrientation: "horizontal",
+      bbox: { x1: 0.1, y1: 0.4, x2: 0.9, y2: 0.8 },
+      totalLines: 5,
+    }),
+    5,
   );
 });
 

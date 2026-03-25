@@ -67,6 +67,74 @@ export function resolveReconstructedLineFlow({
   return effective === "vertical" ? "vertical" : "horizontal";
 }
 
+export function resolveLineMatchingOrientation({
+  className,
+  outputFormat,
+  orientation = null,
+  effectiveOrientation = null,
+  bbox = null,
+  totalLines = 1,
+} = {}) {
+  const flow = resolveReconstructedLineFlow({
+    className,
+    outputFormat,
+    orientation,
+    effectiveOrientation,
+    bbox,
+  });
+  const lineCount = Number(totalLines);
+  const safeLineCount = Number.isFinite(lineCount) && lineCount > 0 ? Math.max(1, Math.floor(lineCount)) : 1;
+  if (flow === "vertical" && safeLineCount >= 1) {
+    return "vertical";
+  }
+  return "horizontal";
+}
+
+export function resolveLineMatchingBandCount({
+  className,
+  outputFormat,
+  orientation = null,
+  effectiveOrientation = null,
+  bbox = null,
+  totalLines = 1,
+  singleColumnAspectThreshold = 4,
+} = {}) {
+  const lineCount = Number(totalLines);
+  const safeLineCount = Number.isFinite(lineCount) && lineCount > 0 ? Math.max(1, Math.floor(lineCount)) : 1;
+  if (safeLineCount <= 1) {
+    return 1;
+  }
+  const matchingOrientation = resolveLineMatchingOrientation({
+    className,
+    outputFormat,
+    orientation,
+    effectiveOrientation,
+    bbox,
+    totalLines: safeLineCount,
+  });
+  if (matchingOrientation !== "vertical") {
+    return safeLineCount;
+  }
+  const x1 = Number(bbox?.x1);
+  const y1 = Number(bbox?.y1);
+  const x2 = Number(bbox?.x2);
+  const y2 = Number(bbox?.y2);
+  if (![x1, y1, x2, y2].every((value) => Number.isFinite(value))) {
+    return safeLineCount;
+  }
+  const width = Math.max(0, Math.abs(x2 - x1));
+  const height = Math.max(0, Math.abs(y2 - y1));
+  if (width <= 0 || height <= 0) {
+    return safeLineCount;
+  }
+  const aspect = height / width;
+  const threshold = Math.max(1, Number(singleColumnAspectThreshold) || 4);
+  if (aspect >= threshold) {
+    return 1;
+  }
+  return safeLineCount;
+}
+
 function normalizeOutputClassName(className) {
   return String(className || "")
     .trim()
