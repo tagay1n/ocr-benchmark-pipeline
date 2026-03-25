@@ -17,10 +17,14 @@ import {
   isReconstructedRestoreDisabled,
   isLineSyncEnabledOutputFormat,
   lineBandFromLineIndex,
+  lineIndexFromPointerOffset,
   lineIndexFromTextOffset,
+  normalizeLayoutOrientationValue,
   normalizeReviewViewMode,
   normalizeReconstructedRenderMode,
   reconstructedLayerRankForOutputClass,
+  resolveLineBandAxisRect,
+  resolveOutputEffectiveOrientation,
   resolveViewportScrollSyncUpdate,
   resolveEditorDrawerLayout,
   tokenBoundsAtOffset,
@@ -264,6 +268,75 @@ test("lineBandFromLineIndex clamps line index and returns normalized ratios", ()
     topRatio: 0.75,
     heightRatio: 0.25,
     totalLines: 4,
+  });
+});
+
+test("normalizeLayoutOrientationValue supports compact aliases and fallback", () => {
+  assert.equal(normalizeLayoutOrientationValue("vertical"), "vertical");
+  assert.equal(normalizeLayoutOrientationValue("v"), "vertical");
+  assert.equal(normalizeLayoutOrientationValue("horizontal"), "horizontal");
+  assert.equal(normalizeLayoutOrientationValue("h"), "horizontal");
+  assert.equal(normalizeLayoutOrientationValue("unknown"), "horizontal");
+  assert.equal(normalizeLayoutOrientationValue("unknown", { fallback: "vertical" }), "vertical");
+});
+
+test("resolveOutputEffectiveOrientation prefers explicit effective orientation then declared orientation", () => {
+  assert.equal(
+    resolveOutputEffectiveOrientation({
+      orientation: "horizontal",
+      effectiveOrientation: "vertical",
+      bbox: { x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.9 },
+    }),
+    "vertical",
+  );
+  assert.equal(
+    resolveOutputEffectiveOrientation({
+      orientation: "v",
+      effectiveOrientation: "",
+      bbox: { x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.9 },
+    }),
+    "vertical",
+  );
+  assert.equal(
+    resolveOutputEffectiveOrientation({
+      orientation: "",
+      effectiveOrientation: "",
+      bbox: { x1: 0.2, y1: 0.1, x2: 0.3, y2: 0.8 },
+    }),
+    "vertical",
+  );
+  assert.equal(
+    resolveOutputEffectiveOrientation({
+      orientation: "",
+      effectiveOrientation: "",
+      bbox: { x1: 0.1, y1: 0.2, x2: 0.8, y2: 0.3 },
+    }),
+    "horizontal",
+  );
+});
+
+test("lineIndexFromPointerOffset maps pointer offset to clamped line index", () => {
+  assert.equal(lineIndexFromPointerOffset({ offset: 0, axisSize: 100, totalLines: 4 }), 0);
+  assert.equal(lineIndexFromPointerOffset({ offset: 24.9, axisSize: 100, totalLines: 4 }), 0);
+  assert.equal(lineIndexFromPointerOffset({ offset: 25, axisSize: 100, totalLines: 4 }), 1);
+  assert.equal(lineIndexFromPointerOffset({ offset: 99.9, axisSize: 100, totalLines: 4 }), 3);
+  assert.equal(lineIndexFromPointerOffset({ offset: 1000, axisSize: 100, totalLines: 4 }), 3);
+  assert.equal(lineIndexFromPointerOffset({ offset: -10, axisSize: 100, totalLines: 4 }), 0);
+});
+
+test("resolveLineBandAxisRect maps line bands to row or column geometry", () => {
+  const band = { topRatio: 0.25, heightRatio: 0.2 };
+  assert.deepEqual(resolveLineBandAxisRect(band, "horizontal"), {
+    leftRatio: 0,
+    topRatio: 0.25,
+    widthRatio: 1,
+    heightRatio: 0.2,
+  });
+  assert.deepEqual(resolveLineBandAxisRect(band, "vertical"), {
+    leftRatio: 0.25,
+    topRatio: 0,
+    widthRatio: 0.2,
+    heightRatio: 1,
   });
 });
 

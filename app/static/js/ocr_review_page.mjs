@@ -44,9 +44,13 @@
         isLineSyncEnabledOutputFormat,
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
+        lineIndexFromPointerOffset,
         normalizeReviewViewMode,
         normalizeReconstructedRenderMode,
+        normalizeLayoutOrientationValue,
         reconstructedLayerRankForOutputClass,
+        resolveLineBandAxisRect,
+        resolveOutputEffectiveOrientation,
         resolveViewportScrollSyncUpdate,
         resolveEditorDrawerLayout,
         tokenBoundsAtOffset,
@@ -2117,6 +2121,39 @@
         });
       }
 
+      function outputEffectiveOrientation(output) {
+        return resolveOutputEffectiveOrientation({
+          orientation: output?.orientation,
+          effectiveOrientation: output?.effective_orientation,
+          bbox: output?.bbox,
+        });
+      }
+
+      function outputIsVertical(output) {
+        return normalizeLayoutOrientationValue(outputEffectiveOrientation(output)) === "vertical";
+      }
+
+      function lineBandAxisRectForOutput(output, lineBand) {
+        const orientation = outputEffectiveOrientation(output);
+        return resolveLineBandAxisRect(lineBand, orientation);
+      }
+
+      function applyLineBandAxisStyle(marker, output, lineBand) {
+        if (!(marker instanceof HTMLElement)) {
+          return false;
+        }
+        const axisRect = lineBandAxisRectForOutput(output, lineBand);
+        if (!axisRect) {
+          return false;
+        }
+        marker.style.left = `${Math.max(0, Math.min(1, Number(axisRect.leftRatio))) * 100}%`;
+        marker.style.top = `${Math.max(0, Math.min(1, Number(axisRect.topRatio))) * 100}%`;
+        marker.style.width = `${Math.max(0, Math.min(1, Number(axisRect.widthRatio))) * 100}%`;
+        marker.style.height = `${Math.max(0, Math.min(1, Number(axisRect.heightRatio))) * 100}%`;
+        marker.dataset.lineOrientation = outputIsVertical(output) ? "vertical" : "horizontal";
+        return true;
+      }
+
       function normalizeApprovedLineIndexes(layoutId, lineCount) {
         const rawIndexes = state.approvedLineIndexesByLayoutId[String(layoutId)];
         if (!Array.isArray(rawIndexes) || lineCount <= 0) {
@@ -2366,7 +2403,7 @@
         return Array.from(deduped).sort((a, b) => a - b);
       }
 
-      function appendLineMarkers(container, lineIndexes, totalLines, markerClassName) {
+      function appendLineMarkers(container, lineIndexes, totalLines, markerClassName, output = null) {
         if (!container || !Array.isArray(lineIndexes) || !lineIndexes.length) {
           return;
         }
@@ -2379,8 +2416,9 @@
           const band = lineBandFromLineIndex(lineIndex, safeTotalLines);
           const marker = document.createElement("div");
           marker.className = markerClassName;
-          marker.style.top = `${Math.max(0, Number(band.topRatio)) * 100}%`;
-          marker.style.height = `${Math.max(0, Number(band.heightRatio)) * 100}%`;
+          if (!applyLineBandAxisStyle(marker, output, band)) {
+            continue;
+          }
           container.appendChild(marker);
         }
       }
@@ -2403,19 +2441,15 @@
         }
       }
 
-      function appendLineStatusMarker(container, markerClassName, band) {
+      function appendLineStatusMarker(container, markerClassName, band, output = null) {
         if (!container || !markerClassName || !band) {
-          return;
-        }
-        const top = Math.max(0, Math.min(1, Number(band.topRatio)));
-        const height = Math.max(0, Math.min(1 - top, Number(band.heightRatio)));
-        if (height <= 0) {
           return;
         }
         const marker = document.createElement("div");
         marker.className = markerClassName;
-        marker.style.top = `${top * 100}%`;
-        marker.style.height = `${height * 100}%`;
+        if (!applyLineBandAxisStyle(marker, output, band)) {
+          return;
+        }
         container.appendChild(marker);
       }
 
@@ -2453,15 +2487,15 @@
             if (!band) {
               continue;
             }
-            appendLineStatusMarker(reconItem, "recon-line-status approved", band);
-            appendLineStatusMarker(sourceBox, "box-line-status approved", band);
+            appendLineStatusMarker(reconItem, "recon-line-status approved", band, output);
+            appendLineStatusMarker(sourceBox, "box-line-status approved", band, output);
           }
 
           if (currentIndex >= 0) {
             const currentBand = resolveLineBandForLayout(layoutId, currentIndex);
             if (currentBand) {
-              appendLineStatusMarker(reconItem, "recon-line-status current", currentBand);
-              appendLineStatusMarker(sourceBox, "box-line-status current", currentBand);
+              appendLineStatusMarker(reconItem, "recon-line-status current", currentBand, output);
+              appendLineStatusMarker(sourceBox, "box-line-status current", currentBand, output);
             }
           }
         }
@@ -2474,19 +2508,15 @@
           return;
         }
         const layoutId = Number(hovered.layoutId);
-        const topRatio = Number(hovered.topRatio);
-        const heightRatio = Number(hovered.heightRatio);
+        const output = outputByLayoutId(layoutId);
         if (
           !Number.isInteger(layoutId) ||
           layoutId <= 0 ||
-          !Number.isFinite(topRatio) ||
-          !Number.isFinite(heightRatio)
+          !hovered
         ) {
           return;
         }
-        const clampedTop = Math.max(0, Math.min(1, topRatio));
-        const clampedHeight = Math.max(0, Math.min(1 - clampedTop, heightRatio));
-        if (clampedHeight <= 0) {
+        if (!output) {
           return;
         }
 
@@ -2494,18 +2524,18 @@
         if (reconItem) {
           const reconMarker = document.createElement("div");
           reconMarker.className = "recon-line-highlight";
-          reconMarker.style.top = `${clampedTop * 100}%`;
-          reconMarker.style.height = `${clampedHeight * 100}%`;
-          reconItem.appendChild(reconMarker);
+          if (applyLineBandAxisStyle(reconMarker, output, hovered)) {
+            reconItem.appendChild(reconMarker);
+          }
         }
 
         const sourceBox = sourceOverlay.querySelector(`.box[data-layout-id="${layoutId}"]`);
         if (sourceBox) {
           const sourceMarker = document.createElement("div");
           sourceMarker.className = "box-line-highlight";
-          sourceMarker.style.top = `${clampedTop * 100}%`;
-          sourceMarker.style.height = `${clampedHeight * 100}%`;
-          sourceBox.appendChild(sourceMarker);
+          if (applyLineBandAxisStyle(sourceMarker, output, hovered)) {
+            sourceBox.appendChild(sourceMarker);
+          }
         }
       }
 
@@ -2860,24 +2890,38 @@
         if (contentWidth <= 0 || contentHeight <= 0) {
           return null;
         }
-        const rawTop = contentHeight * Number(lineBand.topRatio);
-        const rawHeight = Math.max(1e-6, contentHeight * Number(lineBand.heightRatio));
-        if (!Number.isFinite(rawTop) || !Number.isFinite(rawHeight)) {
+        const axisRect = lineBandAxisRectForOutput(output, lineBand);
+        if (!axisRect) {
           return null;
         }
-        const context = rawHeight * LINE_REVIEW_CONTEXT_RATIO;
-        const localTop = Math.max(0, rawTop - context);
-        const localBottom = Math.min(contentHeight, rawTop + rawHeight + context);
-        const sourceHeight = Math.max(1e-6, localBottom - localTop);
-        const sourceTop = normalizedRect.y1 + localTop;
-        if (!Number.isFinite(sourceTop) || !Number.isFinite(sourceHeight)) {
+        const rawLeft = contentWidth * Number(axisRect.leftRatio);
+        const rawTop = contentHeight * Number(axisRect.topRatio);
+        const rawWidth = Math.max(1e-6, contentWidth * Number(axisRect.widthRatio));
+        const rawHeight = Math.max(1e-6, contentHeight * Number(axisRect.heightRatio));
+        if (![rawLeft, rawTop, rawWidth, rawHeight].every((value) => Number.isFinite(value) && value > 0)) {
+          return null;
+        }
+        const isVertical = outputIsVertical(output);
+        const context = (isVertical ? rawWidth : rawHeight) * LINE_REVIEW_CONTEXT_RATIO;
+        const localLeft = isVertical ? Math.max(0, rawLeft - context) : 0;
+        const localTop = isVertical ? 0 : Math.max(0, rawTop - context);
+        const localRight = isVertical ? Math.min(contentWidth, rawLeft + rawWidth + context) : contentWidth;
+        const localBottom = isVertical ? contentHeight : Math.min(contentHeight, rawTop + rawHeight + context);
+        const cropWidth = Math.max(1e-6, localRight - localLeft);
+        const cropHeight = Math.max(1e-6, localBottom - localTop);
+        const cropLeft = normalizedRect.x1 + localLeft;
+        const cropTop = normalizedRect.y1 + localTop;
+        if (![cropLeft, cropTop, cropWidth, cropHeight].every((value) => Number.isFinite(value) && value > 0)) {
           return null;
         }
         return {
           normalizedRect,
           contentWidth,
-          sourceTop,
-          sourceHeight,
+          contentHeight,
+          cropLeft,
+          cropTop,
+          cropWidth,
+          cropHeight,
         };
       }
 
@@ -3036,6 +3080,10 @@
         if (!output || !lineReviewRequiredOutput(output)) {
           return [];
         }
+        const lineCount = Math.max(1, outputLineCount(output.layout_id));
+        if (outputIsVertical(output)) {
+          return Array.from({ length: lineCount }, () => 1);
+        }
         const analysis = ensureSourceAnalysisContext();
         if (!analysis) {
           return [];
@@ -3044,7 +3092,6 @@
         if (!normalizedRect) {
           return [];
         }
-        const lineCount = Math.max(1, outputLineCount(output.layout_id));
         const cacheKey = sourceLineWidthCacheKey(output, lineCount, analysis.key);
         const cached = sourceLineInkWidthRatioCache.get(cacheKey);
         if (Array.isArray(cached)) {
@@ -3098,11 +3145,22 @@
           const reelWidth = Number(lineReviewReel.clientWidth);
           const imageWidth = Number(pageImage.naturalWidth || pageImage.width || 0);
           const imageHeight = Number(pageImage.naturalHeight || pageImage.height || 0);
+          const imageAspectRatio =
+            Number.isFinite(imageWidth) && imageWidth > 0 &&
+            Number.isFinite(imageHeight) && imageHeight > 0
+              ? imageHeight / imageWidth
+              : 1;
+          const cropWidth = Number(crop.cropWidth || contentWidth);
+          const cropHeight = Number(crop.cropHeight || 0);
+          const cropAspectRatio =
+            cropWidth > 0 && cropHeight > 0
+              ? (cropHeight / cropWidth) * imageAspectRatio
+              : 0;
           const aspectFactor =
             Number.isFinite(reelWidth) && reelWidth > 0 &&
             Number.isFinite(imageWidth) && imageWidth > 0 &&
             Number.isFinite(imageHeight) && imageHeight > 0
-              ? (reelWidth * crop.sourceHeight * (imageHeight / imageWidth)) / contentWidth
+              ? reelWidth * cropAspectRatio
               : 0;
           if (Number.isFinite(aspectFactor) && aspectFactor > 0) {
             const minWidthRatioFromPx = Math.max(
@@ -3169,10 +3227,14 @@
         image.src = imageUrl;
         image.alt = "";
         image.draggable = false;
-        image.style.width = `${100 / crop.contentWidth}%`;
-        image.style.height = `${100 / crop.sourceHeight}%`;
-        image.style.left = `${(-crop.normalizedRect.x1 / crop.contentWidth) * 100}%`;
-        image.style.top = `${(-crop.sourceTop / crop.sourceHeight) * 100}%`;
+        const cropWidth = Math.max(1e-6, Number(crop.cropWidth || crop.contentWidth || 1));
+        const cropHeight = Math.max(1e-6, Number(crop.cropHeight || 1));
+        const cropLeft = Math.max(0, Number(crop.cropLeft ?? crop.normalizedRect?.x1 ?? 0));
+        const cropTop = Math.max(0, Number(crop.cropTop ?? 0));
+        image.style.width = `${100 / cropWidth}%`;
+        image.style.height = `${100 / cropHeight}%`;
+        image.style.left = `${(-cropLeft / cropWidth) * 100}%`;
+        image.style.top = `${(-cropTop / cropHeight) * 100}%`;
         node.appendChild(image);
       }
 
@@ -4152,21 +4214,23 @@
         if (!rect || !lineBand) {
           return null;
         }
-        const topRatio = Math.max(0, Math.min(1, Number(lineBand.topRatio)));
-        const heightRatio = Math.max(0, Math.min(1 - topRatio, Number(lineBand.heightRatio)));
-        if (heightRatio <= 0) {
+        const axisRect = lineBandAxisRectForOutput(output, lineBand);
+        if (!axisRect) {
           return null;
         }
-        const bboxHeight = rect.bottom - rect.top;
-        if (!(bboxHeight > 0)) {
+        const bboxWidth = rect.x2 - rect.x1;
+        const bboxHeight = rect.y2 - rect.y1;
+        if (!(bboxWidth > 0) || !(bboxHeight > 0)) {
           return null;
         }
-        const y1 = rect.top + bboxHeight * topRatio;
-        const y2 = rect.top + bboxHeight * (topRatio + heightRatio);
+        const x1 = rect.x1 + bboxWidth * Number(axisRect.leftRatio);
+        const y1 = rect.y1 + bboxHeight * Number(axisRect.topRatio);
+        const x2 = rect.x1 + bboxWidth * (Number(axisRect.leftRatio) + Number(axisRect.widthRatio));
+        const y2 = rect.y1 + bboxHeight * (Number(axisRect.topRatio) + Number(axisRect.heightRatio));
         return {
-          x1: rect.left,
+          x1,
           y1,
-          x2: rect.right,
+          x2,
           y2,
         };
       }
@@ -4469,12 +4533,19 @@
         return true;
       }
 
-      function renderPreserveLinesContent(container, content, { renderMarkdown = false, onRendered = null } = {}) {
+      function renderPreserveLinesContent(
+        container,
+        content,
+        { renderMarkdown = false, onRendered = null, orientation = "horizontal" } = {},
+      ) {
         if (!container) {
           return;
         }
         const lines = splitPreserveLines(content);
         container.innerHTML = "";
+        const isVertical = normalizeLayoutOrientationValue(orientation) === "vertical";
+        container.classList.toggle("vertical-lines", isVertical);
+        container.classList.toggle("horizontal-lines", !isVertical);
         for (const line of lines) {
           const row = document.createElement("div");
           row.className = "recon-preserve-line";
@@ -4510,9 +4581,11 @@
           return;
         }
         const lineCount = rows.length;
-        const slotHeight = Math.max(1, availableHeight / lineCount);
+        const isVertical = outputIsVertical(output);
+        const slotHeight = isVertical ? Math.max(1, availableHeight) : Math.max(1, availableHeight / lineCount);
+        const slotWidth = isVertical ? Math.max(1, availableWidth / lineCount) : Math.max(1, availableWidth);
         container.style.setProperty("--recon-line-slot-height", `${slotHeight}px`);
-        void output;
+        container.style.setProperty("--recon-line-slot-width", `${slotWidth}px`);
 
         for (const row of rows) {
           const text = row.querySelector(".recon-preserve-line-text");
@@ -4581,7 +4654,7 @@
         const nonLastWordSpacings = [];
         const nonLastLetterSpacings = [];
         const nonLastScales = [];
-        const targetWidth = Math.max(1, availableWidth - 0.5);
+        const targetWidth = Math.max(1, (isVertical ? slotWidth : availableWidth) - 0.5);
         for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
           const row = rows[rowIndex];
           const isLastLine = lineCount > 1 && rowIndex === lineCount - 1;
@@ -4796,6 +4869,7 @@
             renderPreserveLinesContent(block, content, {
               renderMarkdown: renderMarkdownLines,
               onRendered: renderMarkdownLines ? scheduleReconstructionRefit : null,
+              orientation: outputEffectiveOrientation(output),
             });
             if (renderMarkdownLines) {
               block.classList.add("markdown-rendered");
@@ -4931,29 +5005,47 @@
         return null;
       }
 
-      function updateHoveredLineFromPointer(contentNode, layoutId, clientY) {
+      function updateHoveredLineFromPointer(contentNode, output, clientX, clientY) {
         if (!contentNode) {
           return;
         }
-        const rect = contentNode.getBoundingClientRect();
-        if (!rect || rect.height <= 0) {
+        const layoutId = Number(output?.layout_id);
+        if (!Number.isInteger(layoutId) || layoutId <= 0) {
           return;
         }
-        const offsetY = Number(clientY) - rect.top;
-        const lineHeight = lineHeightForContentNode(contentNode);
-        let band = null;
-        if (lineHeight) {
-          band = computeApproxLineBand({
-            offsetY,
-            contentHeight: rect.height,
-            lineHeight,
-            minLineHeight: 6,
-          });
+        const rect = contentNode.getBoundingClientRect();
+        if (!rect || rect.height <= 0 || rect.width <= 0) {
+          return;
         }
-        if (!band) {
-          const totalLines = outputLineCount(layoutId);
-          const safeOffsetY = Math.max(0, Math.min(rect.height - 0.001, offsetY));
-          const roughIndex = Math.floor((safeOffsetY / rect.height) * totalLines);
+        const totalLines = outputLineCount(layoutId);
+        const isVertical = outputIsVertical(output);
+        let band = null;
+        if (!isVertical) {
+          const offsetY = Number(clientY) - rect.top;
+          const lineHeight = lineHeightForContentNode(contentNode);
+          if (lineHeight) {
+            band = computeApproxLineBand({
+              offsetY,
+              contentHeight: rect.height,
+              lineHeight,
+              minLineHeight: 6,
+            });
+          }
+          if (!band) {
+            const roughIndex = lineIndexFromPointerOffset({
+              offset: offsetY,
+              axisSize: rect.height,
+              totalLines,
+            });
+            band = resolveLineBandForLayout(layoutId, roughIndex);
+          }
+        } else {
+          const offsetX = Number(clientX) - rect.left;
+          const roughIndex = lineIndexFromPointerOffset({
+            offset: offsetX,
+            axisSize: rect.width,
+            totalLines,
+          });
           band = resolveLineBandForLayout(layoutId, roughIndex);
         }
         setHoveredLine(layoutId, band, { source: "reconstructed" });
@@ -4982,26 +5074,16 @@
         if (!output || !isLineSyncEnabledOutputFormat(output.output_format)) {
           return false;
         }
-        const contentNode = reconstructedContentNodeByLayout(candidateLayoutId);
-        if (!contentNode) {
-          return false;
-        }
-        const rect = contentNode.getBoundingClientRect();
-        const lineHeight = lineHeightForContentNode(contentNode);
-        if (!rect || rect.height <= 0 || !lineHeight) {
-          return false;
-        }
-
         const currentIndex =
           state.hoveredLine && Number(state.hoveredLine.layoutId) === candidateLayoutId
             ? Number(state.hoveredLine.lineIndex)
             : 0;
-        const nextBand = computeApproxLineBandByIndex({
-          lineIndex: (Number.isInteger(currentIndex) ? currentIndex : 0) + delta,
-          contentHeight: rect.height,
-          lineHeight,
-          minLineHeight: 6,
-        });
+        const totalLines = Math.max(1, outputLineCount(candidateLayoutId));
+        const nextIndex = Math.max(
+          0,
+          Math.min(totalLines - 1, (Number.isInteger(currentIndex) ? currentIndex : 0) + delta),
+        );
+        const nextBand = resolveLineBandForLayout(candidateLayoutId, nextIndex);
         if (!nextBand) {
           return false;
         }
@@ -5265,6 +5347,7 @@
               warningLineIndexes,
               outputLineCount(output.layout_id),
               "recon-line-warning",
+              output,
             );
           }
           if (isLineSyncEnabledOutputFormat(output.output_format)) {
@@ -5272,7 +5355,7 @@
               if (lineReviewLockActive()) {
                 return;
               }
-              updateHoveredLineFromPointer(contentNode, output.layout_id, event.clientY);
+              updateHoveredLineFromPointer(contentNode, output, event.clientX, event.clientY);
             });
             contentNode.addEventListener("pointerleave", () => {
               if (lineReviewLockActive()) {
@@ -5350,12 +5433,21 @@
               return;
             }
             const rect = box.getBoundingClientRect();
-            if (!rect || rect.height <= 0) {
+            if (!rect || rect.height <= 0 || rect.width <= 0) {
               return;
             }
-            const safeOffsetY = Math.max(0, Math.min(rect.height - 0.001, Number(event.clientY) - rect.top));
             const totalLines = outputLineCount(output.layout_id);
-            const roughIndex = Math.floor((safeOffsetY / rect.height) * totalLines);
+            const roughIndex = outputIsVertical(output)
+              ? lineIndexFromPointerOffset({
+                  offset: Number(event.clientX) - rect.left,
+                  axisSize: rect.width,
+                  totalLines,
+                })
+              : lineIndexFromPointerOffset({
+                  offset: Number(event.clientY) - rect.top,
+                  axisSize: rect.height,
+                  totalLines,
+                });
             const band = resolveLineBandForLayout(output.layout_id, roughIndex);
             setHoveredLine(output.layout_id, band, { source: "source" });
           });
@@ -5386,6 +5478,7 @@
               warningLineIndexes,
               outputLineCount(output.layout_id),
               "box-line-warning",
+              output,
             );
           }
           sourceOverlay.appendChild(box);

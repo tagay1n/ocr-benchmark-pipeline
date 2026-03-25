@@ -504,6 +504,85 @@ export function lineBandFromLineIndex(lineIndex, totalLines) {
   };
 }
 
+export function normalizeLayoutOrientationValue(value, { fallback = "horizontal" } = {}) {
+  const normalized = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "vertical" || normalized === "v") {
+    return "vertical";
+  }
+  if (normalized === "horizontal" || normalized === "h") {
+    return "horizontal";
+  }
+  const fallbackNormalized = String(fallback || "").trim().toLowerCase();
+  return fallbackNormalized === "vertical" ? "vertical" : "horizontal";
+}
+
+export function resolveOutputEffectiveOrientation({
+  orientation = null,
+  effectiveOrientation = null,
+  bbox = null,
+} = {}) {
+  const explicitEffective = String(effectiveOrientation || "").trim();
+  if (explicitEffective) {
+    return normalizeLayoutOrientationValue(explicitEffective);
+  }
+  const explicitOrientation = String(orientation || "").trim();
+  if (explicitOrientation) {
+    return normalizeLayoutOrientationValue(explicitOrientation);
+  }
+  const x1 = Number(bbox?.x1);
+  const y1 = Number(bbox?.y1);
+  const x2 = Number(bbox?.x2);
+  const y2 = Number(bbox?.y2);
+  if (![x1, y1, x2, y2].every((value) => Number.isFinite(value))) {
+    return "horizontal";
+  }
+  const width = Math.max(0, Math.abs(x2 - x1));
+  const height = Math.max(0, Math.abs(y2 - y1));
+  if (width <= 0 || height <= 0) {
+    return "horizontal";
+  }
+  return height / width >= 2 ? "vertical" : "horizontal";
+}
+
+export function lineIndexFromPointerOffset({ offset, axisSize, totalLines } = {}) {
+  const size = Number(axisSize);
+  const lines = Number(totalLines);
+  const safeLines = Number.isFinite(lines) && lines > 0 ? Math.max(1, Math.floor(lines)) : 1;
+  if (!Number.isFinite(size) || size <= 0) {
+    return 0;
+  }
+  const rawOffset = Number(offset);
+  const safeOffset = Number.isFinite(rawOffset) ? Math.max(0, Math.min(size - 0.001, rawOffset)) : 0;
+  const ratio = safeOffset / size;
+  return Math.max(0, Math.min(safeLines - 1, Math.floor(ratio * safeLines)));
+}
+
+export function resolveLineBandAxisRect(lineBand, orientation = "horizontal") {
+  if (!lineBand) {
+    return null;
+  }
+  const axisStart = Math.max(0, Math.min(1, Number(lineBand.topRatio)));
+  const axisSpan = Math.max(0, Math.min(1 - axisStart, Number(lineBand.heightRatio)));
+  if (!(axisSpan > 0)) {
+    return null;
+  }
+  const mode = normalizeLayoutOrientationValue(orientation);
+  if (mode === "vertical") {
+    return {
+      leftRatio: axisStart,
+      topRatio: 0,
+      widthRatio: axisSpan,
+      heightRatio: 1,
+    };
+  }
+  return {
+    leftRatio: 0,
+    topRatio: axisStart,
+    widthRatio: 1,
+    heightRatio: axisSpan,
+  };
+}
+
 function isWordTokenChar(char) {
   return /[\p{L}\p{N}_]/u.test(char);
 }
