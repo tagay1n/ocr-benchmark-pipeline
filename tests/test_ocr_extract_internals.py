@@ -631,6 +631,66 @@ class OcrExtractInternalsTests(unittest.TestCase):
         if usage_path.exists():
             self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), [])
 
+    def test_extract_ocr_quota_rotation_is_not_limited_by_non_quota_retries(self) -> None:
+        self.test_settings = Settings(
+            project_root=self.project_root,
+            source_dir=self.project_root / "input",
+            db_path=self.project_root / "data" / "test.db",
+            result_dir=self.project_root / "result",
+            allowed_extensions=DEFAULT_EXTENSIONS,
+            enable_background_jobs=False,
+            gemini_keys=("k1", "k2", "k3", "k4"),
+            gemini_usage_path=self.project_root / "_artifacts" / "gemini_usage.json",
+        )
+        self.stack.close()
+        self.stack = ExitStack()
+        self.stack.enter_context(patch.object(config, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(db, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(discovery, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(layouts, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(main, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(ocr_extract, "settings", self.test_settings))
+        self.stack.enter_context(patch.object(runtime_options, "settings", self.test_settings))
+        db.init_db()
+        runtime_options.reset_runtime_options_from_settings()
+
+        self._write_image("ocr/quota-rotation-many-keys.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        def fake_call(api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0) -> str:
+            del prompt, image_bytes, temperature
+            if api_key in {"k1", "k2", "k3"}:
+                raise RuntimeError(
+                    "HTTP 429 RESOURCE_EXHAUSTED "
+                    "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                )
+            return "from-k4"
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", side_effect=fake_call
+        ):
+            result = ocr_extract.extract_ocr_for_page(
+                page_id,
+                layout_ids=[int(layout["id"])],
+                max_retries_per_layout=1,
+            )
+
+        self.assertEqual(result["requests_count"], 1)
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(outputs[0]["content"], "from-k4")
+        self.assertEqual(outputs[0]["key_alias"], "k4")
+        usage_path = Path(self.test_settings.gemini_usage_path or "")
+        self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), ["k1", "k2", "k3"])
+
     def test_extract_ocr_non_quota_error_does_not_mark_key_exhausted(self) -> None:
         self._write_image("ocr/non-quota.png")
         main.scan_images()

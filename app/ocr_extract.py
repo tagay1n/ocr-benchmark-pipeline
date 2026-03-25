@@ -316,7 +316,8 @@ def extract_ocr_for_page(
         response_text = ""
         used_key = ""
         retry_excluded_keys: set[str] = set()
-        for _ in range(resolved_max_retries):
+        non_quota_attempts = 0
+        while True:
             try:
                 key = _next_available_key(exhausted_keys, exclude_keys=retry_excluded_keys)
             except GeminiQuotaExhaustedError as error:
@@ -348,6 +349,9 @@ def extract_ocr_for_page(
                     last_error = error_text
                     continue
                 last_error = error_text
+                non_quota_attempts += 1
+                if non_quota_attempts >= resolved_max_retries:
+                    break
         if last_error is not None:
             layout_id = int(layout["id"])
             if continue_on_server_error and _is_gemini_server_error(last_error):

@@ -92,18 +92,28 @@ def _coerce_gemini_keys(raw: object) -> tuple[str, ...]:
         return ()
 
     flattened: list[str] = []
-    if isinstance(raw, str):
-        flattened = [raw]
-    elif isinstance(raw, list):
-        flattened = [str(value) for value in raw]
-    elif isinstance(raw, dict):
-        for value in raw.values():
-            if isinstance(value, list):
-                flattened.extend(str(item) for item in value)
-            elif isinstance(value, str):
-                flattened.append(value)
-    else:
-        return ()
+
+    def collect(value: object) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            flattened.append(value)
+            return
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+            return
+        if isinstance(value, dict):
+            # Account-object shape: {"account": "...", "keys": [...]}
+            # Keep only keys payload and ignore metadata fields.
+            if "keys" in value:
+                collect(value.get("keys"))
+                return
+            # Account-map shape: {"acc_a": [...], "acc_b": [...]}
+            for nested in value.values():
+                collect(nested)
+
+    collect(raw)
 
     deduplicated: list[str] = []
     seen: set[str] = set()

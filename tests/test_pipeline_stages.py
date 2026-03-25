@@ -175,6 +175,76 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(loaded.gemini_keys, ("key-1", "key-2", "key-3"))
         self.assertEqual(loaded.gemini_usage_path, self.project_root / "_artifacts" / "gemini_usage.json")
 
+    def test_settings_loads_gemini_keys_from_yaml_account_objects(self) -> None:
+        config_path = self.project_root / "config.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "source_dir: input",
+                    "db_path: data/test.db",
+                    "enable_background_jobs: false",
+                    "gemini_keys:",
+                    "  - account: tt",
+                    "    keys:",
+                    "      - key-1",
+                    "      - key-2",
+                    "  - account: aa",
+                    "    keys:",
+                    "      - key-3",
+                    "      - key-2",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PROJECT_ROOT": str(self.project_root),
+                "APP_CONFIG_PATH": str(config_path),
+            },
+            clear=False,
+        ):
+            loaded = config.load_settings()
+
+        self.assertEqual(loaded.gemini_keys, ("key-1", "key-2", "key-3"))
+
+    def test_settings_loads_gemini_keys_from_yaml_account_map_with_keys_field(self) -> None:
+        config_path = self.project_root / "config.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "source_dir: input",
+                    "db_path: data/test.db",
+                    "enable_background_jobs: false",
+                    "gemini_keys:",
+                    "  tt:",
+                    "    keys:",
+                    "      - key-1",
+                    "      - key-2",
+                    "  aa:",
+                    "    keys:",
+                    "      - key-3",
+                    "      - key-2",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PROJECT_ROOT": str(self.project_root),
+                "APP_CONFIG_PATH": str(config_path),
+            },
+            clear=False,
+        ):
+            loaded = config.load_settings()
+
+        self.assertEqual(loaded.gemini_keys, ("key-1", "key-2", "key-3"))
+
     def test_layout_detection_stage_creates_layouts(self) -> None:
         self._write_image("page.png", b"fake-image")
         main.scan_images()
