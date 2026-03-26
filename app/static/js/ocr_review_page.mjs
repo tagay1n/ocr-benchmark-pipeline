@@ -43,15 +43,18 @@
         isReconstructedRestoreDisabled,
         isLineReviewRequiredOutput as isLineReviewRequiredOutputShared,
         isLineSyncEnabledOutputFormat,
+        hasRaisedInlineMarkdownTag,
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
         lineIndexFromPointerOffset,
         normalizeReviewViewMode,
         normalizeReconstructedRenderMode,
         normalizeLayoutOrientationValue,
+        preserveLineHeightRatio,
         reconstructedLayerRankForOutputClass,
         resolveLineMatchingBandCount,
         resolveLineMatchingOrientation,
+        resolveStretchableLineText,
         resolveReconstructedLineFlow,
         resolveLineBandAxisRect,
         resolveOutputEffectiveOrientation,
@@ -3353,6 +3356,7 @@
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
         const isInlineMathLine = !isFormulaLine && hasInlineMarkdownMath(currentText);
+        const hasInlineSupSubTag = /<\s*(sup|sub)\b/i.test(currentText);
         geminiLine.dataset.rawText = currentText;
         geminiLine.dataset.renderFormat = isFormulaLine
           ? "latex"
@@ -3377,7 +3381,19 @@
         } else {
           const geminiLineText = document.createElement("span");
           geminiLineText.className = "line-review-gemini-line-text";
-          geminiLineText.textContent = currentText || " ";
+          if (hasInlineSupSubTag) {
+            renderMarkdownInlineInto(geminiLineText, currentText, {
+              onRendered: () => {
+                const stretchText = resolveStretchableLineText({
+                  rawLine: currentText,
+                  renderedText: geminiLineText.textContent,
+                });
+                fitLineReviewGeminiText(geminiLine, stretchText);
+              },
+            });
+          } else {
+            geminiLineText.textContent = currentText || " ";
+          }
           geminiLine.appendChild(geminiLineText);
         }
         geminiLine.classList.toggle("is-changed", baselineText !== currentText);
@@ -3407,7 +3423,12 @@
             fitLineReviewGeminiInlineMarkdownMath(lineNode, lineNode.dataset.rawText || "", fitProfile);
             continue;
           }
-          fitLineReviewGeminiText(lineNode, lineNode.dataset.rawText || "", fitProfile);
+          const textNode = lineNode.querySelector(".line-review-gemini-line-text");
+          const stretchText = resolveStretchableLineText({
+            rawLine: lineNode.dataset.rawText || "",
+            renderedText: textNode?.textContent || "",
+          });
+          fitLineReviewGeminiText(lineNode, stretchText, fitProfile);
         }
       }
 
@@ -4101,6 +4122,7 @@
           const row = document.createElement("div");
           row.className = "recon-preserve-line";
           row.dataset.rawLine = line;
+          row.dataset.hasRaisedInlineTag = hasRaisedInlineMarkdownTag(line) ? "true" : "false";
           const text = document.createElement("span");
           text.className = "recon-preserve-line-text";
           if (renderMarkdown && line.length > 0) {
@@ -4134,17 +4156,27 @@
         const lineCount = rows.length;
         const verticalFlow = container.classList.contains("vertical-flow");
         const isVertical = !verticalFlow && useVerticalLineAxis(output);
+        const rowMetrics = rows.map((row) => {
+          const text = row.querySelector(".recon-preserve-line-text");
+          const hasRaisedInlineTag = String(row.dataset.hasRaisedInlineTag || "").toLowerCase() === "true";
+          row.classList.toggle("has-inline-super-sub", hasRaisedInlineTag);
+          return {
+            row,
+            text: text instanceof HTMLElement ? text : null,
+            hasRaisedInlineTag,
+          };
+        });
+        const hasRaisedInlineTag = rowMetrics.some((entry) => entry.hasRaisedInlineTag);
         const slotHeight = isVertical ? Math.max(1, availableHeight) : Math.max(1, availableHeight / lineCount);
         const slotWidth = isVertical ? Math.max(1, availableWidth / lineCount) : Math.max(1, availableWidth);
         container.style.setProperty("--recon-line-slot-height", `${slotHeight}px`);
         container.style.setProperty("--recon-line-slot-width", `${slotWidth}px`);
 
-        for (const row of rows) {
-          const text = row.querySelector(".recon-preserve-line-text");
-          if (text instanceof HTMLElement) {
-            text.style.transform = "scaleX(1)";
-            text.style.wordSpacing = "0px";
-            text.style.letterSpacing = "0px";
+        for (const entry of rowMetrics) {
+          if (entry.text instanceof HTMLElement) {
+            entry.text.style.transform = "scaleX(1)";
+            entry.text.style.wordSpacing = "0px";
+            entry.text.style.letterSpacing = "0px";
           }
         }
 
@@ -4154,41 +4186,52 @@
           iterations: 14,
           fitsAtFontSize(fontSize) {
             const font = `${fontSize}px`;
-            for (const row of rows) {
-              const text = row.querySelector(".recon-preserve-line-text");
-              if (text instanceof HTMLElement) {
-                text.style.fontSize = font;
+            for (const entry of rowMetrics) {
+              if (entry.text instanceof HTMLElement) {
+                entry.text.style.fontSize = font;
+                entry.text.style.lineHeight = `${fontSize * preserveLineHeightRatio({
+                  hasRaisedInlineTag: entry.hasRaisedInlineTag,
+                  verticalFlow,
+                })}px`;
               }
             }
             const maxRowHeight = Math.ceil(slotHeight + 0.5);
-            for (const row of rows) {
-              const text = row.querySelector(".recon-preserve-line-text");
-              if (!(text instanceof HTMLElement)) {
+            for (const entry of rowMetrics) {
+              if (!(entry.text instanceof HTMLElement)) {
                 continue;
               }
-              if (text.scrollHeight > maxRowHeight) {
+              const renderedHeight = Number(entry.text.getBoundingClientRect().height) || 0;
+              const measuredHeight = Math.max(Number(entry.text.scrollHeight) || 0, renderedHeight);
+              if (measuredHeight > maxRowHeight) {
                 return false;
               }
             }
             return true;
           },
         });
-        const comfortableLineHeightRatio = 1.18;
+        const comfortableLineHeightRatio = preserveLineHeightRatio({
+          hasRaisedInlineTag,
+          verticalFlow,
+        });
         const comfortableLineHeightPx = Math.max(1, slotHeight * 0.96);
         const comfortableFontSize = comfortableLineHeightPx / comfortableLineHeightRatio;
         const resolvedFontSize = verticalFlow
           ? Math.max(2, bestFontSize)
           : Math.max(2, Math.min(bestFontSize, comfortableFontSize));
-        const resolvedLineHeight = verticalFlow
-          ? Math.max(1, resolvedFontSize)
-          : Math.min(slotHeight, resolvedFontSize * comfortableLineHeightRatio);
         const resolvedFont = `${resolvedFontSize}px`;
-        const resolvedLineHeightPx = `${resolvedLineHeight}px`;
-        for (const row of rows) {
-          const text = row.querySelector(".recon-preserve-line-text");
-          if (text instanceof HTMLElement) {
-            text.style.fontSize = resolvedFont;
-            text.style.lineHeight = resolvedLineHeightPx;
+        for (const entry of rowMetrics) {
+          if (entry.text instanceof HTMLElement) {
+            const resolvedLineHeight = verticalFlow
+              ? Math.max(1, resolvedFontSize)
+              : Math.min(
+                  slotHeight,
+                  resolvedFontSize * preserveLineHeightRatio({
+                    hasRaisedInlineTag: entry.hasRaisedInlineTag,
+                    verticalFlow,
+                  }),
+                );
+            entry.text.style.fontSize = resolvedFont;
+            entry.text.style.lineHeight = `${resolvedLineHeight}px`;
           }
         }
 
@@ -4239,6 +4282,10 @@
             continue;
           }
           const rawLine = String(row.dataset.rawLine ?? "").replace(/\u00A0/g, " ");
+          const stretchLine = resolveStretchableLineText({
+            rawLine,
+            renderedText: text.textContent,
+          });
           let measuredWidth = Number(text.scrollWidth) || 0;
           if (!Number.isFinite(measuredWidth) || measuredWidth <= 0) {
             text.style.transform = "scaleX(1)";
@@ -4250,7 +4297,7 @@
           let appliedWordSpacing = 0;
           let appliedLetterSpacing = 0;
           if (targetWidth > measuredWidth + 0.25) {
-            const spacesCount = countStretchableSpaces(rawLine);
+            const spacesCount = countStretchableSpaces(stretchLine);
             if (spacesCount > 0) {
               const requiredExtra = targetWidth - measuredWidth;
               const wordSpacing = Math.max(0, Math.min(6, requiredExtra / spacesCount));
@@ -4263,7 +4310,7 @@
             }
 
             if (targetWidth > measuredWidth + 0.25) {
-              const glyphsCount = countStretchableGlyphs(rawLine);
+              const glyphsCount = countStretchableGlyphs(stretchLine);
               if (glyphsCount > 1) {
                 const requiredExtra = targetWidth - measuredWidth;
                 const letterSpacing = Math.max(0, Math.min(1.2, requiredExtra / (glyphsCount - 1)));
@@ -4294,6 +4341,10 @@
           const text = lastRow?.querySelector(".recon-preserve-line-text");
           if (text instanceof HTMLElement) {
             const rawLine = String(lastRow.dataset.rawLine ?? "").replace(/\u00A0/g, " ");
+            const stretchLine = resolveStretchableLineText({
+              rawLine,
+              renderedText: text.textContent,
+            });
             let measuredWidth = Number(text.scrollWidth) || 0;
             if (Number.isFinite(measuredWidth) && measuredWidth > 0) {
               const medianWordSpacing = Math.max(0, median(nonLastWordSpacings, 0));
@@ -4319,7 +4370,7 @@
               text.style.transform = `scaleX(${appliedScale})`;
 
               // If no meaningful reference exists (e.g. all blank refs), fallback to previous behavior.
-              if (!rawLine.trim() || !Number.isFinite(appliedScale) || appliedScale <= 0) {
+              if (!stretchLine.trim() || !Number.isFinite(appliedScale) || appliedScale <= 0) {
                 text.style.wordSpacing = "0px";
                 text.style.letterSpacing = "0px";
                 const fallbackWidth = Number(text.scrollWidth) || measuredWidth;

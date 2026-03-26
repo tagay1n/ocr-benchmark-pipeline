@@ -5,6 +5,21 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
+export function normalizeSupSubTagsForRender(markdownSource) {
+  const source = String(markdownSource ?? "");
+  if (!source) {
+    return "";
+  }
+  const withInlineTokenWrapped = source.replace(
+    /<(sup|sub)\s*\/>([^\s<][^<\s]*)/gi,
+    (_match, tagName, token) => `<${String(tagName).toLowerCase()}>${token}</${String(tagName).toLowerCase()}>`,
+  );
+  return withInlineTokenWrapped.replace(/<(sup|sub)\s*\/>/gi, (_match, tagName) => {
+    const normalizedTag = String(tagName).toLowerCase();
+    return `<${normalizedTag}></${normalizedTag}>`;
+  });
+}
+
 export function normalizeLatexForRender(latexSource) {
   let text = String(latexSource ?? "").trim();
   if (!text) {
@@ -255,7 +270,7 @@ export function renderMarkdownInto(container, markdown, { onRendered } = {}) {
     if (!deps || !container) {
       return;
     }
-    const markdownText = String(markdown ?? "");
+    const markdownText = normalizeSupSubTagsForRender(markdown);
     const rawHtml = deps.marked.parse(markdownText, {
       gfm: true,
       breaks: true,
@@ -278,7 +293,7 @@ export function renderMarkdownInlineInto(container, markdown, { onRendered } = {
     if (!deps || !container) {
       return;
     }
-    const markdownText = String(markdown ?? "");
+    const markdownText = normalizeSupSubTagsForRender(markdown);
     const inlineHtml =
       typeof deps.marked.parseInline === "function"
         ? deps.marked.parseInline(markdownText, {
@@ -309,7 +324,7 @@ export function renderMarkdownInlineWithMathInto(container, markdown, { onRender
     if (!deps || !container) {
       return;
     }
-    const segments = splitInlineMathSegments(markdown);
+    const segments = splitInlineMathSegments(normalizeSupSubTagsForRender(markdown));
     container.innerHTML = "";
     for (const segment of segments) {
       if (segment.type !== "math") {

@@ -13,6 +13,7 @@ import {
   detectEditorValidationIssues,
   findBestTokenOccurrence,
   hasLocalDraftForLayout,
+  hasRaisedInlineMarkdownTag,
   isRectOnscreen,
   isLineReviewRequiredOutput,
   isReconstructedRestoreDisabled,
@@ -23,7 +24,9 @@ import {
   normalizeLayoutOrientationValue,
   normalizeReviewViewMode,
   normalizeReconstructedRenderMode,
+  preserveLineHeightRatio,
   reconstructedLayerRankForOutputClass,
+  resolveStretchableLineText,
   resolveLineMatchingOrientation,
   resolveLineMatchingBandCount,
   resolveReconstructedLineFlow,
@@ -104,6 +107,30 @@ test("computeLineReviewDisplayGeometry adapts width by crop aspect and clamps to
   assert.equal(geometry.heightPx, 62);
   assert.equal(geometry.widthRatio, 0.12);
   assert.equal(geometry.leftRatio, 0.44);
+});
+
+test("resolveStretchableLineText prefers rendered text over raw markdown/html source", () => {
+  const rawLine = "<sup>10</sup> **Кәкәш — солдат баш киеме.**";
+  const renderedText = "10 Кәкәш — солдат баш киеме.";
+  assert.equal(
+    resolveStretchableLineText({
+      rawLine,
+      renderedText,
+    }),
+    renderedText,
+  );
+});
+
+test("hasRaisedInlineMarkdownTag detects sup and sub tags including shorthand", () => {
+  assert.equal(hasRaisedInlineMarkdownTag("E = mc<sup/>2"), true);
+  assert.equal(hasRaisedInlineMarkdownTag("H<sub>2</sub>O"), true);
+  assert.equal(hasRaisedInlineMarkdownTag("plain text"), false);
+});
+
+test("preserveLineHeightRatio allocates more height for raised inline tags", () => {
+  assert.equal(preserveLineHeightRatio(), 1.18);
+  assert.equal(preserveLineHeightRatio({ hasRaisedInlineTag: true }), 1.45);
+  assert.equal(preserveLineHeightRatio({ hasRaisedInlineTag: true, verticalFlow: true }), 1);
 });
 
 test("normalizeReconstructedRenderMode defaults to markdown and accepts raw", () => {

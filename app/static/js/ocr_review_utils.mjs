@@ -21,6 +21,17 @@ export function isLineSyncEnabledOutputFormat(outputFormat) {
   return String(outputFormat || "").trim().toLowerCase() === "markdown";
 }
 
+export function hasRaisedInlineMarkdownTag(rawValue) {
+  return /<\s*(sup|sub)\b/i.test(String(rawValue ?? ""));
+}
+
+export function preserveLineHeightRatio({ hasRaisedInlineTag = false, verticalFlow = false } = {}) {
+  if (verticalFlow) {
+    return 1;
+  }
+  return hasRaisedInlineTag ? 1.45 : 1.18;
+}
+
 export function isLineReviewRequiredOutput({ className, outputFormat } = {}) {
   const normalizedClassName = String(className || "")
     .trim()
@@ -975,4 +986,10 @@ export function computeLineReviewDisplayGeometry({
     contentWidth,
     heightPx: safeHeight,
   };
+}
+
+export function resolveStretchableLineText({ rawLine = "", renderedText = "" } = {}) {
+  const raw = String(rawLine ?? "").replace(/\u00A0/g, " ");
+  const rendered = String(renderedText ?? "").replace(/\u00A0/g, " ");
+  return rendered.trim().length > 0 ? rendered : raw;
 }
