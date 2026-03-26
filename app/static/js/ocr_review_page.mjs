@@ -64,6 +64,11 @@
         createImageMagnifier,
       } from "./magnifier.mjs";
       import {
+        ensureElementVisibleInViewport as ensureElementVisibleInViewportShared,
+        ensureNormalizedBBoxVisible,
+        isNormalizedBBoxVisible,
+      } from "./viewport_visibility_utils.mjs";
+      import {
         colorForClass,
         formatClassLabel,
         normalizeClassName,
@@ -3644,7 +3649,8 @@
           return;
         }
         const fitScale = profile.targetWidth / Math.max(1e-6, width);
-        let appliedScale = Math.max(0.04, Math.min(1.4, fitScale));
+        const maxExpandScale = 1.4;
+        let appliedScale = Math.max(0.04, Math.min(maxExpandScale, fitScale));
         textNode.style.transform = `scaleX(${appliedScale})`;
 
         // Strict overflow guard: if the right edge is still clipped, keep shrinking.
@@ -3741,7 +3747,10 @@
           lineBandFromLineIndex(lineIndex, lineCount);
         const sourceCrop = resolveLineReviewSourceCrop(output, lineBand);
         const displayGeometry = resolveLineReviewDisplayGeometry(output, sourceCrop);
+        const isVertical = useVerticalLineAxis(output);
+        const orientation = isVertical ? "vertical" : "horizontal";
         applyLineReviewHorizontalGeometry(sourceLine, output, displayGeometry);
+        sourceLine.dataset.lineOrientation = orientation;
 
         const geminiLane = document.createElement("div");
         geminiLane.className = "line-review-gemini-lane";
@@ -3760,6 +3769,7 @@
         } else {
           applyLineReviewHorizontalGeometry(geminiLine, output, displayGeometry);
         }
+        geminiLine.dataset.lineOrientation = orientation;
         const currentText = String(lines[lineIndex] ?? "");
         const baselineText = String(baselineLines[lineIndex] ?? "");
         const isInlineMathLine = !isFormulaLine && hasInlineMarkdownMath(currentText);
@@ -4303,7 +4313,10 @@
           return false;
         }
         if (!preferVerticalCenter) {
-          return ensureViewportBBoxVisible(bbox, viewport, content, { paddingPx: 24 });
+          if (isNormalizedBBoxVisible(bbox, viewport, content, { paddingPx: 24 })) {
+            return true;
+          }
+          return ensureNormalizedBBoxVisible(bbox, viewport, content, { paddingPx: 24 });
         }
         const target = computeViewportAutoCenterTarget({
           bbox,
@@ -4322,7 +4335,7 @@
         if (!target) return false;
         viewport.scrollLeft = target.left;
         viewport.scrollTop = target.top;
-        return ensureViewportBBoxVisible(bbox, viewport, content, { paddingPx: 24 }) || true;
+        return ensureNormalizedBBoxVisible(bbox, viewport, content, { paddingPx: 24 }) || true;
       }
 
       function scrollVisiblePreviewToLayout(layoutId, { preferVerticalCenter = false } = {}) {
@@ -4414,56 +4427,7 @@
       }
 
       function ensureElementVisibleInViewport(element, viewport, { paddingPx = 20 } = {}) {
-        if (!(element instanceof HTMLElement) || !(viewport instanceof HTMLElement)) {
-          return false;
-        }
-        const elementRect = element.getBoundingClientRect();
-        const viewportRect = viewport.getBoundingClientRect();
-        if (
-          !(elementRect.width > 0) ||
-          !(elementRect.height > 0) ||
-          !(viewportRect.width > 0) ||
-          !(viewportRect.height > 0)
-        ) {
-          return false;
-        }
-
-        const maxLeft = Math.max(0, Number(viewport.scrollWidth) - Number(viewport.clientWidth));
-        const maxTop = Math.max(0, Number(viewport.scrollHeight) - Number(viewport.clientHeight));
-        const currentLeft = Math.max(0, Math.min(maxLeft, Number(viewport.scrollLeft) || 0));
-        const currentTop = Math.max(0, Math.min(maxTop, Number(viewport.scrollTop) || 0));
-        const padding = Math.max(0, Number(paddingPx) || 0);
-
-        let nextLeft = currentLeft;
-        let nextTop = currentTop;
-
-        const topLimit = viewportRect.top + padding;
-        const bottomLimit = viewportRect.bottom - padding;
-        const leftLimit = viewportRect.left + padding;
-        const rightLimit = viewportRect.right - padding;
-
-        if (elementRect.top < topLimit) {
-          nextTop -= topLimit - elementRect.top;
-        } else if (elementRect.bottom > bottomLimit) {
-          nextTop += elementRect.bottom - bottomLimit;
-        }
-
-        if (elementRect.left < leftLimit) {
-          nextLeft -= leftLimit - elementRect.left;
-        } else if (elementRect.right > rightLimit) {
-          nextLeft += elementRect.right - rightLimit;
-        }
-
-        const clampedLeft = Math.round(Math.max(0, Math.min(maxLeft, nextLeft)));
-        const clampedTop = Math.round(Math.max(0, Math.min(maxTop, nextTop)));
-        const currentLeftRounded = Math.round(currentLeft);
-        const currentTopRounded = Math.round(currentTop);
-        if (clampedLeft === currentLeftRounded && clampedTop === currentTopRounded) {
-          return false;
-        }
-        viewport.scrollLeft = clampedLeft;
-        viewport.scrollTop = clampedTop;
-        return true;
+        return ensureElementVisibleInViewportShared(element, viewport, { paddingPx });
       }
 
       function ensureViewportBBoxVisible(
@@ -4472,61 +4436,7 @@
         content,
         { paddingPx = 20 } = {},
       ) {
-        if (!viewport || !content || !bbox) {
-          return false;
-        }
-        const width = Number(content.clientWidth);
-        const height = Number(content.clientHeight);
-        const viewportW = Number(viewport.clientWidth);
-        const viewportH = Number(viewport.clientHeight);
-        if (!(width > 0) || !(height > 0) || !(viewportW > 0) || !(viewportH > 0)) {
-          return false;
-        }
-
-        const x1 = Math.max(0, Math.min(width, Number(bbox.x1) * width));
-        const x2 = Math.max(0, Math.min(width, Number(bbox.x2) * width));
-        const y1 = Math.max(0, Math.min(height, Number(bbox.y1) * height));
-        const y2 = Math.max(0, Math.min(height, Number(bbox.y2) * height));
-        if (!(x2 > x1) || !(y2 > y1)) {
-          return false;
-        }
-
-        const maxLeft = Math.max(0, width - viewportW);
-        const maxTop = Math.max(0, height - viewportH);
-        const currentLeft = Math.max(0, Math.min(maxLeft, Number(viewport.scrollLeft) || 0));
-        const currentTop = Math.max(0, Math.min(maxTop, Number(viewport.scrollTop) || 0));
-        const padding = Math.max(0, Number(paddingPx) || 0);
-
-        let nextLeft = currentLeft;
-        let nextTop = currentTop;
-
-        const visibleLeft = currentLeft + padding;
-        const visibleRight = currentLeft + viewportW - padding;
-        const visibleTop = currentTop + padding;
-        const visibleBottom = currentTop + viewportH - padding;
-
-        if (x1 < visibleLeft) {
-          nextLeft = x1 - padding;
-        } else if (x2 > visibleRight) {
-          nextLeft = x2 + padding - viewportW;
-        }
-
-        if (y1 < visibleTop) {
-          nextTop = y1 - padding;
-        } else if (y2 > visibleBottom) {
-          nextTop = y2 + padding - viewportH;
-        }
-
-        const clampedLeft = Math.round(Math.max(0, Math.min(maxLeft, nextLeft)));
-        const clampedTop = Math.round(Math.max(0, Math.min(maxTop, nextTop)));
-        const currentLeftRounded = Math.round(currentLeft);
-        const currentTopRounded = Math.round(currentTop);
-        if (clampedLeft === currentLeftRounded && clampedTop === currentTopRounded) {
-          return false;
-        }
-        viewport.scrollLeft = clampedLeft;
-        viewport.scrollTop = clampedTop;
-        return true;
+        return ensureNormalizedBBoxVisible(bbox, viewport, content, { paddingPx });
       }
 
       function selectOutput(layoutId, { scrollImageToLayout = false, isUserSelection = false } = {}) {
@@ -6458,3 +6368,4 @@
       init().catch((error) => {
         setStatus(`Initialization failed: ${error.message}`, { isError: true });
       });
+        const isVertical = String(lineNode.dataset.lineOrientation || "").toLowerCase() === "vertical";

@@ -86,6 +86,10 @@
         openModal,
         shouldCloseOnBackdropPointerDown,
       } from "/static/js/modal_controller.mjs";
+      import {
+        ensureNormalizedBBoxVisible,
+        isNormalizedBBoxVisible,
+      } from "/static/js/viewport_visibility_utils.mjs";
 
       const params = new URLSearchParams(window.location.search);
       const pageId = Number(params.get("page_id"));
@@ -513,6 +517,17 @@
       function scrollImageViewportToLayout(layoutId) {
         if (!pageImage.naturalWidth || !pageImage.naturalHeight) {
           return false;
+        }
+        const normalizedLayoutId = Number(layoutId);
+        const layout =
+          state.layouts.find((candidate) => Number(candidate?.id) === normalizedLayoutId) || null;
+        if (layout?.bbox) {
+          if (isNormalizedBBoxVisible(layout.bbox, imageViewport, imageWrap, { paddingPx: 24 })) {
+            return true;
+          }
+          if (ensureNormalizedBBoxVisible(layout.bbox, imageViewport, imageWrap, { paddingPx: 24 })) {
+            return true;
+          }
         }
         const target = computeViewportScrollTargetForLayoutId({
           layoutId,
