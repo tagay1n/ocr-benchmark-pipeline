@@ -305,6 +305,65 @@ class BatchOcrApiTests(unittest.TestCase):
         self.assertEqual(int(status_payload["running_jobs"]), 0)
         self.assertEqual(int(status_payload["queued_jobs"]), 0)
 
+    def test_recover_pipeline_jobs_after_restart_repairs_stale_ocr_extracting_page_statuses(self) -> None:
+        self._write_image("batch/recover/p1.png", b"p1")
+        self._write_image("batch/recover/p2.png", b"p2")
+        self._write_image("batch/recover/p3.png", b"p3")
+        main.scan_images()
+
+        page1 = self._page_id_by_rel_path("batch/recover/p1.png")
+        page2 = self._page_id_by_rel_path("batch/recover/p2.png")
+        page3 = self._page_id_by_rel_path("batch/recover/p3.png")
+        self._set_page_status(page1, "ocr_extracting")
+        self._set_page_status(page2, "ocr_extracting")
+        self._set_page_status(page3, "ocr_extracting")
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add_all(
+                [
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=page2,
+                        status="running",
+                        payload_json='{"trigger":"batch_ocr"}',
+                        result_json=None,
+                        error=None,
+                        attempts=1,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=now,
+                        finished_at=None,
+                    ),
+                    main.PipelineJob(
+                        stage="ocr_extract",
+                        page_id=page3,
+                        status="queued",
+                        payload_json='{"trigger":"batch_ocr"}',
+                        result_json=None,
+                        error=None,
+                        attempts=0,
+                        created_at=now,
+                        updated_at=now,
+                        started_at=None,
+                        finished_at=None,
+                    ),
+                ]
+            )
+
+        recovered = pipeline_runtime.recover_pipeline_jobs_after_restart(exclude_stages={"layout_benchmark"})
+        self.assertEqual(int(recovered["recovered_jobs"]), 1)
+        self.assertEqual(int(recovered["recovered_stale_ocr_extracting_pages"]), 2)
+
+        with db.get_session() as session:
+            pages = session.execute(
+                select(main.Page.id, main.Page.status).where(main.Page.id.in_([page1, page2, page3]))
+            ).all()
+        status_by_page = {int(row[0]): str(row[1]) for row in pages}
+        self.assertEqual(status_by_page[page1], "ocr_failed")
+        self.assertEqual(status_by_page[page2], "ocr_failed")
+        self.assertEqual(status_by_page[page3], "ocr_extracting")
+
     def test_ocr_extract_handler_respects_payload_layout_ids(self) -> None:
         self._write_image("batch/extract.png", b"extract-page")
         main.scan_images()

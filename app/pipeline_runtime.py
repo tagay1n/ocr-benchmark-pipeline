@@ -34,6 +34,9 @@ _WORKER_THREAD: Thread | None = None
 _WORKER_LOCK = Lock()
 
 _DEFAULT_HANDLERS_REGISTERED = False
+_ACTIVE_JOB_STATUSES = ("queued", "running")
+_OCR_EXTRACTING_PAGE_STATUSES = ("ocr_extracting", "OCR_EXTRACTING")
+_LAYOUT_DETECTING_PAGE_STATUSES = ("layout_detecting", "LAYOUT_DETECTING")
 
 
 def _utc_now() -> str:
@@ -90,6 +93,54 @@ def register_default_handlers() -> None:
     _DEFAULT_HANDLERS_REGISTERED = True
 
 
+def _recover_stale_page_statuses(*, now: str, excluded_stages: set[str]) -> dict[str, int]:
+    recovered_ocr_extracting_pages = 0
+    recovered_layout_detecting_pages = 0
+    with get_session() as session:
+        if STAGE_OCR_EXTRACT not in excluded_stages:
+            active_ocr_job_exists = (
+                select(PipelineJob.id)
+                .where(PipelineJob.stage == STAGE_OCR_EXTRACT)
+                .where(PipelineJob.status.in_(_ACTIVE_JOB_STATUSES))
+                .where(PipelineJob.page_id == Page.id)
+                .exists()
+            )
+            stale_ocr_pages = session.execute(
+                select(Page)
+                .where(Page.is_missing.is_(False))
+                .where(Page.status.in_(_OCR_EXTRACTING_PAGE_STATUSES))
+                .where(~active_ocr_job_exists)
+            ).scalars().all()
+            for page_row in stale_ocr_pages:
+                page_row.status = "ocr_failed"
+                page_row.updated_at = now
+            recovered_ocr_extracting_pages = len(stale_ocr_pages)
+
+        if STAGE_LAYOUT_DETECT not in excluded_stages:
+            active_layout_job_exists = (
+                select(PipelineJob.id)
+                .where(PipelineJob.stage == STAGE_LAYOUT_DETECT)
+                .where(PipelineJob.status.in_(_ACTIVE_JOB_STATUSES))
+                .where(PipelineJob.page_id == Page.id)
+                .exists()
+            )
+            stale_layout_pages = session.execute(
+                select(Page)
+                .where(Page.is_missing.is_(False))
+                .where(Page.status.in_(_LAYOUT_DETECTING_PAGE_STATUSES))
+                .where(~active_layout_job_exists)
+            ).scalars().all()
+            for page_row in stale_layout_pages:
+                page_row.status = "new"
+                page_row.updated_at = now
+            recovered_layout_detecting_pages = len(stale_layout_pages)
+
+    return {
+        "recovered_stale_ocr_extracting_pages": int(recovered_ocr_extracting_pages),
+        "recovered_stale_layout_detecting_pages": int(recovered_layout_detecting_pages),
+    }
+
+
 def recover_pipeline_jobs_after_restart(*, exclude_stages: set[str] | None = None) -> dict[str, int]:
     now = _utc_now()
     excluded = {str(stage) for stage in (exclude_stages or set())}
@@ -106,7 +157,8 @@ def recover_pipeline_jobs_after_restart(*, exclude_stages: set[str] | None = Non
             job.finished_at = now
             job.updated_at = now
             recovered_jobs += 1
-    return {"recovered_jobs": recovered_jobs}
+    stale_page_recovery = _recover_stale_page_statuses(now=now, excluded_stages=excluded)
+    return {"recovered_jobs": recovered_jobs, **stale_page_recovery}
 
 
 def _ensure_worker_running() -> None:

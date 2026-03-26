@@ -19,6 +19,7 @@ Use only these living docs:
 - Keep this file focused on process and engineering agreements.
 - Do not commit secrets (especially API keys in `config.yaml`).
 - Prefer small, test-backed changes.
+- Use TDD by default for behavior changes: add or update a failing test first, implement the minimal fix, then run relevant tests.
 - When touching backend logic, run backend tests.
 - When touching frontend logic, run frontend tests.
 - Keep API status values canonical in backend (frontend should not remap business semantics).
