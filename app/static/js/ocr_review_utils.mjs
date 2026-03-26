@@ -910,3 +910,69 @@ export function computeFloatingControlPlacement({
 
   return { visible: true, top, right };
 }
+
+export function computeLineReviewDisplayGeometry({
+  bbox,
+  crop = null,
+  reelWidth = 0,
+  imageWidth = 0,
+  imageHeight = 0,
+  targetHeightPx = 44,
+  minHeightPx = 30,
+  maxHeightPx = 62,
+  minWidthPx = 120,
+  minWidthRatioFallback = 0.08,
+  maxWidthRatio = 0.94,
+} = {}) {
+  const x1 = clampUnit(bbox?.x1);
+  const y1 = clampUnit(bbox?.y1);
+  const x2 = clampUnit(bbox?.x2);
+  const y2 = clampUnit(bbox?.y2);
+  const normalizedRect = x2 > x1 && y2 > y1 ? { x1, y1, x2, y2 } : null;
+  const contentWidth = Math.max(1e-6, normalizedRect ? normalizedRect.x2 - normalizedRect.x1 : 0.5);
+  let widthRatio = Math.min(maxWidthRatio, Math.max(0.18, contentWidth));
+  let heightPx = targetHeightPx;
+
+  const safeReelWidth = Number(reelWidth);
+  const safeImageWidth = Number(imageWidth);
+  const safeImageHeight = Number(imageHeight);
+  const cropWidth = Number(crop?.cropWidth || contentWidth);
+  const cropHeight = Number(crop?.cropHeight || 0);
+  if (
+    Number.isFinite(safeReelWidth) && safeReelWidth > 0 &&
+    Number.isFinite(safeImageWidth) && safeImageWidth > 0 &&
+    Number.isFinite(safeImageHeight) && safeImageHeight > 0 &&
+    cropWidth > 0 &&
+    cropHeight > 0
+  ) {
+    const imageAspectRatio = safeImageHeight / safeImageWidth;
+    const cropAspectRatio = (cropHeight / cropWidth) * imageAspectRatio;
+    const aspectFactor = safeReelWidth * cropAspectRatio;
+    if (Number.isFinite(aspectFactor) && aspectFactor > 0) {
+      const minWidthRatioFromPx = Math.max(
+        minWidthRatioFallback,
+        Math.min(maxWidthRatio, minWidthPx / safeReelWidth),
+      );
+      const widthForTarget = targetHeightPx / aspectFactor;
+      const widthForMinHeight = minHeightPx / aspectFactor;
+      const widthForMaxHeight = maxHeightPx / aspectFactor;
+      const minAllowedWidth = Math.max(minWidthRatioFromPx, widthForMinHeight);
+      const maxAllowedWidth = Math.min(maxWidthRatio, widthForMaxHeight);
+      if (minAllowedWidth <= maxAllowedWidth) {
+        widthRatio = Math.max(minAllowedWidth, Math.min(maxAllowedWidth, widthForTarget));
+      } else {
+        widthRatio = Math.max(minWidthRatioFromPx, Math.min(maxWidthRatio, widthForTarget));
+      }
+      heightPx = aspectFactor * widthRatio;
+    }
+  }
+
+  const safeHeight = Math.max(minHeightPx, Math.min(maxHeightPx, Number(heightPx) || targetHeightPx));
+  const safeWidth = Math.max(minWidthRatioFallback, Math.min(maxWidthRatio, Number(widthRatio) || 0.5));
+  return {
+    leftRatio: Math.max(0, (1 - safeWidth) / 2),
+    widthRatio: safeWidth,
+    contentWidth,
+    heightPx: safeHeight,
+  };
+}

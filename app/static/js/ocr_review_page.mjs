@@ -33,6 +33,7 @@
         computeViewportAutoCenterTarget,
         computeEditorToolbarState,
         computeReconstructedImageCropStyle,
+        computeLineReviewDisplayGeometry,
         computeFloatingControlPlacement,
         countTextLines,
         detectEditorValidationIssues,
@@ -67,6 +68,7 @@
         ensureElementVisibleInViewport as ensureElementVisibleInViewportShared,
         ensureNormalizedBBoxVisible,
         isNormalizedBBoxVisible,
+        normalizeBBoxRect,
       } from "./viewport_visibility_utils.mjs";
       import {
         colorForClass,
@@ -2907,24 +2909,6 @@
         ensureFocusedLineVisible(selectedLayoutId, focusedBand, retries, { preferVerticalCenter: false });
       }
 
-      function normalizeBBoxRect(bbox) {
-        const rawX1 = Number(bbox?.x1);
-        const rawY1 = Number(bbox?.y1);
-        const rawX2 = Number(bbox?.x2);
-        const rawY2 = Number(bbox?.y2);
-        if (![rawX1, rawY1, rawX2, rawY2].every((value) => Number.isFinite(value))) {
-          return null;
-        }
-        const x1 = Math.max(0, Math.min(1, Math.min(rawX1, rawX2)));
-        const y1 = Math.max(0, Math.min(1, Math.min(rawY1, rawY2)));
-        const x2 = Math.max(0, Math.min(1, Math.max(rawX1, rawX2)));
-        const y2 = Math.max(0, Math.min(1, Math.max(rawY1, rawY2)));
-        if (x2 <= x1 || y2 <= y1) {
-          return null;
-        }
-        return { x1, y1, x2, y2 };
-      }
-
       function resolveLineReviewSourceCrop(output, lineBand) {
         const normalizedRect = normalizeBBoxRect(output?.bbox);
         if (!normalizedRect || !lineBand) {
@@ -3197,72 +3181,19 @@
       }
 
       function resolveLineReviewDisplayGeometry(output, crop) {
-        const normalizedRect = normalizeBBoxRect(output?.bbox);
-        const contentWidth = Math.max(
-          1e-6,
-          normalizedRect ? normalizedRect.x2 - normalizedRect.x1 : 0.5,
-        );
-        let widthRatio = Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, Math.max(0.18, contentWidth));
-        let heightPx = LINE_REVIEW_TARGET_HEIGHT_PX;
-        if (crop && lineReviewReel instanceof HTMLElement) {
-          const reelWidth = Number(lineReviewReel.clientWidth);
-          const imageWidth = Number(pageImage.naturalWidth || pageImage.width || 0);
-          const imageHeight = Number(pageImage.naturalHeight || pageImage.height || 0);
-          const imageAspectRatio =
-            Number.isFinite(imageWidth) && imageWidth > 0 &&
-            Number.isFinite(imageHeight) && imageHeight > 0
-              ? imageHeight / imageWidth
-              : 1;
-          const cropWidth = Number(crop.cropWidth || contentWidth);
-          const cropHeight = Number(crop.cropHeight || 0);
-          const cropAspectRatio =
-            cropWidth > 0 && cropHeight > 0
-              ? (cropHeight / cropWidth) * imageAspectRatio
-              : 0;
-          const aspectFactor =
-            Number.isFinite(reelWidth) && reelWidth > 0 &&
-            Number.isFinite(imageWidth) && imageWidth > 0 &&
-            Number.isFinite(imageHeight) && imageHeight > 0
-              ? reelWidth * cropAspectRatio
-              : 0;
-          if (Number.isFinite(aspectFactor) && aspectFactor > 0) {
-            const minWidthRatioFromPx = Math.max(
-              LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK,
-              Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, LINE_REVIEW_MIN_WIDTH_PX / reelWidth),
-            );
-            const widthForTarget = LINE_REVIEW_TARGET_HEIGHT_PX / aspectFactor;
-            const widthForMinHeight = LINE_REVIEW_MIN_HEIGHT_PX / aspectFactor;
-            const widthForMaxHeight = LINE_REVIEW_MAX_HEIGHT_PX / aspectFactor;
-            const minAllowedWidth = Math.max(minWidthRatioFromPx, widthForMinHeight);
-            const maxAllowedWidth = Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, widthForMaxHeight);
-            if (minAllowedWidth <= maxAllowedWidth) {
-              widthRatio = Math.max(
-                minAllowedWidth,
-                Math.min(maxAllowedWidth, widthForTarget),
-              );
-            } else {
-              widthRatio = Math.max(
-                minWidthRatioFromPx,
-                Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, widthForTarget),
-              );
-            }
-            heightPx = aspectFactor * widthRatio;
-          }
-        }
-        const safeHeight = Math.max(
-          LINE_REVIEW_MIN_HEIGHT_PX,
-          Math.min(LINE_REVIEW_MAX_HEIGHT_PX, Number(heightPx) || LINE_REVIEW_TARGET_HEIGHT_PX),
-        );
-        const safeWidth = Math.max(
-          LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK,
-          Math.min(LINE_REVIEW_MAX_WIDTH_RATIO, Number(widthRatio) || 0.5),
-        );
-        return {
-          leftRatio: Math.max(0, (1 - safeWidth) / 2),
-          widthRatio: safeWidth,
-          contentWidth,
-          heightPx: safeHeight,
-        };
+        return computeLineReviewDisplayGeometry({
+          bbox: output?.bbox,
+          crop,
+          reelWidth: Number(lineReviewReel?.clientWidth || 0),
+          imageWidth: Number(pageImage.naturalWidth || pageImage.width || 0),
+          imageHeight: Number(pageImage.naturalHeight || pageImage.height || 0),
+          targetHeightPx: LINE_REVIEW_TARGET_HEIGHT_PX,
+          minHeightPx: LINE_REVIEW_MIN_HEIGHT_PX,
+          maxHeightPx: LINE_REVIEW_MAX_HEIGHT_PX,
+          minWidthPx: LINE_REVIEW_MIN_WIDTH_PX,
+          minWidthRatioFallback: LINE_REVIEW_MIN_WIDTH_RATIO_FALLBACK,
+          maxWidthRatio: LINE_REVIEW_MAX_WIDTH_RATIO,
+        });
       }
 
       function applyLineReviewLaneHeights(sourceLane, geminiLane, heightPx) {

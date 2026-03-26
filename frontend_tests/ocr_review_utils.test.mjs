@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyInlineMarkdownWrapper,
   applyLinePrefixMarkdown,
+  computeLineReviewDisplayGeometry,
   computeReconstructedImageCropStyle,
   computeViewportAutoCenterTarget,
   computeEditorToolbarState,
@@ -75,6 +76,34 @@ test("computeReconstructedImageCropStyle clamps malformed inputs and rejects emp
     }),
     null,
   );
+});
+
+test("computeLineReviewDisplayGeometry uses bbox width fallback when no crop metrics are provided", () => {
+  const geometry = computeLineReviewDisplayGeometry({
+    bbox: { x1: 0.3, y1: 0.1, x2: 0.7, y2: 0.2 },
+  });
+  assert.ok(Math.abs(geometry.widthRatio - 0.4) < 1e-9);
+  assert.ok(Math.abs(geometry.leftRatio - 0.3) < 1e-9);
+  assert.equal(geometry.heightPx, 44);
+});
+
+test("computeLineReviewDisplayGeometry adapts width by crop aspect and clamps to configured bounds", () => {
+  const geometry = computeLineReviewDisplayGeometry({
+    bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.9 },
+    crop: { cropWidth: 0.1, cropHeight: 0.8 },
+    reelWidth: 1000,
+    imageWidth: 1000,
+    imageHeight: 2000,
+    targetHeightPx: 44,
+    minHeightPx: 30,
+    maxHeightPx: 62,
+    minWidthPx: 120,
+    minWidthRatioFallback: 0.08,
+    maxWidthRatio: 0.94,
+  });
+  assert.equal(geometry.heightPx, 62);
+  assert.equal(geometry.widthRatio, 0.12);
+  assert.equal(geometry.leftRatio, 0.44);
 });
 
 test("normalizeReconstructedRenderMode defaults to markdown and accepts raw", () => {
