@@ -707,8 +707,21 @@ class OcrExtractInternalsTests(unittest.TestCase):
         with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
             ocr_extract, "_gemini_generate_content", side_effect=RuntimeError("HTTP 500 transient")
         ):
-            with self.assertRaisesRegex(RuntimeError, f"layout {int(layout['id'])}"):
-                ocr_extract.extract_ocr_for_page(page_id, layout_ids=[int(layout["id"])], max_retries_per_layout=2)
+            result = ocr_extract.extract_ocr_for_page(
+                page_id,
+                layout_ids=[int(layout["id"])],
+                max_retries_per_layout=2,
+            )
+
+        self.assertEqual(result["status"], "ocr_done")
+        self.assertEqual(result["extracted_count"], 0)
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["failed_layout_ids"], [int(layout["id"])])
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 1)
+        self.assertEqual(outputs[0]["extraction_status"], "failed")
+        self.assertIn("HTTP 500 transient", str(outputs[0]["error_message"]))
+        self.assertEqual(main.page_details(page_id)["page"]["status"], "ocr_done")
 
         usage_path = Path(self.test_settings.gemini_usage_path or "")
         if usage_path.exists():
@@ -746,19 +759,22 @@ class OcrExtractInternalsTests(unittest.TestCase):
                 max_retries_per_layout=1,
             )
 
-        self.assertEqual(result["status"], "ocr_failed")
+        self.assertEqual(result["status"], "ocr_done")
         self.assertEqual(result["extracted_count"], 1)
         self.assertEqual(result["failed_count"], 1)
         self.assertEqual(result["failed_layout_ids"], [int(first["id"])])
         self.assertEqual(result["requests_count"], 1)
 
         page_payload = main.page_details(page_id)
-        self.assertEqual(page_payload["page"]["status"], "ocr_failed")
+        self.assertEqual(page_payload["page"]["status"], "ocr_done")
 
         outputs = main.page_ocr_outputs(page_id)["outputs"]
-        self.assertEqual(len(outputs), 1)
-        self.assertEqual(int(outputs[0]["layout_id"]), int(second["id"]))
-        self.assertEqual(str(outputs[0]["content"]), "second-ok")
+        self.assertEqual(len(outputs), 2)
+        by_layout = {int(row["layout_id"]): row for row in outputs}
+        self.assertEqual(str(by_layout[int(second["id"])]["content"]), "second-ok")
+        self.assertEqual(str(by_layout[int(second["id"])]["extraction_status"]), "ok")
+        self.assertEqual(str(by_layout[int(first["id"])]["extraction_status"]), "failed")
+        self.assertIn("timed out", str(by_layout[int(first["id"])]["error_message"]).lower())
 
 
 if __name__ == "__main__":

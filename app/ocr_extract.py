@@ -41,7 +41,7 @@ from .ocr_prompts import (
     render_prompt_for_layout_class,
 )
 
-MAX_RETRIES_PER_LAYOUT = 3
+MAX_RETRIES_PER_LAYOUT = 2
 
 
 def _utc_now() -> str:
@@ -298,6 +298,8 @@ def extract_ocr_for_page(
                     "output_format": "skip",
                     "content": "",
                     "key_alias": None,
+                    "extraction_status": "skip",
+                    "error_message": None,
                 }
             )
             skipped_count += 1
@@ -354,22 +356,30 @@ def extract_ocr_for_page(
                     break
         if last_error is not None:
             layout_id = int(layout["id"])
-            if continue_on_server_error and _is_gemini_server_error(last_error):
-                failed_count += 1
-                failed_layout_ids.append(layout_id)
-                processed_count += 1
-                if callable(progress_callback):
-                    progress_callback(
-                        {
-                            "processed_layouts": int(processed_count),
-                            "total_layouts": int(total_selected),
-                            "failed_layout_id": int(layout_id),
-                            "failed_count": int(failed_count),
-                        }
-                    )
-                continue
-            _write_prompt_debug_dump(page_id, prompt_debug_rows)
-            raise RuntimeError(f"OCR extraction failed for layout {layout['id']}: {last_error}")
+            failed_count += 1
+            failed_layout_ids.append(layout_id)
+            pending_outputs.append(
+                {
+                    "layout_id": int(layout["id"]),
+                    "class_name": str(layout["class_name"]),
+                    "output_format": output_format,
+                    "content": "",
+                    "key_alias": None,
+                    "extraction_status": "failed",
+                    "error_message": str(last_error),
+                }
+            )
+            processed_count += 1
+            if callable(progress_callback):
+                progress_callback(
+                    {
+                        "processed_layouts": int(processed_count),
+                        "total_layouts": int(total_selected),
+                        "failed_layout_id": int(layout_id),
+                        "failed_count": int(failed_count),
+                    }
+                )
+            continue
 
         response_text = normalize_text_nfc(response_text)
         class_name = str(layout["class_name"])
@@ -395,6 +405,8 @@ def extract_ocr_for_page(
                 "content": response_text,
                 "key_alias": _key_alias(used_key),
                 "lookalike_warning_count": len(lookalike_warnings),
+                "extraction_status": "ok",
+                "error_message": None,
             }
         )
         extracted_count += 1
@@ -408,7 +420,7 @@ def extract_ocr_for_page(
             )
 
     now = _utc_now()
-    final_status = "ocr_failed" if failed_count > 0 else "ocr_done"
+    final_status = "ocr_done"
     with get_session() as session:
         output_layout_ids = [int(output["layout_id"]) for output in pending_outputs]
         if output_layout_ids:
@@ -428,6 +440,10 @@ def extract_ocr_for_page(
                     content=str(output["content"]),
                     model_name=GEMINI_MODEL,
                     key_alias=output["key_alias"],
+                    extraction_status=str(output.get("extraction_status") or "ok"),
+                    error_message=None
+                    if output.get("error_message") is None
+                    else str(output.get("error_message")),
                     created_at=now,
                     updated_at=now,
                 )

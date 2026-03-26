@@ -993,7 +993,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(outputs_by_layout_id[first_layout_id], "Updated first")
         self.assertEqual(outputs_by_layout_id[second_layout_id], "Initial second")
 
-    def test_manual_ocr_reextract_failure_keeps_previous_outputs(self) -> None:
+    def test_manual_ocr_reextract_failure_marks_layout_failed_for_manual_recovery(self) -> None:
         self.test_settings = Settings(
             project_root=self.project_root,
             source_dir=self.project_root / "input",
@@ -1039,13 +1039,16 @@ class PipelineStagesTests(unittest.TestCase):
         with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
             ocr_extract, "_gemini_generate_content", side_effect=RuntimeError("HTTP 500 transient failure")
         ):
-            with self.assertRaises(main.HTTPException) as reextract_error:
-                main.reextract_ocr(page_id)
+            result = main.reextract_ocr(page_id)
 
-        self.assertEqual(reextract_error.exception.status_code, 400)
+        self.assertEqual(result["status"], "ocr_done")
+        self.assertEqual(result["failed_count"], 1)
         outputs_after = main.page_ocr_outputs(page_id)
         self.assertEqual(outputs_after["count"], 1)
-        self.assertEqual(outputs_after["outputs"][0]["content"], "Initial text")
+        self.assertEqual(outputs_after["outputs"][0]["content"], "")
+        self.assertEqual(outputs_after["outputs"][0]["extraction_status"], "failed")
+        self.assertIn("HTTP 500 transient failure", str(outputs_after["outputs"][0]["error_message"]))
+        self.assertEqual(main.page_details(page_id)["page"]["status"], "ocr_done")
 
     def test_pipeline_activity_endpoint_shape(self) -> None:
         self._write_image("activity.png", b"activity")

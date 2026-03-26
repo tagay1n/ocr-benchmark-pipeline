@@ -1677,6 +1677,10 @@
         if (!output) {
           return "No OCR yet";
         }
+        if (isFailedExtractionOutput(output)) {
+          const errorText = String(output.error_message || "").trim();
+          return errorText ? `OCR failed: ${errorText}` : "OCR failed";
+        }
         const format = String(output.output_format || "").toLowerCase();
         if (format === "skip") {
           return "Skipped region (no text extraction)";
@@ -1715,6 +1719,7 @@
       function updateReviewButtonState() {
         const alreadyReviewed = state.page?.status === "ocr_reviewed";
         const lineProgress = reviewProgressSummary();
+        const unresolvedTotal = Math.max(0, Number(lineProgress.unresolvedTotal) || 0);
         if (state.reviewSubmitInProgress) {
           reviewBtn.textContent = "Saving...";
           reviewBtn.disabled = true;
@@ -1732,6 +1737,11 @@
         }
         if (state.viewMode === "line_by_line" && !lineProgress.complete) {
           reviewBtn.textContent = `Review lines (${lineProgress.missingTotal})`;
+          reviewBtn.disabled = true;
+          return;
+        }
+        if (unresolvedTotal > 0) {
+          reviewBtn.textContent = `Resolve failed OCR (${unresolvedTotal})`;
           reviewBtn.disabled = true;
           return;
         }
@@ -2133,10 +2143,35 @@
       }
 
       function lineReviewRequiredOutput(output) {
+        if (isFailedExtractionOutput(output)) {
+          return false;
+        }
         return isLineReviewRequiredOutputShared({
           className: output?.class_name,
           outputFormat: output?.output_format,
         });
+      }
+
+      function normalizeExtractionStatus(value) {
+        const normalized = String(value || "").trim().toLowerCase();
+        if (normalized === "ok" || normalized === "manual" || normalized === "failed" || normalized === "skip") {
+          return normalized;
+        }
+        return "ok";
+      }
+
+      function isFailedExtractionOutput(output) {
+        return normalizeExtractionStatus(output?.extraction_status) === "failed";
+      }
+
+      function isResolvedExtractionOutput(output) {
+        const status = normalizeExtractionStatus(output?.extraction_status);
+        return status === "ok" || status === "manual" || status === "skip";
+      }
+
+      function layoutRequiresOcr(layout) {
+        const className = normalizeClassName(layout?.class_name);
+        return className !== "picture";
       }
 
       function useVerticalLineAxis(output) {
@@ -2316,11 +2351,33 @@
           approvedTotal += normalizeApprovedLineIndexes(output.layout_id, lines.length).length;
         }
         const missingTotal = Math.max(0, requiredTotal - approvedTotal);
+        const outputByLayout = new Map(
+          state.outputs.map((output) => [Number(output.layout_id), output]),
+        );
+        let unresolvedTotal = 0;
+        for (const layout of state.pageLayouts) {
+          const layoutId = Number(layout?.id);
+          if (!Number.isInteger(layoutId) || layoutId <= 0) {
+            continue;
+          }
+          if (!layoutRequiresOcr(layout)) {
+            continue;
+          }
+          const output = outputByLayout.get(layoutId);
+          if (!output) {
+            unresolvedTotal += 1;
+            continue;
+          }
+          if (!isResolvedExtractionOutput(output)) {
+            unresolvedTotal += 1;
+          }
+        }
         return {
           requiredTotal,
           approvedTotal,
           missingTotal,
-          complete: requiredTotal === 0 || missingTotal === 0,
+          unresolvedTotal,
+          complete: (requiredTotal === 0 || missingTotal === 0) && unresolvedTotal === 0,
         };
       }
 
@@ -4454,6 +4511,14 @@
         if (isPictureOutput(output)) {
           return appendPictureCropContent(container, output);
         }
+        if (isFailedExtractionOutput(output)) {
+          container.classList.add("ocr-failed");
+          const errorText = String(output.error_message || "").trim();
+          const failureMessage = errorText
+            ? `OCR failed. Use Detect again or enter text manually. (${errorText})`
+            : "OCR failed. Use Detect again or enter text manually.";
+          return appendPlainContent(container, failureMessage, "ocr-failed");
+        }
         if (format === "skip") {
           return appendPlainContent(container, "Skipped region (no text extraction).", "skip");
         }
@@ -4938,6 +5003,9 @@
           item.style.height = style.height;
           item.style.zIndex = String(reconstructedLayerRankForOutputClass(output.class_name));
           item.style.borderColor = hexToRgba(color, 0.6);
+          if (isFailedExtractionOutput(output)) {
+            item.classList.add("ocr-failed");
+          }
           item.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) return;
             selectOutput(output.layout_id, { isUserSelection: true });
@@ -5096,7 +5164,12 @@
           label.style.color = color;
           label.style.borderColor = hexToRgba(color, 0.62);
           label.dataset.layoutId = String(output.layout_id);
-          label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}`;
+          label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}${
+            isFailedExtractionOutput(output) ? " [FAILED]" : ""
+          }`;
+          if (isFailedExtractionOutput(output)) {
+            label.classList.add("ocr-failed");
+          }
           if (Number(output.layout_id) === selectedId) {
             sourceSelectedLabelLayer.appendChild(label);
           } else {
@@ -5305,7 +5378,10 @@
       async function markReviewed() {
         if (state.reviewSubmitInProgress) return;
         if (state.reextractInProgress) return;
-        if (!reviewProgressSummary().complete) return;
+        if (!reviewProgressSummary().complete) {
+          setStatus("Resolve failed or missing OCR layouts before marking reviewed.", { isError: true });
+          return;
+        }
         state.reviewSubmitInProgress = true;
         updateReviewUiState();
         try {

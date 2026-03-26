@@ -307,6 +307,58 @@ def _migrate_sqlite_layout_orientation_column(engine: Engine) -> None:
             connection.commit()
 
 
+def _migrate_sqlite_ocr_outputs_status_columns(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.connect() as connection:
+        if not _sqlite_table_exists(connection, "ocr_outputs"):
+            return
+
+        if not _sqlite_table_has_column(connection, "ocr_outputs", "extraction_status"):
+            if connection.in_transaction():
+                connection.commit()
+            connection.exec_driver_sql(
+                "ALTER TABLE ocr_outputs ADD COLUMN extraction_status VARCHAR NOT NULL DEFAULT 'ok';"
+            )
+            if connection.in_transaction():
+                connection.commit()
+
+        if not _sqlite_table_has_column(connection, "ocr_outputs", "error_message"):
+            if connection.in_transaction():
+                connection.commit()
+            connection.exec_driver_sql(
+                "ALTER TABLE ocr_outputs ADD COLUMN error_message TEXT;"
+            )
+            if connection.in_transaction():
+                connection.commit()
+
+        connection.exec_driver_sql(
+            """
+            UPDATE ocr_outputs
+            SET extraction_status = CASE
+                WHEN lower(trim(coalesce(extraction_status, ''))) IN ('ok', 'manual', 'failed', 'skip')
+                    THEN lower(trim(coalesce(extraction_status, '')))
+                WHEN lower(trim(coalesce(output_format, ''))) = 'skip'
+                    THEN 'skip'
+                ELSE 'ok'
+            END
+            """
+        )
+        if connection.in_transaction():
+            connection.commit()
+
+        connection.exec_driver_sql(
+            """
+            UPDATE ocr_outputs
+            SET error_message = NULL
+            WHERE lower(trim(coalesce(extraction_status, ''))) != 'failed'
+            """
+        )
+        if connection.in_transaction():
+            connection.commit()
+
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
@@ -314,5 +366,6 @@ def init_db() -> None:
     _migrate_sqlite_layout_orientation_column(engine)
     _migrate_sqlite_layout_benchmark_predictions_column(engine)
     _migrate_sqlite_pages_layout_order_mode_column(engine)
+    _migrate_sqlite_ocr_outputs_status_columns(engine)
     # Ensure metadata-defined indexes/constraints are present after migrations.
     Base.metadata.create_all(bind=engine)

@@ -441,18 +441,20 @@ class BatchOcrApiTests(unittest.TestCase):
                 }
             )
 
-        self.assertEqual(result["status"], "ocr_failed")
+        self.assertEqual(result["status"], "ocr_done")
         self.assertEqual(result["extracted_count"], 1)
         self.assertEqual(result["failed_count"], 1)
         self.assertEqual(result["failed_layout_ids"], [layout1])
 
         page_payload = main.page_details(page_id)
-        self.assertEqual(str(page_payload["page"]["status"]), "ocr_failed")
+        self.assertEqual(str(page_payload["page"]["status"]), "ocr_done")
 
         outputs_payload = main.page_ocr_outputs(page_id)
-        self.assertEqual(int(outputs_payload["count"]), 1)
-        self.assertEqual(int(outputs_payload["outputs"][0]["layout_id"]), layout2)
-        self.assertEqual(str(outputs_payload["outputs"][0]["content"]), "second-ok")
+        self.assertEqual(int(outputs_payload["count"]), 2)
+        outputs_by_layout_id = {int(row["layout_id"]): row for row in outputs_payload["outputs"]}
+        self.assertEqual(str(outputs_by_layout_id[layout2]["content"]), "second-ok")
+        self.assertEqual(str(outputs_by_layout_id[layout2]["extraction_status"]), "ok")
+        self.assertEqual(str(outputs_by_layout_id[layout1]["extraction_status"]), "failed")
 
     def test_batch_ocr_status_reports_bbox_progress_for_active_run(self) -> None:
         now = main._utc_now()

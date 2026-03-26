@@ -1059,6 +1059,17 @@
         font-style: italic;
       }
 
+      .recon-item.ocr-failed {
+        border-color: #b05346;
+        box-shadow: 0 0 0 1px rgba(176, 83, 70, 0.2);
+      }
+
+      .recon-item-content.ocr-failed {
+        color: #7a2b22;
+        background: rgba(231, 197, 188, 0.38);
+        font-style: italic;
+      }
+
       .recon-item-content.picture-crop {
         position: relative;
         background: #f6f3ea;
@@ -1289,6 +1300,12 @@
 
       .source-box-label {
         transform: translateY(calc(-20px * var(--overlay-badge-scale, 1)));
+      }
+
+      .box-label.ocr-failed {
+        border-color: #b05346;
+        color: #7a2b22;
+        background: rgba(255, 240, 235, 0.86);
       }
 
       .recon-restore-btn {
@@ -1707,7 +1724,7 @@
           </div>
           <div class="modal-field">
             <label for="reextract-modal-max-retries">Max retries per layout</label>
-            <input id="reextract-modal-max-retries" class="modal-input" type="number" min="1" max="10" step="1" value="3" />
+            <input id="reextract-modal-max-retries" class="modal-input" type="number" min="1" max="10" step="1" value="2" />
           </div>
         </div>
         <div class="modal-actions">

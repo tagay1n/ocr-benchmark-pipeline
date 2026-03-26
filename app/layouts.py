@@ -74,6 +74,13 @@ def _status_key(value: str | None) -> str:
     return str(value or "").strip().replace("-", "_").replace(" ", "_").lower()
 
 
+def _normalize_extraction_status(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"ok", "manual", "failed", "skip"}:
+        return normalized
+    return "ok"
+
+
 def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
@@ -804,6 +811,13 @@ def mark_layout_reviewed(page_id: int) -> dict[str, Any]:
 
             output_class_name = normalize_class_name(str(output.class_name))
             output_format = str(output.output_format)
+            output_extraction_status = _normalize_extraction_status(getattr(output, "extraction_status", None))
+            if output_extraction_status == "failed":
+                invalidated_layout_ids.add(layout_id)
+                continue
+            if output_extraction_status not in {"ok", "manual", "skip"}:
+                invalidated_layout_ids.add(layout_id)
+                continue
             if not output_matches_layout_class(
                 output_class_name=output_class_name,
                 output_format=output_format,

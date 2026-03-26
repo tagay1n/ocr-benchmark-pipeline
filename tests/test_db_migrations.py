@@ -143,6 +143,108 @@ class DbMigrationsTests(unittest.TestCase):
                 )
                 verify.commit()
 
+    def test_init_db_migrates_ocr_outputs_status_columns(self) -> None:
+        db_path = self.test_settings.db_path
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute("PRAGMA foreign_keys=ON;")
+            connection.execute(
+                """
+                CREATE TABLE pages (
+                  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                  rel_path VARCHAR NOT NULL UNIQUE,
+                  file_hash VARCHAR NOT NULL UNIQUE,
+                  status VARCHAR NOT NULL,
+                  created_at VARCHAR NOT NULL,
+                  updated_at VARCHAR NOT NULL,
+                  last_seen_at VARCHAR NOT NULL,
+                  is_missing BOOLEAN NOT NULL DEFAULT 0
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE layouts (
+                  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                  page_id INTEGER NOT NULL REFERENCES pages (id) ON DELETE CASCADE,
+                  class_name VARCHAR NOT NULL,
+                  x1 FLOAT NOT NULL,
+                  y1 FLOAT NOT NULL,
+                  x2 FLOAT NOT NULL,
+                  y2 FLOAT NOT NULL,
+                  reading_order INTEGER NOT NULL,
+                  confidence FLOAT,
+                  source VARCHAR NOT NULL DEFAULT 'manual',
+                  created_at VARCHAR NOT NULL,
+                  updated_at VARCHAR NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE ocr_outputs (
+                  layout_id INTEGER NOT NULL PRIMARY KEY REFERENCES layouts (id) ON DELETE CASCADE,
+                  page_id INTEGER NOT NULL REFERENCES pages (id) ON DELETE CASCADE,
+                  class_name VARCHAR NOT NULL,
+                  output_format VARCHAR NOT NULL,
+                  content TEXT NOT NULL,
+                  model_name VARCHAR NOT NULL,
+                  key_alias VARCHAR,
+                  created_at VARCHAR NOT NULL,
+                  updated_at VARCHAR NOT NULL
+                )
+                """
+            )
+
+            now = "2026-03-09T00:00:00+00:00"
+            connection.execute(
+                """
+                INSERT INTO pages (rel_path, file_hash, status, created_at, updated_at, last_seen_at, is_missing)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("legacy/ocr.png", "hash-ocr", "ocr_done", now, now, now, 0),
+            )
+            page_id = int(connection.execute("SELECT id FROM pages").fetchone()[0])
+            connection.execute(
+                """
+                INSERT INTO layouts (page_id, class_name, x1, y1, x2, y2, reading_order, confidence, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (page_id, "text", 0.1, 0.1, 0.9, 0.2, 1, 0.9, "legacy", now, now),
+            )
+            layout_id = int(connection.execute("SELECT id FROM layouts").fetchone()[0])
+            connection.execute(
+                """
+                INSERT INTO ocr_outputs (
+                  layout_id, page_id, class_name, output_format, content, model_name, key_alias, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (layout_id, page_id, "text", "markdown", "Legacy output", "legacy-model", "k", now, now),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        db.init_db()
+
+        with sqlite3.connect(db_path) as verify:
+            columns = [
+                str(row[1])
+                for row in verify.execute("PRAGMA table_info('ocr_outputs')").fetchall()
+            ]
+            self.assertIn("extraction_status", columns)
+            self.assertIn("error_message", columns)
+
+            row = verify.execute(
+                "SELECT extraction_status, error_message FROM ocr_outputs WHERE layout_id = ?",
+                (layout_id,),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(str(row[0]), "ok")
+            self.assertIsNone(row[1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -17,12 +17,23 @@ def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+_RESOLVED_EXTRACTION_STATUSES = frozenset({"ok", "manual"})
+
+
+def _normalize_extraction_status(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"ok", "manual", "failed", "skip"}:
+        return normalized
+    return "ok"
+
+
 def _output_row_to_dict(output: OcrOutput, layout: Layout, *, bound_target_ids: list[int] | None = None) -> dict[str, Any]:
     output_format = str(output.output_format)
+    extraction_status = _normalize_extraction_status(getattr(output, "extraction_status", None))
     normalized_content = normalize_text_nfc(str(output.content))
     lookalike_warnings = (
         detect_suspicious_lookalikes(normalized_content, markdown_code_aware=True)
-        if output_format.lower() == "markdown"
+        if output_format.lower() == "markdown" and extraction_status in _RESOLVED_EXTRACTION_STATUSES
         else []
     )
     lookalike_line_indexes = sorted({int(item["line_index"]) for item in lookalike_warnings})
@@ -42,6 +53,8 @@ def _output_row_to_dict(output: OcrOutput, layout: Layout, *, bound_target_ids: 
         "content": normalized_content,
         "model_name": str(output.model_name),
         "key_alias": output.key_alias,
+        "extraction_status": extraction_status,
+        "error_message": None if getattr(output, "error_message", None) is None else str(output.error_message),
         "created_at": str(output.created_at),
         "updated_at": str(output.updated_at),
         "lookalike_warning_count": len(lookalike_warnings),
@@ -111,6 +124,8 @@ def update_ocr_output(layout_id: int, *, content: str) -> dict[str, Any]:
 
         output, layout = row
         output.content = normalized_content
+        output.extraction_status = "manual"
+        output.error_message = None
         output.updated_at = now
         session.flush()
         return _output_row_to_dict(output, layout)
@@ -151,10 +166,17 @@ def mark_ocr_reviewed(page_id: int) -> dict[str, Any]:
         }
 
         matched_layout_ids: set[int] = set()
+        failed_layout_ids: set[int] = set()
         for output in outputs:
             layout_id = int(output.layout_id)
             layout = layout_by_id.get(layout_id)
             if layout is None:
+                continue
+            extraction_status = _normalize_extraction_status(getattr(output, "extraction_status", None))
+            if extraction_status == "failed":
+                failed_layout_ids.add(layout_id)
+                continue
+            if extraction_status not in _RESOLVED_EXTRACTION_STATUSES:
                 continue
             if output_matches_layout_class(
                 output_class_name=str(output.class_name),
@@ -162,6 +184,11 @@ def mark_ocr_reviewed(page_id: int) -> dict[str, Any]:
                 layout_class_name=str(layout.class_name),
             ):
                 matched_layout_ids.add(layout_id)
+        unresolved_failed_layout_ids = sorted(required_layout_ids.intersection(failed_layout_ids))
+        if unresolved_failed_layout_ids:
+            raise ValueError(
+                "One or more OCR outputs are marked failed; run Detect again for failed layouts or add manual text before marking reviewed."
+            )
         missing_layout_ids = sorted(required_layout_ids.difference(matched_layout_ids))
         if missing_layout_ids:
             raise ValueError(

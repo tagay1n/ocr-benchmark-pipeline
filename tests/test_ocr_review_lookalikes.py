@@ -275,6 +275,52 @@ class OcrReviewLookalikesTests(unittest.TestCase):
         reviewed = main.complete_ocr_review(page_id)
         self.assertEqual(reviewed["status"], "ocr_reviewed")
         self.assertEqual(reviewed["output_count"], 1)
+
+    def test_mark_ocr_reviewed_requires_failed_outputs_to_be_resolved(self) -> None:
+        self._write_image("review/failed-output-must-be-resolved.png")
+        main.scan_images()
+        page_id = int(main.list_pages()["pages"][0]["id"])
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        now = main._utc_now()
+        with db.get_session() as session:
+            session.add(
+                main.OcrOutput(
+                    layout_id=int(layout["id"]),
+                    page_id=page_id,
+                    class_name="text",
+                    output_format="markdown",
+                    content="",
+                    model_name="test",
+                    key_alias="k",
+                    extraction_status="failed",
+                    error_message="timeout",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            page = session.get(main.Page, page_id)
+            self.assertIsNotNone(page)
+            page.status = "ocr_done"
+            page.updated_at = now
+
+        with self.assertRaises(main.HTTPException) as error:
+            main.complete_ocr_review(page_id)
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("failed", str(error.exception.detail).lower())
+
+        patched = main.patch_ocr_output(int(layout["id"]), main.UpdateOcrOutputRequest(content="Manual fixed text"))
+        self.assertEqual(str(patched["output"]["extraction_status"]), "manual")
+
+        reviewed = main.complete_ocr_review(page_id)
+        self.assertEqual(reviewed["status"], "ocr_reviewed")
         self.assertEqual(main.page_details(page_id)["page"]["status"], "ocr_reviewed")
 
     def test_mark_ocr_reviewed_requires_outputs_for_all_extractable_layouts(self) -> None:

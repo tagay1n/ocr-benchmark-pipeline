@@ -92,6 +92,8 @@ class OcrOutput(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     model_name: Mapped[str] = mapped_column(String, nullable=False)
     key_alias: Mapped[str | None] = mapped_column(String, nullable=True)
+    extraction_status: Mapped[str] = mapped_column(String, nullable=False, default="ok")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 

@@ -44,6 +44,8 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Draft editing and per-layout restore.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with OCR bbox overlays.
   - `Detect` modal with layout selection + generation params.
+  - OCR extraction is retried per bbox and then marked failed if still unsuccessful; failed bboxes stay editable and can be re-detected per-layout.
+  - Marking OCR reviewed requires resolving failed/missing required bboxes (re-detect or manual text entry).
   - All pipeline steps are manual by reviewer action.
 
 ## Configuration
