@@ -165,6 +165,7 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
     'id="reextract-modal"',
     'id="reextract-modal-layouts"',
     'id="reextract-modal-select-all"',
+    'id="reextract-modal-model"',
     'id="reextract-modal-run-btn"',
     'id="reextract-modal-cancel-btn"',
     'id="source-strip-overlay"',

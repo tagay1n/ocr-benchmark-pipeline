@@ -28,6 +28,7 @@ from .ocr_gemini_client import (
     extract_content_from_json_response,
     extract_text_from_response,
     gemini_generate_content,
+    gemini_generate_content_with_model,
     is_daily_quota_exhausted_error,
     is_gemini_server_error,
     is_quota_error,
@@ -113,10 +114,29 @@ _normalize_formula_latex_content = normalize_formula_latex_content
 _extract_text_from_response = extract_text_from_response
 _extract_content_from_json_response = extract_content_from_json_response
 _gemini_generate_content = gemini_generate_content
+_gemini_generate_content_with_model = gemini_generate_content_with_model
 _is_quota_error = is_quota_error
 _is_daily_quota_exhausted_error = is_daily_quota_exhausted_error
 _is_gemini_server_error = is_gemini_server_error
 _key_alias = key_alias
+
+
+def supported_ocr_models() -> tuple[str, ...]:
+    configured = tuple(str(value).strip() for value in settings.supported_ocr_models if str(value).strip())
+    if not configured:
+        return (GEMINI_MODEL,)
+    deduplicated: list[str] = []
+    seen: set[str] = set()
+    for model_name in configured:
+        if model_name in seen:
+            continue
+        seen.add(model_name)
+        deduplicated.append(model_name)
+    return tuple(deduplicated) if deduplicated else (GEMINI_MODEL,)
+
+
+def default_ocr_model() -> str:
+    return GEMINI_MODEL
 
 
 def _prompt_for_layout(layout: dict[str, Any], *, prompt_template: str) -> tuple[str, str]:
@@ -194,6 +214,7 @@ def extract_ocr_for_page(
     page_id: int,
     *,
     layout_ids: list[int] | None = None,
+    model_name: str | None = None,
     prompt_template: str | None = None,
     temperature: float | None = None,
     max_retries_per_layout: int | None = None,
@@ -252,6 +273,17 @@ def extract_ocr_for_page(
         if prompt_template is None or not str(prompt_template).strip()
         else str(prompt_template)
     )
+    resolved_model_name = (
+        default_ocr_model()
+        if model_name is None or not str(model_name).strip()
+        else str(model_name).strip()
+    )
+    supported_models = supported_ocr_models()
+    if resolved_model_name not in supported_models:
+        raise ValueError(
+            "Unsupported OCR model. "
+            f"model_name must be one of: {', '.join(supported_models)}."
+        )
     resolved_temperature = DEFAULT_GEMINI_TEMPERATURE if temperature is None else float(temperature)
     if resolved_temperature < 0 or resolved_temperature > 2:
         raise ValueError("temperature must be between 0 and 2.")
@@ -332,12 +364,21 @@ def extract_ocr_for_page(
                 last_error = str(error)
                 break
             try:
-                response_text = _gemini_generate_content(
-                    key,
-                    prompt,
-                    image_bytes,
-                    temperature=resolved_temperature,
-                )
+                if resolved_model_name == default_ocr_model():
+                    response_text = _gemini_generate_content(
+                        key,
+                        prompt,
+                        image_bytes,
+                        temperature=resolved_temperature,
+                    )
+                else:
+                    response_text = _gemini_generate_content_with_model(
+                        key,
+                        prompt,
+                        image_bytes,
+                        model_name=resolved_model_name,
+                        temperature=resolved_temperature,
+                    )
                 request_count += 1
                 used_key = key
                 last_error = None
@@ -438,7 +479,7 @@ def extract_ocr_for_page(
                     class_name=str(output["class_name"]),
                     output_format=str(output["output_format"]),
                     content=str(output["content"]),
-                    model_name=GEMINI_MODEL,
+                    model_name=resolved_model_name,
                     key_alias=output["key_alias"],
                     extraction_status=str(output.get("extraction_status") or "ok"),
                     error_message=None
@@ -459,7 +500,7 @@ def extract_ocr_for_page(
     return {
         "page_id": page_id,
         "status": final_status,
-        "model": GEMINI_MODEL,
+        "model": resolved_model_name,
         "layouts_total": len(layouts),
         "layouts_selected": len(layouts_to_process),
         "extracted_count": extracted_count,

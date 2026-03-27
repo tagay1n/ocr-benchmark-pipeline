@@ -169,6 +169,7 @@
       const SOURCE_INK_MEAN_OFFSET = 30;
       const SOURCE_INK_DARK_PIXEL_RATIO = 0.18;
       const SOURCE_INK_MIN_RATIO = 0.2;
+      const DEFAULT_OCR_MODEL = "gemini-3-flash-preview";
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -223,6 +224,7 @@
       const reextractModal = document.getElementById("reextract-modal");
       const reextractModalLayoutsContainer = document.getElementById("reextract-modal-layouts");
       const reextractModalSelectAllInput = document.getElementById("reextract-modal-select-all");
+      const reextractModalModelInput = document.getElementById("reextract-modal-model");
       const reextractModalTemperatureInput = document.getElementById("reextract-modal-temperature");
       const reextractModalMaxRetriesInput = document.getElementById("reextract-modal-max-retries");
       const reextractModalCancelBtn = document.getElementById("reextract-modal-cancel-btn");
@@ -265,6 +267,8 @@
         reextractInProgress: false,
         reextractProgressCurrent: 0,
         reextractProgressTotal: 0,
+        supportedOcrModels: [DEFAULT_OCR_MODEL],
+        defaultOcrModel: DEFAULT_OCR_MODEL,
         reconstructedRenderMode: "markdown",
         zoomMode: "automatic",
         zoomPercent: 100,
@@ -1759,6 +1763,39 @@
         reextractBtn.disabled = state.reviewSubmitInProgress || !Number.isInteger(state.pageId) || state.pageId <= 0;
       }
 
+      function normalizeOcrModelName(value) {
+        return String(value || "").trim();
+      }
+
+      function supportedOcrModelsFromPagePayload(payload) {
+        const modelsPayload =
+          payload && typeof payload === "object" && payload.ocr_models && typeof payload.ocr_models === "object"
+            ? payload.ocr_models
+            : null;
+        const rawSupported = Array.isArray(modelsPayload?.supported_models)
+          ? modelsPayload.supported_models
+          : [];
+        const deduplicated = [];
+        const seen = new Set();
+        for (const rawModel of rawSupported) {
+          const model = normalizeOcrModelName(rawModel);
+          if (!model || seen.has(model)) {
+            continue;
+          }
+          seen.add(model);
+          deduplicated.push(model);
+        }
+        if (deduplicated.length === 0) {
+          deduplicated.push(DEFAULT_OCR_MODEL);
+        }
+        const rawDefault = normalizeOcrModelName(modelsPayload?.default_model);
+        const defaultModel = deduplicated.includes(rawDefault) ? rawDefault : deduplicated[0];
+        return {
+          supportedModels: deduplicated,
+          defaultModel,
+        };
+      }
+
       function updateReviewUiState() {
         updateReviewBadge();
         updateReviewButtonState();
@@ -1770,6 +1807,9 @@
         const inProgress = Boolean(busy);
         reextractModalRunBtn.classList.toggle("is-busy", inProgress);
         reextractModalCancelBtn.disabled = inProgress;
+        if (reextractModalModelInput instanceof HTMLSelectElement) {
+          reextractModalModelInput.disabled = inProgress || reextractModalModelInput.options.length === 0;
+        }
         reextractModalTemperatureInput.disabled = inProgress;
         reextractModalMaxRetriesInput.disabled = inProgress;
         if (reextractModalSelectAllInput instanceof HTMLInputElement) {
@@ -1930,12 +1970,34 @@
         updateReextractModalRunButtonState();
       }
 
+      function renderReextractModelOptions() {
+        if (!(reextractModalModelInput instanceof HTMLSelectElement)) {
+          return;
+        }
+        const supportedModels = Array.isArray(state.supportedOcrModels) && state.supportedOcrModels.length > 0
+          ? state.supportedOcrModels
+          : [DEFAULT_OCR_MODEL];
+        const defaultModel = supportedModels.includes(state.defaultOcrModel)
+          ? state.defaultOcrModel
+          : supportedModels[0];
+        reextractModalModelInput.innerHTML = "";
+        for (const modelName of supportedModels) {
+          const option = document.createElement("option");
+          option.value = modelName;
+          option.textContent = modelName;
+          reextractModalModelInput.appendChild(option);
+        }
+        reextractModalModelInput.value = defaultModel;
+        reextractModalModelInput.disabled = state.reextractInProgress || supportedModels.length === 0;
+      }
+
       function openReextractModal() {
         if (state.reviewSubmitInProgress || state.reextractInProgress) {
           return;
         }
         state.reextractProgressCurrent = 0;
         state.reextractProgressTotal = 0;
+        renderReextractModelOptions();
         renderReextractLayoutOptions();
         openModal(reextractModal);
       }
@@ -1951,6 +2013,12 @@
       }
 
       function parseReextractPayload() {
+        const modelName = normalizeOcrModelName(
+          reextractModalModelInput instanceof HTMLSelectElement ? reextractModalModelInput.value : "",
+        );
+        if (!modelName) {
+          throw new Error("Select OCR model.");
+        }
         const temperature = Number(reextractModalTemperatureInput.value);
         if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) {
           throw new Error("Temperature must be between 0 and 2.");
@@ -1972,6 +2040,7 @@
 
         return {
           layout_ids: layoutIds,
+          model_name: modelName,
           temperature,
           max_retries_per_layout: maxRetries,
         };
@@ -5351,6 +5420,9 @@
         sourceAnalysisCanvas = null;
         sourceAnalysisContext = null;
         state.page = pagePayload.page;
+        const modelsConfig = supportedOcrModelsFromPagePayload(pagePayload);
+        state.supportedOcrModels = modelsConfig.supportedModels;
+        state.defaultOcrModel = modelsConfig.defaultModel;
         pageImage.src = pagePayload.image_url;
         state.outputs = outputsPayload.outputs || [];
         state.pageLayouts = Array.isArray(layoutsPayload.layouts) ? layoutsPayload.layouts : [];

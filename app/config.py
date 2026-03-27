@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 DEFAULT_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp")
+DEFAULT_SUPPORTED_OCR_MODELS = ("gemini-3-flash-preview", "gemini-2.5-flash")
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,7 @@ class Settings:
     enable_background_jobs: bool
     gemini_keys: tuple[str, ...] = ()
     gemini_usage_path: Path | None = None
+    supported_ocr_models: tuple[str, ...] = DEFAULT_SUPPORTED_OCR_MODELS
 
 
 def _resolve_path(project_root: Path, value: str) -> Path:
@@ -126,6 +128,30 @@ def _coerce_gemini_keys(raw: object) -> tuple[str, ...]:
     return tuple(deduplicated)
 
 
+def _coerce_supported_ocr_models(raw: object) -> tuple[str, ...]:
+    if raw is None:
+        return DEFAULT_SUPPORTED_OCR_MODELS
+    values: list[str] = []
+    if isinstance(raw, str):
+        values = [part for part in raw.split(",")]
+    elif isinstance(raw, list):
+        values = [str(value) for value in raw]
+    else:
+        return DEFAULT_SUPPORTED_OCR_MODELS
+
+    deduplicated: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = str(value).strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduplicated.append(normalized)
+    if not deduplicated:
+        return DEFAULT_SUPPORTED_OCR_MODELS
+    return tuple(deduplicated)
+
+
 def load_settings() -> Settings:
     project_root = Path(os.getenv("PROJECT_ROOT", ".")).resolve()
     config_path = _resolve_path(project_root, os.getenv("APP_CONFIG_PATH", "config.yaml"))
@@ -141,6 +167,12 @@ def load_settings() -> Settings:
     gemini_keys_env = os.getenv("GEMINI_KEYS")
     gemini_keys_value = (
         _coerce_gemini_keys(gemini_keys_env.split(",")) if gemini_keys_env is not None else _coerce_gemini_keys(config.get("gemini_keys"))
+    )
+    supported_ocr_models_env = os.getenv("SUPPORTED_OCR_MODELS")
+    supported_ocr_models_value = (
+        _coerce_supported_ocr_models(supported_ocr_models_env)
+        if supported_ocr_models_env is not None
+        else _coerce_supported_ocr_models(config.get("supported_ocr_models"))
     )
     gemini_usage_path_value = os.getenv("GEMINI_USAGE_PATH", "_artifacts/gemini_usage.json")
 
@@ -160,6 +192,7 @@ def load_settings() -> Settings:
         enable_background_jobs=enable_background_jobs,
         gemini_keys=gemini_keys_value,
         gemini_usage_path=gemini_usage_path,
+        supported_ocr_models=supported_ocr_models_value,
     )
 
 

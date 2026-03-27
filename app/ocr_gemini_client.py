@@ -69,9 +69,29 @@ def gemini_generate_content(
     *,
     temperature: float = DEFAULT_GEMINI_TEMPERATURE,
 ) -> str:
+    return gemini_generate_content_with_model(
+        api_key,
+        prompt,
+        image_bytes,
+        model_name=GEMINI_MODEL,
+        temperature=temperature,
+    )
+
+
+def gemini_generate_content_with_model(
+    api_key: str,
+    prompt: str,
+    image_bytes: bytes,
+    *,
+    model_name: str,
+    temperature: float = DEFAULT_GEMINI_TEMPERATURE,
+) -> str:
+    resolved_model_name = str(model_name or "").strip()
+    if not resolved_model_name:
+        raise RuntimeError("Gemini model name is required.")
     endpoint = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{urllib_parse.quote(GEMINI_MODEL)}:generateContent?key={urllib_parse.quote(api_key)}"
+        f"{urllib_parse.quote(resolved_model_name)}:generateContent?key={urllib_parse.quote(api_key)}"
     )
     payload = {
         "contents": [

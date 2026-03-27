@@ -10,6 +10,7 @@ from sqlalchemy import and_, delete, func, or_, select
 from ..db import get_session
 from ..layouts import get_page, normalize_layout_order_mode
 from ..models import DuplicateFile, Layout, OcrOutput, Page, PipelineEvent, PipelineJob
+from ..ocr_extract import default_ocr_model, supported_ocr_models
 from ..ocr_review import list_ocr_outputs
 from ..pipeline_constants import (
     EVENT_PAGE_REMOVED,
@@ -390,6 +391,11 @@ def page_details(page_id: int) -> dict[str, object]:
         "page": page,
         "image_url": f"/api/pages/{page_id}/image?v={image_version}",
         "image_exists": image_exists,
+        "ocr_models": {
+            "default_model": default_ocr_model(),
+            "batch_model": default_ocr_model(),
+            "supported_models": list(supported_ocr_models()),
+        },
     }
 
 

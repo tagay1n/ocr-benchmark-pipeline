@@ -137,6 +137,7 @@ class ReviewApiEventContractsTests(unittest.TestCase):
                 page_id,
                 main.ReextractOcrRequest(
                     layout_ids=[layout_id],
+                    model_name="gemini-2.5-flash",
                     prompt_template="custom prompt",
                     temperature=0.25,
                     max_retries_per_layout=3,
@@ -152,6 +153,7 @@ class ReviewApiEventContractsTests(unittest.TestCase):
         started_payload = json.loads(str(started_events[-1].data_json or "{}"))
         self.assertEqual(started_payload["trigger"], "manual_reextract")
         self.assertEqual(started_payload["layout_ids"], [layout_id])
+        self.assertEqual(started_payload["model_name"], "gemini-2.5-flash")
         self.assertEqual(started_payload["prompt_template"], "custom prompt")
         self.assertEqual(started_payload["temperature"], 0.25)
         self.assertEqual(started_payload["max_retries_per_layout"], 3)

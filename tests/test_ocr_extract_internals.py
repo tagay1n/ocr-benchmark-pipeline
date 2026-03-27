@@ -776,6 +776,61 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(str(by_layout[int(first["id"])]["extraction_status"]), "failed")
         self.assertIn("timed out", str(by_layout[int(first["id"])]["error_message"]).lower())
 
+    def test_extract_ocr_uses_selected_supported_model_for_manual_reextract(self) -> None:
+        self._write_image("ocr/model-override.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract,
+            "_gemini_generate_content",
+            side_effect=RuntimeError("default model helper should not be called"),
+        ) as default_model_mock, patch.object(
+            ocr_extract,
+            "_gemini_generate_content_with_model",
+            return_value="Model override text",
+        ) as override_model_mock:
+            result = ocr_extract.extract_ocr_for_page(
+                page_id,
+                layout_ids=[int(layout["id"])],
+                model_name="gemini-2.5-flash",
+            )
+
+        self.assertEqual(result["model"], "gemini-2.5-flash")
+        default_model_mock.assert_not_called()
+        override_model_mock.assert_called_once()
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        self.assertEqual(len(outputs), 1)
+        self.assertEqual(str(outputs[0]["model_name"]), "gemini-2.5-flash")
+
+    def test_extract_ocr_rejects_unsupported_model_name(self) -> None:
+        self._write_image("ocr/unsupported-model.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        with self.assertRaisesRegex(ValueError, "Unsupported OCR model"):
+            ocr_extract.extract_ocr_for_page(
+                page_id,
+                layout_ids=[int(layout["id"])],
+                model_name="gemini-unknown",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -245,6 +245,35 @@ class PipelineStagesTests(unittest.TestCase):
 
         self.assertEqual(loaded.gemini_keys, ("key-1", "key-2", "key-3"))
 
+    def test_settings_loads_supported_ocr_models_from_yaml(self) -> None:
+        config_path = self.project_root / "config.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "source_dir: input",
+                    "db_path: data/test.db",
+                    "enable_background_jobs: false",
+                    "supported_ocr_models:",
+                    "  - gemini-3-flash-preview",
+                    "  - gemini-2.5-flash",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "PROJECT_ROOT": str(self.project_root),
+                "APP_CONFIG_PATH": str(config_path),
+            },
+            clear=False,
+        ):
+            loaded = config.load_settings()
+
+        self.assertEqual(loaded.supported_ocr_models, ("gemini-3-flash-preview", "gemini-2.5-flash"))
+
     def test_layout_detection_stage_creates_layouts(self) -> None:
         self._write_image("page.png", b"fake-image")
         main.scan_images()
@@ -828,6 +857,7 @@ class PipelineStagesTests(unittest.TestCase):
         }
         request_payload = main.ReextractOcrRequest(
             layout_ids=[layout_id],
+            model_name="gemini-2.5-flash",
             prompt_template="Rules: {class_rule}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
@@ -839,6 +869,7 @@ class PipelineStagesTests(unittest.TestCase):
         extract_mock.assert_called_once_with(
             page_id,
             layout_ids=[layout_id],
+            model_name="gemini-2.5-flash",
             prompt_template="Rules: {class_rule}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
@@ -879,6 +910,7 @@ class PipelineStagesTests(unittest.TestCase):
         extract_mock.assert_called_once_with(
             page_id,
             layout_ids=None,
+            model_name=None,
             prompt_template=None,
             temperature=None,
             max_retries_per_layout=None,

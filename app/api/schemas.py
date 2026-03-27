@@ -62,6 +62,7 @@ class UpdateOcrOutputRequest(BaseModel):
 
 class ReextractOcrRequest(BaseModel):
     layout_ids: list[int] | None = None
+    model_name: str | None = Field(default=None, min_length=1, max_length=120)
     prompt_template: str | None = Field(default=None, max_length=20000)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_retries_per_layout: int | None = Field(default=None, ge=1, le=10)

@@ -43,7 +43,7 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Review modes: `Two panels` and `Line by line` (slot-style line approval rail).
   - Draft editing and per-layout restore.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with OCR bbox overlays.
-  - `Detect` modal with layout selection + generation params.
+  - `Detect` modal with layout selection, model picker, and generation params.
   - OCR extraction is retried per bbox and then marked failed if still unsuccessful; failed bboxes stay editable and can be re-detected per-layout.
   - Marking OCR reviewed requires resolving failed/missing required bboxes (re-detect or manual text entry).
   - All pipeline steps are manual by reviewer action.
@@ -64,6 +64,9 @@ allowed_image_extensions:
   - .tiff
   - .webp
 enable_background_jobs: true
+supported_ocr_models:
+  - gemini-3-flash-preview
+  - gemini-2.5-flash
 gemini_keys: []
 ```
 
@@ -75,6 +78,7 @@ Environment overrides:
 - `ALLOWED_IMAGE_EXTENSIONS` (comma-separated)
 - `APP_CONFIG_PATH`
 - `ENABLE_BACKGROUND_JOBS`
+- `SUPPORTED_OCR_MODELS` (comma-separated)
 - `GEMINI_KEYS` (comma-separated)
 - `GEMINI_USAGE_PATH`
 

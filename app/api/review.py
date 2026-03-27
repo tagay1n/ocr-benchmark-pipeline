@@ -146,6 +146,7 @@ def _run_manual_ocr_reextract(page_id: int, params: ReextractOcrRequest) -> dict
         data={
             "trigger": "manual_reextract",
             "layout_ids": params.layout_ids,
+            "model_name": params.model_name,
             "temperature": params.temperature,
             "max_retries_per_layout": params.max_retries_per_layout,
             "prompt_template": params.prompt_template,
@@ -155,6 +156,7 @@ def _run_manual_ocr_reextract(page_id: int, params: ReextractOcrRequest) -> dict
         result = _extract_ocr_for_page_dynamic()(
             page_id,
             layout_ids=params.layout_ids,
+            model_name=params.model_name,
             prompt_template=params.prompt_template,
             temperature=params.temperature,
             max_retries_per_layout=params.max_retries_per_layout,
