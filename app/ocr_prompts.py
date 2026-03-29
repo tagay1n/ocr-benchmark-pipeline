@@ -179,7 +179,16 @@ CLASS_RULE_TABLE: Final[str] = (
 SECTION_HEADER_RULE: Final[str] = (
     "- Treat this crop as heading-like text.\n"
     "- Preserve visible heading markers/tokens when present.\n"
-    f"{CLASS_RULE_TEXT}"
+    "- Keep one semantic header in one Markdown heading line.\n"
+    "- If the header is wrapped across multiple visual lines, preserve those visual breaks using <br> inside that same heading line.\n"
+    "- Do not output continuation lines as separate bold paragraphs.\n"
+    "- Do not use bold markers inside Markdown headings (for example: do not output ## **Title**).\n"
+    "- Primary script is Tatar Cyrillic; preserve original characters exactly. Words from other languages may appear and must be preserved.\n"
+    "- Preserve visible punctuation exactly.\n"
+    "- Do not dehyphenate words split by visible line breaks.\n"
+    "- Inline formulas inside header text must use LaTeX inline syntax: $...$.\n"
+    "- Preserve visible superscript/subscript formatting as <sup>...</sup> and <sub>...</sub> when clearly visible.\n"
+    "- Do not invent formatting or unseen text."
 )
 
 DEFAULT_CLASS_CONFIG: Final[PromptClassConfig] = PromptClassConfig(

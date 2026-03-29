@@ -26,29 +26,16 @@ SOURCE FIDELITY:
 CLASS-SPECIFIC REQUIREMENTS:
 - Treat this crop as heading-like text.
 - Preserve visible heading markers/tokens when present.
+- Keep one semantic header in one Markdown heading line.
+- If the header is wrapped across multiple visual lines, preserve those visual breaks using <br> inside that same heading line.
+- Do not output continuation lines as separate bold paragraphs.
+- Do not use bold markers inside Markdown headings (for example: do not output ## **Title**).
 - Primary script is Tatar Cyrillic; preserve original characters exactly. Words from other languages may appear and must be preserved.
-- Keep text as normal Markdown paragraphs.
-- Do not convert into headings, lists, or tables unless those markers are clearly visible.
-- Apply emphasis only when clearly visible: **bold**, *italic*, ***bold italic***.
-- Do not guess or apply formatting arbitrarily.
-- Inline formulas inside text must use LaTeX inline syntax: $...$.
-- Keep formulas inline with surrounding sentence text.
-- Do not turn regular words into formulas.
-- Do not convert the whole text block into a standalone formula block.
-- If formula notation is unclear, keep the visible text as-is.
-- Preserve visible superscript/subscript formatting.
-- Encode superscripts/subscripts as inline HTML in Markdown: <sup>...</sup> and <sub>...</sub>.
-- Do not invent superscript/subscript where it is not clearly visible.
-- One-shot example (text-like crop):
-  EXAMPLE INPUT START
-  Без съезддагы фикер алышуларның һәм тавыш бирүләрнең
-  анализын тәмам иттек; бу анализ съезддан соң булган хәл-
-  ләрнең бөтенесен in nuce (яралгы хәлендә) аңлатып бирә, һәм
-  Visual style in crop: bold='съезддан соң булган хәл-\nләрнең бөтенесен'; italic='in nuce'
-  EXAMPLE INPUT END
-  EXAMPLE OUTPUT START
-  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-\nләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
-  EXAMPLE OUTPUT END
+- Preserve visible punctuation exactly.
+- Do not dehyphenate words split by visible line breaks.
+- Inline formulas inside header text must use LaTeX inline syntax: $...$.
+- Preserve visible superscript/subscript formatting as <sup>...</sup> and <sub>...</sub> when clearly visible.
+- Do not invent formatting or unseen text.
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
 - Preserve line breaks exactly as shown in the crop.
@@ -84,6 +71,9 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Keep text as normal Markdown paragraphs.
 - Do not convert into headings, lists, or tables unless those markers are clearly visible.
 - Apply emphasis only when clearly visible: **bold**, *italic*, ***bold italic***.
+- For emphasis spanning multiple visual lines, apply Markdown markers per line.
+- Do not keep one emphasis marker pair open across a newline.
+- If a styled span crosses a line break, close markers before '\n' and reopen after '\n' with the same style.
 - Do not guess or apply formatting arbitrarily.
 - Inline formulas inside text must use LaTeX inline syntax: $...$.
 - Keep formulas inline with surrounding sentence text.
@@ -101,7 +91,7 @@ CLASS-SPECIFIC REQUIREMENTS:
   Visual style in crop: bold='съезддан соң булган хәл-\nләрнең бөтенесен'; italic='in nuce'
   EXAMPLE INPUT END
   EXAMPLE OUTPUT START
-  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-\nләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-**\n**ләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
   EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
@@ -229,6 +219,9 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Keep text as normal Markdown paragraphs.
 - Do not convert into headings, lists, or tables unless those markers are clearly visible.
 - Apply emphasis only when clearly visible: **bold**, *italic*, ***bold italic***.
+- For emphasis spanning multiple visual lines, apply Markdown markers per line.
+- Do not keep one emphasis marker pair open across a newline.
+- If a styled span crosses a line break, close markers before '\n' and reopen after '\n' with the same style.
 - Do not guess or apply formatting arbitrarily.
 - Inline formulas inside text must use LaTeX inline syntax: $...$.
 - Keep formulas inline with surrounding sentence text.
@@ -246,7 +239,7 @@ CLASS-SPECIFIC REQUIREMENTS:
   Visual style in crop: bold='съезддан соң булган хәл-\nләрнең бөтенесен'; italic='in nuce'
   EXAMPLE INPUT END
   EXAMPLE OUTPUT START
-  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-\nләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-**\n**ләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
   EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
@@ -321,6 +314,9 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Keep text as normal Markdown paragraphs.
 - Do not convert into headings, lists, or tables unless those markers are clearly visible.
 - Apply emphasis only when clearly visible: **bold**, *italic*, ***bold italic***.
+- For emphasis spanning multiple visual lines, apply Markdown markers per line.
+- Do not keep one emphasis marker pair open across a newline.
+- If a styled span crosses a line break, close markers before '\n' and reopen after '\n' with the same style.
 - Do not guess or apply formatting arbitrarily.
 - Inline formulas inside text must use LaTeX inline syntax: $...$.
 - Keep formulas inline with surrounding sentence text.
@@ -338,7 +334,7 @@ CLASS-SPECIFIC REQUIREMENTS:
   Visual style in crop: bold='съезддан соң булган хәл-\nләрнең бөтенесен'; italic='in nuce'
   EXAMPLE INPUT END
   EXAMPLE OUTPUT START
-  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-\nләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-**\n**ләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
   EXAMPLE OUTPUT END
 - Keep content as literal footnote text.
 - Do not convert output to Markdown footnote syntax (for example: [^1] or [^1]: ...).
@@ -417,6 +413,9 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Keep text as normal Markdown paragraphs.
 - Do not convert into headings, lists, or tables unless those markers are clearly visible.
 - Apply emphasis only when clearly visible: **bold**, *italic*, ***bold italic***.
+- For emphasis spanning multiple visual lines, apply Markdown markers per line.
+- Do not keep one emphasis marker pair open across a newline.
+- If a styled span crosses a line break, close markers before '\n' and reopen after '\n' with the same style.
 - Do not guess or apply formatting arbitrarily.
 - Inline formulas inside text must use LaTeX inline syntax: $...$.
 - Keep formulas inline with surrounding sentence text.
@@ -434,7 +433,7 @@ CLASS-SPECIFIC REQUIREMENTS:
   Visual style in crop: bold='съезддан соң булган хәл-\nләрнең бөтенесен'; italic='in nuce'
   EXAMPLE INPUT END
   EXAMPLE OUTPUT START
-  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-\nләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-**\n**ләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
   EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.
@@ -471,6 +470,9 @@ CLASS-SPECIFIC REQUIREMENTS:
 - Keep text as normal Markdown paragraphs.
 - Do not convert into headings, lists, or tables unless those markers are clearly visible.
 - Apply emphasis only when clearly visible: **bold**, *italic*, ***bold italic***.
+- For emphasis spanning multiple visual lines, apply Markdown markers per line.
+- Do not keep one emphasis marker pair open across a newline.
+- If a styled span crosses a line break, close markers before '\n' and reopen after '\n' with the same style.
 - Do not guess or apply formatting arbitrarily.
 - Inline formulas inside text must use LaTeX inline syntax: $...$.
 - Keep formulas inline with surrounding sentence text.
@@ -488,7 +490,7 @@ CLASS-SPECIFIC REQUIREMENTS:
   Visual style in crop: bold='съезддан соң булган хәл-\nләрнең бөтенесен'; italic='in nuce'
   EXAMPLE INPUT END
   EXAMPLE OUTPUT START
-  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-\nләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
+  {"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-**\n**ләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм"}
   EXAMPLE OUTPUT END
 OUTPUT FORMAT REQUIREMENTS:
 The "content" string must be valid Markdown.

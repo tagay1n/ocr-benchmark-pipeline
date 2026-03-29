@@ -126,6 +126,13 @@ class OcrPromptsTests(unittest.TestCase):
         self.assertIn("line breaks inside a cell using <br>", rule)
         self.assertIn("outside crop boundaries", rule)
 
+    def test_section_header_rule_preserves_multiline_header_inside_single_heading_line(self) -> None:
+        rule = ocr_prompts.class_rule_for_layout_class("section_header")
+        self.assertIn("Keep one semantic header in one Markdown heading line", rule)
+        self.assertIn("using <br> inside that same heading line", rule)
+        self.assertIn("Do not use bold markers inside Markdown headings", rule)
+        self.assertIn("Do not output continuation lines as separate bold paragraphs", rule)
+
     def test_text_and_footnote_rules_cover_sup_sub_and_no_markdown_footnote_syntax(self) -> None:
         self.assertIn("<sup>...</sup>", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("<sub>...</sub>", ocr_prompts.CLASS_RULE_TEXT)

@@ -188,6 +188,12 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Subheader: `### Section title`
   - Lower subheader: `#### Subsection title`
 
+- Multiline headers policy:
+  - Do not split one semantic header across multiple Markdown lines with only the first line marked as `#`.
+  - Do not encode continuation lines as bold paragraphs to imitate header continuation.
+  - Keep one semantic header as one Markdown header line by joining wrapped source lines into a single heading text.
+  - If visual line break must be preserved inside a heading, use an explicit HTML break inside the same header (for example: `## First line<br>Second line`).
+
 ## Documentation Policy
 
 This repository keeps active project documentation in only two files:
