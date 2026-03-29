@@ -30,6 +30,7 @@
       import {
         applyInlineMarkdownWrapper,
         applyLinePrefixMarkdown,
+        containsCombiningMarks,
         computeViewportAutoCenterTarget,
         computeEditorToolbarState,
         computeReconstructedImageCropStyle,
@@ -4412,6 +4413,7 @@
             rawLine,
             renderedText: text.textContent,
           });
+          const hasCombiningMarks = containsCombiningMarks(stretchLine);
           let measuredWidth = Number(text.scrollWidth) || 0;
           if (!Number.isFinite(measuredWidth) || measuredWidth <= 0) {
             text.style.transform = "scaleX(1)";
@@ -4422,7 +4424,7 @@
           text.style.letterSpacing = "0px";
           let appliedWordSpacing = 0;
           let appliedLetterSpacing = 0;
-          if (targetWidth > measuredWidth + 0.25) {
+          if (!hasCombiningMarks && targetWidth > measuredWidth + 0.25) {
             const spacesCount = countStretchableSpaces(stretchLine);
             if (spacesCount > 0) {
               const requiredExtra = targetWidth - measuredWidth;
@@ -4435,7 +4437,7 @@
               }
             }
 
-            if (targetWidth > measuredWidth + 0.25) {
+            if (!hasCombiningMarks && targetWidth > measuredWidth + 0.25) {
               const glyphsCount = countStretchableGlyphs(stretchLine);
               if (glyphsCount > 1) {
                 const requiredExtra = targetWidth - measuredWidth;
@@ -4451,7 +4453,9 @@
           }
 
           const fitScale = targetWidth / Math.max(1e-6, measuredWidth);
-          const appliedScale = Math.max(0.18, fitScale);
+          const appliedScale = hasCombiningMarks
+            ? (fitScale < 1 ? Math.max(0.18, fitScale) : 1)
+            : Math.max(0.18, fitScale);
           text.style.transform = `scaleX(${appliedScale})`;
           if (!Number.isFinite(appliedScale) || appliedScale <= 0) {
             text.style.transform = "scaleX(1)";
@@ -4471,10 +4475,13 @@
               rawLine,
               renderedText: text.textContent,
             });
+            const hasCombiningMarks = containsCombiningMarks(stretchLine);
             let measuredWidth = Number(text.scrollWidth) || 0;
             if (Number.isFinite(measuredWidth) && measuredWidth > 0) {
-              const medianWordSpacing = Math.max(0, median(nonLastWordSpacings, 0));
-              const medianLetterSpacing = Math.max(0, median(nonLastLetterSpacings, 0));
+              const medianWordSpacing = hasCombiningMarks ? 0 : Math.max(0, median(nonLastWordSpacings, 0));
+              const medianLetterSpacing = hasCombiningMarks
+                ? 0
+                : Math.max(0, median(nonLastLetterSpacings, 0));
               const medianScale = Math.max(0.18, median(nonLastScales, 1));
 
               text.style.wordSpacing = `${medianWordSpacing}px`;
@@ -4489,6 +4496,9 @@
               if (fitScale < 1) {
                 // Overflow guard only.
                 appliedScale = Math.max(0.18, fitScale);
+              } else if (hasCombiningMarks) {
+                // Avoid stretching grapheme clusters with combining marks.
+                appliedScale = 1;
               } else {
                 // Do not force-fill to full width for the last line in multi-line bbox.
                 appliedScale = Math.max(1, Math.min(medianScale, fitScale));
@@ -4912,7 +4922,9 @@
         contentNode.style.lineHeight = String(lineHeight);
 
         if (format === "markdown") {
-          const spacesCount = countStretchableSpaces(String(output.content ?? ""));
+          const markdownText = String(output.content ?? "");
+          const hasCombiningMarksInMarkdown = containsCombiningMarks(markdownText);
+          const spacesCount = hasCombiningMarksInMarkdown ? 0 : countStretchableSpaces(markdownText);
           const intrinsicWidth = measureIntrinsicContentWidth(contentNode);
           const maxWordSpacing = reconstructionWordSpacing({
             measuredContentWidth: intrinsicWidth,
@@ -4938,30 +4950,32 @@
             contentNode.style.wordSpacing = `${best}px`;
           }
 
-          const glyphsCount = countStretchableGlyphs(String(output.content ?? ""));
-          const intrinsicAfterWordSpacing = measureIntrinsicContentWidth(contentNode);
-          const maxLetterSpacing = reconstructionLetterSpacing({
-            measuredContentWidth: intrinsicAfterWordSpacing,
-            availableWidth,
-            glyphsCount,
-            maxLetterSpacing: 0.8,
-            minGainRatio: 0.004,
-          });
-          if (maxLetterSpacing > 0) {
-            let low = 0;
-            let high = maxLetterSpacing;
-            let best = 0;
-            for (let index = 0; index < 10; index += 1) {
-              const mid = (low + high) / 2;
-              contentNode.style.letterSpacing = `${mid}px`;
-              if (contentFitsInItem(contentNode, availableWidth, availableHeight)) {
-                best = mid;
-                low = mid;
-              } else {
-                high = mid;
+          if (!containsCombiningMarks(markdownText)) {
+            const glyphsCount = countStretchableGlyphs(markdownText);
+            const intrinsicAfterWordSpacing = measureIntrinsicContentWidth(contentNode);
+            const maxLetterSpacing = reconstructionLetterSpacing({
+              measuredContentWidth: intrinsicAfterWordSpacing,
+              availableWidth,
+              glyphsCount,
+              maxLetterSpacing: 0.8,
+              minGainRatio: 0.004,
+            });
+            if (maxLetterSpacing > 0) {
+              let low = 0;
+              let high = maxLetterSpacing;
+              let best = 0;
+              for (let index = 0; index < 10; index += 1) {
+                const mid = (low + high) / 2;
+                contentNode.style.letterSpacing = `${mid}px`;
+                if (contentFitsInItem(contentNode, availableWidth, availableHeight)) {
+                  best = mid;
+                  low = mid;
+                } else {
+                  high = mid;
+                }
               }
+              contentNode.style.letterSpacing = `${best}px`;
             }
-            contentNode.style.letterSpacing = `${best}px`;
           }
         }
 
@@ -4973,6 +4987,9 @@
             maxScale: 1.12,
             minGainRatio: 0.01,
           });
+          if (format === "markdown" && containsCombiningMarks(String(output.content ?? ""))) {
+            horizontalScale = Math.min(1, horizontalScale);
+          }
           if (preserveLines && intrinsicWidth > 0) {
             const widthFitRatio = (availableWidth - 0.5) / intrinsicWidth;
             if (Number.isFinite(widthFitRatio) && widthFitRatio > 0) {

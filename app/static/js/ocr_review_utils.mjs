@@ -685,7 +685,7 @@ export function resolveLineBandAxisRect(lineBand, orientation = "horizontal") {
 }
 
 function isWordTokenChar(char) {
-  return /[\p{L}\p{N}_]/u.test(char);
+  return /[\p{L}\p{N}\p{M}_]/u.test(char);
 }
 
 function classifyTokenChar(char) {
@@ -992,4 +992,8 @@ export function resolveStretchableLineText({ rawLine = "", renderedText = "" } =
   const raw = String(rawLine ?? "").replace(/\u00A0/g, " ");
   const rendered = String(renderedText ?? "").replace(/\u00A0/g, " ");
   return rendered.trim().length > 0 ? rendered : raw;
+}
+
+export function containsCombiningMarks(value) {
+  return /[\u0300-\u036f\u1ab0-\u1aff\u1dc0-\u1dff\u20d0-\u20ff\ufe20-\ufe2f]/u.test(String(value ?? ""));
 }

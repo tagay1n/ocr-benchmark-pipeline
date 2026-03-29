@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyInlineMarkdownWrapper,
   applyLinePrefixMarkdown,
+  containsCombiningMarks,
   computeLineReviewDisplayGeometry,
   computeReconstructedImageCropStyle,
   computeViewportAutoCenterTarget,
@@ -119,6 +120,12 @@ test("resolveStretchableLineText prefers rendered text over raw markdown/html so
     }),
     renderedText,
   );
+});
+
+test("containsCombiningMarks detects combining diacritic code points", () => {
+  assert.equal(containsCombiningMarks("А\u0301"), true);
+  assert.equal(containsCombiningMarks("ё"), false);
+  assert.equal(containsCombiningMarks("plain"), false);
 });
 
 test("hasRaisedInlineMarkdownTag detects sup and sub tags including shorthand", () => {
@@ -650,6 +657,22 @@ test("tokenBoundsAtOffset skips whitespace when selecting token", () => {
   });
 });
 
+test("tokenBoundsAtOffset keeps combining diacritics attached to Cyrillic base letter", () => {
+  const text = "А\u0301 test";
+  assert.deepEqual(tokenBoundsAtOffset(text, 0), {
+    start: 0,
+    end: 2,
+    token: "А\u0301",
+    kind: "word",
+  });
+  assert.deepEqual(tokenBoundsAtOffset(text, 1), {
+    start: 0,
+    end: 2,
+    token: "А\u0301",
+    kind: "word",
+  });
+});
+
 test("findBestTokenOccurrence chooses nearest whole-word token", () => {
   const text = "abc abcd abc";
   assert.deepEqual(
@@ -659,6 +682,14 @@ test("findBestTokenOccurrence chooses nearest whole-word token", () => {
   assert.deepEqual(
     findBestTokenOccurrence(text, "abc", { preferredOffset: 2, wholeWord: true }),
     { start: 0, end: 3 },
+  );
+});
+
+test("findBestTokenOccurrence whole-word mode does not match base letter inside combining-mark letter", () => {
+  const text = "А\u0301 А";
+  assert.deepEqual(
+    findBestTokenOccurrence(text, "А", { preferredOffset: 0, wholeWord: true }),
+    { start: 3, end: 4 },
   );
 });
 
