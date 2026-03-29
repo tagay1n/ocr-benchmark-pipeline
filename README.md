@@ -194,6 +194,13 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Keep one semantic header as one Markdown header line by joining wrapped source lines into a single heading text.
   - If visual line break must be preserved inside a heading, use an explicit HTML break inside the same header (for example: `## First line<br>Second line`).
 
+- Error preservation policy:
+  - Dataset policy is to keep source text as printed, including typos, spelling mistakes, and grammar irregularities.
+  - OCR/review normalization does not correct linguistic errors automatically.
+  - When intended wording seems obvious, the original printed form is still retained.
+  - Punctuation or casing anomalies are retained when they are part of the source.
+  - Corrections are limited to clear OCR character misreads, without changing wording/style.
+
 ## Documentation Policy
 
 This repository keeps active project documentation in only two files:
