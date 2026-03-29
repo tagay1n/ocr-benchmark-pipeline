@@ -139,8 +139,10 @@ class OcrPromptsTests(unittest.TestCase):
         self.assertIn("EXAMPLE OUTPUT START", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("EXAMPLE OUTPUT END", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("Visual style in crop:", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("apply Markdown markers per line", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("Do not keep one emphasis marker pair open across a newline", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn('{"content":"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең', ocr_prompts.CLASS_RULE_TEXT)
-        self.assertIn("**съезддан соң булган хәл-\\nләрнең бөтенесен**", ocr_prompts.CLASS_RULE_TEXT)
+        self.assertIn("**съезддан соң булган хәл-**\\n**ләрнең бөтенесен**", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("*in nuce*", ocr_prompts.CLASS_RULE_TEXT)
         self.assertIn("Do not convert output to Markdown footnote syntax", ocr_prompts.CLASS_RULE_FOOTNOTE)
 

@@ -94,6 +94,9 @@ CLASS_RULE_TEXT: Final[str] = (
     "- Keep text as normal Markdown paragraphs.\n"
     "- Do not convert into headings, lists, or tables unless those markers are clearly visible.\n"
     "- Apply emphasis only when clearly visible: **bold**, *italic*, ***bold italic***.\n"
+    "- For emphasis spanning multiple visual lines, apply Markdown markers per line.\n"
+    "- Do not keep one emphasis marker pair open across a newline.\n"
+    "- If a styled span crosses a line break, close markers before '\\n' and reopen after '\\n' with the same style.\n"
     "- Do not guess or apply formatting arbitrarily.\n"
     "- Inline formulas inside text must use LaTeX inline syntax: $...$.\n"
     "- Keep formulas inline with surrounding sentence text.\n"
@@ -111,7 +114,7 @@ CLASS_RULE_TEXT: Final[str] = (
     "  Visual style in crop: bold='съезддан соң булган хәл-\\nләрнең бөтенесен'; italic='in nuce'\n"
     "  EXAMPLE INPUT END\n"
     "  EXAMPLE OUTPUT START\n"
-    "  {\"content\":\"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-\\nләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм\"}\n"
+    "  {\"content\":\"Без съезддагы фикер алышуларның һәм тавыш бирүләрнең\\nанализын тәмам иттек; бу анализ **съезддан соң булган хәл-**\\n**ләрнең бөтенесен** *in nuce* (яралгы хәлендә) аңлатып бирә, һәм\"}\n"
     "  EXAMPLE OUTPUT END"
 )
 

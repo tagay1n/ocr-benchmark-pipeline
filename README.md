@@ -155,6 +155,15 @@ Each OCR extraction run writes resolved text prompts (without image clip bytes) 
 
 Each JSONL row includes page/layout identifiers, class, output format, and the exact prompt sent to Gemini.
 
+## OCR Formatting Decisions Log
+
+This section is a living log of OCR normalization decisions for dataset consistency. Add new items as rules are agreed.
+
+- Multiline emphasis in source text:
+  - If text is visually italic, bold, or bold+italic across multiple lines, apply Markdown markers per line (not once for the full block).
+  - Use `*line*` for italic, `**line**` for bold, and `***line***` for bold+italic.
+  - Start and end every affected line with its corresponding marker.
+
 ## Documentation Policy
 
 This repository keeps active project documentation in only two files:
