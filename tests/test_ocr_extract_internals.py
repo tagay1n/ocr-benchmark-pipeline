@@ -317,6 +317,17 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(warning["replacements"][0]["from"], "e")
         self.assertEqual(warning["replacements"][0]["to"], "е")
 
+    def test_detect_suspicious_lookalikes_marks_standalone_latin_confusable_letter(self) -> None:
+        text = "Бу Á"
+        warnings = detect_suspicious_lookalikes(text, markdown_code_aware=True)
+        self.assertEqual(len(warnings), 1)
+        warning = warnings[0]
+        self.assertEqual(warning["line_number"], 1)
+        self.assertEqual(warning["token"], "Á")
+        self.assertEqual(warning["normalized_token"], "А")
+        self.assertEqual(warning["replacements"][0]["from"], "Á")
+        self.assertEqual(warning["replacements"][0]["to"], "А")
+
     def test_extract_ocr_for_page_rejects_unknown_layout_ids(self) -> None:
         self._write_image("ocr/a.png")
         main.scan_images()

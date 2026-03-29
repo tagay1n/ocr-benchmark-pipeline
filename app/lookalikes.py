@@ -77,10 +77,11 @@ def detect_suspicious_lookalikes(
             segments = [(line, 0)]
 
         for segment_text, segment_offset in segments:
+            segment_has_cyrillic = bool(CYRILLIC_RE.search(segment_text))
             for match in WORD_RE.finditer(segment_text):
                 token = match.group(0)
-                if not CYRILLIC_RE.search(token):
-                    continue
+                token_has_cyrillic = bool(CYRILLIC_RE.search(token))
+                token_letter_count = sum(1 for char in token if str(char).isalpha())
                 normalized_token_chars: list[str] = []
                 replacements: list[dict[str, str]] = []
                 for char in token:
@@ -90,6 +91,11 @@ def detect_suspicious_lookalikes(
                         replacements.append({"from": char, "to": mapped})
                 if not replacements:
                     continue
+                if not token_has_cyrillic:
+                    if not segment_has_cyrillic:
+                        continue
+                    if token_letter_count != 1:
+                        continue
                 token_start = int(segment_offset + match.start())
                 token_end = int(segment_offset + match.end())
                 warnings.append(

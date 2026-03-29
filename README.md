@@ -164,6 +164,18 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Use `*line*` for italic, `**line**` for bold, and `***line***` for bold+italic.
   - Start and end every affected line with its corresponding marker.
 
+- Diacritics policy (strict):
+  - Preserve diacritics exactly as visible in source text; do not simplify.
+  - Ground-truth text keeps stressed/diacritic forms (not stripped variants).
+  - Treat script lookalikes as different characters (Cyrillic vs Latin are not interchangeable).
+  - Store text in NFC form for consistency, but keep diacritic meaning unchanged.
+
+- Diacritics examples:
+  - Keep `А́` (Cyrillic `А` + stress), not plain `А`.
+  - Keep `ё`, not `е`.
+  - Keep `ә`, not Latin `a`.
+  - Do not replace Cyrillic `А́` with Latin `Á` or `Á`.
+
 ## Documentation Policy
 
 This repository keeps active project documentation in only two files:
