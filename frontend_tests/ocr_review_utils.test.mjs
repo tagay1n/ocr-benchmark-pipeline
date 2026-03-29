@@ -15,6 +15,7 @@ import {
   findBestTokenOccurrence,
   hasLocalDraftForLayout,
   hasRaisedInlineMarkdownTag,
+  isAllowedStructuredTableTag,
   isRectOnscreen,
   isLineReviewRequiredOutput,
   isReconstructedRestoreDisabled,
@@ -35,6 +36,7 @@ import {
   resolveOutputEffectiveOrientation,
   resolveViewportScrollSyncUpdate,
   resolveEditorDrawerLayout,
+  sanitizeStructuredTableAttribute,
   tokenBoundsAtOffset,
   textOffsetForLineIndex,
 } from "../app/static/js/ocr_review_utils.mjs";
@@ -170,6 +172,52 @@ test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs"
   assert.equal(isLineSyncEnabledOutputFormat("latex"), false);
   assert.equal(isLineSyncEnabledOutputFormat("skip"), false);
   assert.equal(isLineSyncEnabledOutputFormat(""), false);
+});
+
+test("isAllowedStructuredTableTag keeps native table structure tags and blocks unsafe tags", () => {
+  assert.equal(isAllowedStructuredTableTag("table"), true);
+  assert.equal(isAllowedStructuredTableTag("tbody"), true);
+  assert.equal(isAllowedStructuredTableTag("tr"), true);
+  assert.equal(isAllowedStructuredTableTag("td"), true);
+  assert.equal(isAllowedStructuredTableTag("colgroup"), true);
+  assert.equal(isAllowedStructuredTableTag("col"), true);
+  assert.equal(isAllowedStructuredTableTag("script"), false);
+  assert.equal(isAllowedStructuredTableTag("img"), false);
+});
+
+test("sanitizeStructuredTableAttribute preserves merge attrs and strips unsafe attrs", () => {
+  assert.equal(
+    sanitizeStructuredTableAttribute({
+      tagName: "td",
+      attrName: "rowspan",
+      attrValue: "2",
+    }),
+    "2",
+  );
+  assert.equal(
+    sanitizeStructuredTableAttribute({
+      tagName: "th",
+      attrName: "colspan",
+      attrValue: " 3 ",
+    }),
+    "3",
+  );
+  assert.equal(
+    sanitizeStructuredTableAttribute({
+      tagName: "td",
+      attrName: "onclick",
+      attrValue: "alert(1)",
+    }),
+    null,
+  );
+  assert.equal(
+    sanitizeStructuredTableAttribute({
+      tagName: "td",
+      attrName: "rowspan",
+      attrValue: "0",
+    }),
+    null,
+  );
 });
 
 test("isLineReviewRequiredOutput includes formula/latex and text-like classes", () => {

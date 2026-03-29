@@ -21,6 +21,67 @@ export function isLineSyncEnabledOutputFormat(outputFormat) {
   return String(outputFormat || "").trim().toLowerCase() === "markdown";
 }
 
+const STRUCTURED_TABLE_ALLOWED_TAGS = new Set([
+  "table",
+  "caption",
+  "colgroup",
+  "col",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "th",
+  "td",
+  "br",
+]);
+
+const STRUCTURED_TABLE_SPAN_ATTRS_BY_TAG = Object.freeze({
+  colgroup: new Set(["span"]),
+  col: new Set(["span"]),
+  th: new Set(["colspan", "rowspan"]),
+  td: new Set(["colspan", "rowspan"]),
+});
+
+function parsePositiveIntegerAttribute(value, { min = 1, max = 1000 } = {}) {
+  const text = String(value ?? "").trim();
+  if (!/^\d+$/.test(text)) {
+    return null;
+  }
+  const parsed = Number.parseInt(text, 10);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return null;
+  }
+  return String(parsed);
+}
+
+export function isAllowedStructuredTableTag(tagName) {
+  const normalized = String(tagName || "").trim().toLowerCase();
+  return STRUCTURED_TABLE_ALLOWED_TAGS.has(normalized);
+}
+
+export function sanitizeStructuredTableAttribute({ tagName, attrName, attrValue } = {}) {
+  const normalizedTag = String(tagName || "").trim().toLowerCase();
+  const normalizedAttr = String(attrName || "").trim().toLowerCase();
+  if (!normalizedAttr || !isAllowedStructuredTableTag(normalizedTag)) {
+    return null;
+  }
+
+  const spanAttrs = STRUCTURED_TABLE_SPAN_ATTRS_BY_TAG[normalizedTag];
+  if (spanAttrs && spanAttrs.has(normalizedAttr)) {
+    return parsePositiveIntegerAttribute(attrValue, { min: 1, max: 1000 });
+  }
+
+  if (normalizedTag === "th" && normalizedAttr === "scope") {
+    const scope = String(attrValue || "").trim().toLowerCase();
+    if (scope === "row" || scope === "col" || scope === "rowgroup" || scope === "colgroup") {
+      return scope;
+    }
+    return null;
+  }
+
+  return null;
+}
+
 export function hasRaisedInlineMarkdownTag(rawValue) {
   return /<\s*(sup|sub)\b/i.test(String(rawValue ?? ""));
 }

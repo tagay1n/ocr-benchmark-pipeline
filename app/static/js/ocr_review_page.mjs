@@ -44,6 +44,7 @@
         isReconstructedRestoreDisabled,
         isLineReviewRequiredOutput as isLineReviewRequiredOutputShared,
         isLineSyncEnabledOutputFormat,
+        isAllowedStructuredTableTag,
         hasRaisedInlineMarkdownTag,
         lineBandFromLineIndex,
         lineIndexFromTextOffset,
@@ -61,6 +62,7 @@
         resolveOutputEffectiveOrientation,
         resolveViewportScrollSyncUpdate,
         resolveEditorDrawerLayout,
+        sanitizeStructuredTableAttribute,
         tokenBoundsAtOffset,
         textOffsetForLineIndex,
       } from "./ocr_review_utils.mjs";
@@ -236,6 +238,7 @@
       const expandedEditorToolbar = document.getElementById("expanded-editor-toolbar");
       const editorActionBoldBtn = document.getElementById("editor-action-bold");
       const editorActionItalicBtn = document.getElementById("editor-action-italic");
+      const editorActionStressMarkBtn = document.getElementById("editor-action-stress-mark");
       const editorActionInlineFormulaBtn = document.getElementById("editor-action-inline-formula");
       const editorActionListItemBtn = document.getElementById("editor-action-list-item");
       const editorActionOrderedListItemBtn = document.getElementById("editor-action-ordered-list-item");
@@ -1078,6 +1081,7 @@
         for (const button of [
           editorActionBoldBtn,
           editorActionItalicBtn,
+          editorActionStressMarkBtn,
           editorActionInlineFormulaBtn,
           editorActionListItemBtn,
           editorActionOrderedListItemBtn,
@@ -1119,6 +1123,24 @@
             right: "$",
             placeholder: "formula",
           });
+        }
+        if (normalized === "stress_mark") {
+          const text = String(content ?? "");
+          const rawStart = Number(selectionStart);
+          const rawEnd = Number(selectionEnd);
+          const start = Number.isFinite(rawStart) ? Math.max(0, Math.min(text.length, Math.floor(rawStart))) : 0;
+          const end = Number.isFinite(rawEnd) ? Math.max(0, Math.min(text.length, Math.floor(rawEnd))) : start;
+          const safeStart = Math.min(start, end);
+          const safeEnd = Math.max(start, end);
+          const mark = "\u0301";
+          const insertAt = safeStart === safeEnd ? safeStart : safeEnd;
+          const nextText = `${text.slice(0, insertAt)}${mark}${text.slice(insertAt)}`;
+          const nextOffset = insertAt + mark.length;
+          return {
+            content: nextText,
+            selectionStart: nextOffset,
+            selectionEnd: nextOffset,
+          };
         }
         if (normalized === "list_item") {
           return applyLinePrefixMarkdown({
@@ -4557,15 +4579,24 @@
       }
 
       function cloneAllowedTableNode(node) {
-        const allowedTags = new Set(["table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "br"]);
         if (!(node instanceof Element)) {
           return null;
         }
         const tagName = node.tagName.toLowerCase();
-        if (!allowedTags.has(tagName)) {
+        if (!isAllowedStructuredTableTag(tagName)) {
           return null;
         }
         const cloned = document.createElement(tagName);
+        for (const attribute of Array.from(node.attributes || [])) {
+          const safeValue = sanitizeStructuredTableAttribute({
+            tagName,
+            attrName: attribute.name,
+            attrValue: attribute.value,
+          });
+          if (safeValue !== null) {
+            cloned.setAttribute(String(attribute.name || "").trim().toLowerCase(), safeValue);
+          }
+        }
         for (const child of Array.from(node.childNodes)) {
           if (child.nodeType === Node.TEXT_NODE) {
             cloned.appendChild(document.createTextNode(child.textContent || ""));
@@ -6042,6 +6073,9 @@
       });
       editorActionItalicBtn.addEventListener("click", () => {
         applyMarkdownAction("italic");
+      });
+      editorActionStressMarkBtn.addEventListener("click", () => {
+        applyMarkdownAction("stress_mark");
       });
       editorActionInlineFormulaBtn.addEventListener("click", () => {
         applyMarkdownAction("inline_formula");
