@@ -171,10 +171,10 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Store text in NFC form for consistency, but keep diacritic meaning unchanged.
 
 - Diacritics examples:
-  - Keep `А́` (Cyrillic `А` + stress), not plain `А`.
-  - Keep `ё`, not `е`.
-  - Keep `ә`, not Latin `a`.
-  - Do not replace Cyrillic `А́` with Latin `Á` or `Á`.
+  - Keep `А́` (`U+0410` + `U+0301`, Cyrillic `А` + combining stress), not plain `А` (`U+0410`).
+  - Keep `ё` (`U+0451`), not `е` (`U+0435`).
+  - Keep `ә` (`U+04D9`), not Latin `a` (`U+0061`).
+  - Do not replace Cyrillic `А́` (`U+0410` + `U+0301`) with Latin `Á` (`U+00C1`) or Latin `Á` (`U+0041` + `U+0301`).
 
 ## Documentation Policy
 

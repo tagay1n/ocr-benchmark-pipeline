@@ -172,6 +172,7 @@ test("ocr review HTML keeps extraction/editor integration hooks", () => {
     'id="reconstructed-strip-overlay"',
     'id="editor-action-bold"',
     'id="editor-action-italic"',
+    'id="editor-action-stress-mark"',
     'id="editor-action-inline-formula"',
     'id="editor-action-list-item"',
     'id="editor-action-ordered-list-item"',
