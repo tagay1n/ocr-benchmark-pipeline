@@ -36,6 +36,7 @@ import {
   resolveOutputEffectiveOrientation,
   resolveViewportScrollSyncUpdate,
   resolveEditorDrawerLayout,
+  pruneDraftReviewStateForLayouts,
   sanitizeStructuredTableAttribute,
   tokenBoundsAtOffset,
   textOffsetForLineIndex,
@@ -338,6 +339,44 @@ test("hasLocalDraftForLayout checks layout id normalization and map presence", (
   assert.equal(hasLocalDraftForLayout(localEditsByLayoutId, "abc"), false);
   assert.equal(hasLocalDraftForLayout(localEditsByLayoutId, 99), false);
   assert.equal(hasLocalDraftForLayout(null, 7), false);
+});
+
+test("pruneDraftReviewStateForLayouts clears only selected layout ids", () => {
+  const localEditsByLayoutId = {
+    "1": { content: "one" },
+    "2": { content: "two" },
+    "7": { content: "seven" },
+  };
+  const approvedLineIndexesByLayoutId = {
+    "1": [0],
+    "2": [0, 1],
+    "7": [2],
+  };
+  const lineCursorByLayoutId = {
+    "1": 0,
+    "2": 1,
+    "7": 2,
+  };
+
+  const next = pruneDraftReviewStateForLayouts({
+    localEditsByLayoutId,
+    approvedLineIndexesByLayoutId,
+    lineCursorByLayoutId,
+    layoutIds: [2, "7", "invalid", 0, -1, 2],
+  });
+
+  assert.deepEqual(next.localEditsByLayoutId, {
+    "1": { content: "one" },
+  });
+  assert.deepEqual(next.approvedLineIndexesByLayoutId, {
+    "1": [0],
+  });
+  assert.deepEqual(next.lineCursorByLayoutId, {
+    "1": 0,
+  });
+  assert.notEqual(next.localEditsByLayoutId, localEditsByLayoutId);
+  assert.notEqual(next.approvedLineIndexesByLayoutId, approvedLineIndexesByLayoutId);
+  assert.notEqual(next.lineCursorByLayoutId, lineCursorByLayoutId);
 });
 
 test("countTextLines handles empty and multiline text", () => {

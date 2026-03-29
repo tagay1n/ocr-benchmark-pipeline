@@ -62,6 +62,7 @@
         resolveOutputEffectiveOrientation,
         resolveViewportScrollSyncUpdate,
         resolveEditorDrawerLayout,
+        pruneDraftReviewStateForLayouts,
         sanitizeStructuredTableAttribute,
         tokenBoundsAtOffset,
         textOffsetForLineIndex,
@@ -5580,7 +5581,16 @@
           shouldCloseModal = true;
           closeReextractModal(true);
 
-          clearDraftState();
+          const prunedDraftState = pruneDraftReviewStateForLayouts({
+            localEditsByLayoutId: state.localEditsByLayoutId,
+            approvedLineIndexesByLayoutId: state.approvedLineIndexesByLayoutId,
+            lineCursorByLayoutId: state.lineCursorByLayoutId,
+            layoutIds: selectedLayoutIds,
+          });
+          state.localEditsByLayoutId = prunedDraftState.localEditsByLayoutId;
+          state.approvedLineIndexesByLayoutId = prunedDraftState.approvedLineIndexesByLayoutId;
+          state.lineCursorByLayoutId = prunedDraftState.lineCursorByLayoutId;
+          persistDraftState();
           await loadPageData();
           renderHeaderMeta();
           renderOverlay();

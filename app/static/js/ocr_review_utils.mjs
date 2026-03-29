@@ -252,6 +252,39 @@ export function resolveViewportScrollSyncUpdate({
   };
 }
 
+export function pruneDraftReviewStateForLayouts({
+  localEditsByLayoutId,
+  approvedLineIndexesByLayoutId,
+  lineCursorByLayoutId,
+  layoutIds,
+} = {}) {
+  const nextEdits = { ...(localEditsByLayoutId && typeof localEditsByLayoutId === "object" ? localEditsByLayoutId : {}) };
+  const nextApprovals = {
+    ...(approvedLineIndexesByLayoutId && typeof approvedLineIndexesByLayoutId === "object"
+      ? approvedLineIndexesByLayoutId
+      : {}),
+  };
+  const nextCursors = {
+    ...(lineCursorByLayoutId && typeof lineCursorByLayoutId === "object" ? lineCursorByLayoutId : {}),
+  };
+  const normalizedLayoutIds = new Set(
+    (Array.isArray(layoutIds) ? layoutIds : [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+      .map((value) => String(value)),
+  );
+  for (const layoutId of normalizedLayoutIds) {
+    delete nextEdits[layoutId];
+    delete nextApprovals[layoutId];
+    delete nextCursors[layoutId];
+  }
+  return {
+    localEditsByLayoutId: nextEdits,
+    approvedLineIndexesByLayoutId: nextApprovals,
+    lineCursorByLayoutId: nextCursors,
+  };
+}
+
 function clampNumber(value, min, max) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) {
