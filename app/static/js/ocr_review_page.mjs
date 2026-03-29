@@ -62,6 +62,7 @@
         resolveOutputEffectiveOrientation,
         resolveViewportScrollSyncUpdate,
         resolveEditorDrawerLayout,
+        mergeLayoutsWithOcrOutputs,
         pruneDraftReviewStateForLayouts,
         sanitizeStructuredTableAttribute,
         tokenBoundsAtOffset,
@@ -1624,7 +1625,7 @@
         if (!output) {
           return;
         }
-        if (String(output.output_format || "").toLowerCase() === "skip") {
+        if (String(output.output_format || "").toLowerCase() === "skip" || isMissingExtractionOutput(output)) {
           return;
         }
         selectOutput(normalized, { scrollImageToLayout: true, isUserSelection: true });
@@ -1709,6 +1710,9 @@
           const errorText = String(output.error_message || "").trim();
           return errorText ? `OCR failed: ${errorText}` : "OCR failed";
         }
+        if (isMissingExtractionOutput(output)) {
+          return "No OCR yet (run Detect).";
+        }
         const format = String(output.output_format || "").toLowerCase();
         if (format === "skip") {
           return "Skipped region (no text extraction)";
@@ -1769,7 +1773,7 @@
           return;
         }
         if (unresolvedTotal > 0) {
-          reviewBtn.textContent = `Resolve failed OCR (${unresolvedTotal})`;
+          reviewBtn.textContent = `Resolve OCR issues (${unresolvedTotal})`;
           reviewBtn.disabled = true;
           return;
         }
@@ -2236,7 +2240,7 @@
       }
 
       function lineReviewRequiredOutput(output) {
-        if (isFailedExtractionOutput(output)) {
+        if (isFailedExtractionOutput(output) || isMissingExtractionOutput(output)) {
           return false;
         }
         return isLineReviewRequiredOutputShared({
@@ -2247,10 +2251,20 @@
 
       function normalizeExtractionStatus(value) {
         const normalized = String(value || "").trim().toLowerCase();
-        if (normalized === "ok" || normalized === "manual" || normalized === "failed" || normalized === "skip") {
+        if (
+          normalized === "ok" ||
+          normalized === "manual" ||
+          normalized === "failed" ||
+          normalized === "skip" ||
+          normalized === "missing"
+        ) {
           return normalized;
         }
         return "ok";
+      }
+
+      function isMissingExtractionOutput(output) {
+        return normalizeExtractionStatus(output?.extraction_status) === "missing";
       }
 
       function isFailedExtractionOutput(output) {
@@ -4630,6 +4644,10 @@
             : "OCR failed. Use Detect again or enter text manually.";
           return appendPlainContent(container, failureMessage, "ocr-failed");
         }
+        if (isMissingExtractionOutput(output)) {
+          container.classList.add("ocr-missing");
+          return appendPlainContent(container, "No OCR extracted for this layout yet. Run Detect.", "ocr-missing");
+        }
         if (format === "skip") {
           return appendPlainContent(container, "Skipped region (no text extraction).", "skip");
         }
@@ -5123,6 +5141,8 @@
           item.style.borderColor = hexToRgba(color, 0.6);
           if (isFailedExtractionOutput(output)) {
             item.classList.add("ocr-failed");
+          } else if (isMissingExtractionOutput(output)) {
+            item.classList.add("ocr-missing");
           }
           item.addEventListener("pointerdown", (event) => {
             if (event.button !== 0) return;
@@ -5167,7 +5187,7 @@
               output,
             );
           }
-          if (isLineSyncEnabledOutputFormat(output.output_format)) {
+          if (lineReviewRequiredOutput(output)) {
             contentNode.addEventListener("pointermove", (event) => {
               if (lineReviewLockActive()) {
                 return;
@@ -5245,7 +5265,7 @@
             if (lineReviewLockActive()) {
               return;
             }
-            if (!isLineSyncEnabledOutputFormat(output.output_format)) {
+            if (!lineReviewRequiredOutput(output)) {
               setHoveredLine(null, null, { source: "source" });
               return;
             }
@@ -5283,10 +5303,16 @@
           label.style.borderColor = hexToRgba(color, 0.62);
           label.dataset.layoutId = String(output.layout_id);
           label.textContent = `${output.reading_order}. ${formatClassLabel(output.class_name)}${
-            isFailedExtractionOutput(output) ? " [FAILED]" : ""
+            isFailedExtractionOutput(output)
+              ? " [FAILED]"
+              : isMissingExtractionOutput(output)
+                ? " [MISSING]"
+                : ""
           }`;
           if (isFailedExtractionOutput(output)) {
             label.classList.add("ocr-failed");
+          } else if (isMissingExtractionOutput(output)) {
+            label.classList.add("ocr-missing");
           }
           if (Number(output.layout_id) === selectedId) {
             sourceSelectedLabelLayer.appendChild(label);
@@ -5373,10 +5399,17 @@
           return;
         }
         const output = outputByLayoutId(normalized);
-        if (!output || String(output.output_format || "").toLowerCase() === "skip") {
+        if (
+          !output ||
+          String(output.output_format || "").toLowerCase() === "skip" ||
+          isMissingExtractionOutput(output)
+        ) {
           return;
         }
         const baselineOutput = state.serverOutputsByLayoutId[String(normalized)];
+        if (!baselineOutput) {
+          return;
+        }
         const baseline = baselineOutput ? toDraftShape(baselineOutput) : { content: "" };
         updateOutputContent(normalized, baseline.content);
       }
@@ -5473,10 +5506,23 @@
         state.supportedOcrModels = modelsConfig.supportedModels;
         state.defaultOcrModel = modelsConfig.defaultModel;
         pageImage.src = pagePayload.image_url;
-        state.outputs = outputsPayload.outputs || [];
         state.pageLayouts = Array.isArray(layoutsPayload.layouts) ? layoutsPayload.layouts : [];
+        const serverOutputs = Array.isArray(outputsPayload.outputs) ? outputsPayload.outputs : [];
+        state.outputs = mergeLayoutsWithOcrOutputs({
+          pageId: state.pageId,
+          layouts: state.pageLayouts,
+          outputs: serverOutputs,
+        });
         state.serverOutputsByLayoutId = Object.fromEntries(
-          state.outputs.map((output) => [String(output.layout_id), { ...output }]),
+          serverOutputs
+            .map((output) => {
+              const layoutId = Number(output?.layout_id);
+              if (!Number.isInteger(layoutId) || layoutId <= 0) {
+                return null;
+              }
+              return [String(layoutId), { ...output }];
+            })
+            .filter((row) => Array.isArray(row)),
         );
         loadDraftState();
         applyDraftsToOutputs();

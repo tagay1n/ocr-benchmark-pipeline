@@ -21,6 +21,152 @@ export function isLineSyncEnabledOutputFormat(outputFormat) {
   return String(outputFormat || "").trim().toLowerCase() === "markdown";
 }
 
+function normalizeLayoutClassName(className) {
+  return String(className || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[-/\s]+/g, "_");
+}
+
+const OUTPUT_FORMAT_BY_LAYOUT_CLASS = Object.freeze({
+  table: "html",
+  formula: "latex",
+  picture: "skip",
+});
+
+export function expectedOutputFormatForLayoutClass(className) {
+  const normalizedClassName = normalizeLayoutClassName(className);
+  return OUTPUT_FORMAT_BY_LAYOUT_CLASS[normalizedClassName] || "markdown";
+}
+
+function normalizeExtractionStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "ok" || normalized === "manual" || normalized === "failed" || normalized === "skip") {
+    return normalized;
+  }
+  return "ok";
+}
+
+function normalizedOutputRow(output) {
+  const layoutId = Number(output?.layout_id);
+  if (!Number.isInteger(layoutId) || layoutId <= 0) {
+    return null;
+  }
+  return {
+    ...output,
+    layout_id: layoutId,
+    page_id: Number.isInteger(Number(output?.page_id)) ? Number(output.page_id) : null,
+    class_name: String(output?.class_name || ""),
+    output_format: String(output?.output_format || "").trim().toLowerCase(),
+    content: String(output?.content ?? ""),
+    model_name: String(output?.model_name || ""),
+    key_alias: output?.key_alias ?? null,
+    extraction_status: normalizeExtractionStatus(output?.extraction_status),
+    error_message: output?.error_message == null ? null : String(output.error_message),
+    created_at: output?.created_at ?? null,
+    updated_at: output?.updated_at ?? null,
+    lookalike_warning_count: Math.max(0, Number(output?.lookalike_warning_count) || 0),
+    lookalike_warning_line_indexes: Array.isArray(output?.lookalike_warning_line_indexes)
+      ? output.lookalike_warning_line_indexes
+      : [],
+    lookalike_warnings: Array.isArray(output?.lookalike_warnings) ? output.lookalike_warnings : [],
+    reading_order: Number.isInteger(Number(output?.reading_order)) ? Number(output.reading_order) : layoutId,
+    orientation: String(output?.orientation || "horizontal"),
+    effective_orientation: String(output?.effective_orientation || "horizontal"),
+    bbox: output?.bbox && typeof output.bbox === "object" ? output.bbox : null,
+    bound_target_ids: Array.isArray(output?.bound_target_ids) ? output.bound_target_ids : [],
+  };
+}
+
+function buildMissingOutputRow(layout, pageId) {
+  const layoutId = Number(layout?.id);
+  const className = String(layout?.class_name || "");
+  return {
+    layout_id: layoutId,
+    page_id: Number.isInteger(Number(layout?.page_id)) ? Number(layout.page_id) : Number(pageId) || null,
+    class_name: className,
+    output_format: expectedOutputFormatForLayoutClass(className),
+    content: "",
+    model_name: "",
+    key_alias: null,
+    extraction_status: "missing",
+    error_message: "OCR output is missing for this layout.",
+    created_at: null,
+    updated_at: null,
+    lookalike_warning_count: 0,
+    lookalike_warning_line_indexes: [],
+    lookalike_warnings: [],
+    reading_order: Number.isInteger(Number(layout?.reading_order)) ? Number(layout.reading_order) : layoutId,
+    orientation: String(layout?.orientation || "horizontal"),
+    effective_orientation: String(layout?.effective_orientation || "horizontal"),
+    bbox:
+      layout?.bbox && typeof layout.bbox === "object"
+        ? layout.bbox
+        : { x1: 0, y1: 0, x2: 0, y2: 0 },
+    bound_target_ids: Array.isArray(layout?.bound_target_ids) ? layout.bound_target_ids : [],
+  };
+}
+
+export function mergeLayoutsWithOcrOutputs({
+  pageId = null,
+  layouts = [],
+  outputs = [],
+} = {}) {
+  const normalizedOutputsByLayoutId = new Map();
+  for (const rawOutput of Array.isArray(outputs) ? outputs : []) {
+    const output = normalizedOutputRow(rawOutput);
+    if (!output) {
+      continue;
+    }
+    normalizedOutputsByLayoutId.set(output.layout_id, output);
+  }
+
+  const rows = [];
+  const seenLayoutIds = new Set();
+  for (const layout of Array.isArray(layouts) ? layouts : []) {
+    const layoutId = Number(layout?.id);
+    if (!Number.isInteger(layoutId) || layoutId <= 0 || seenLayoutIds.has(layoutId)) {
+      continue;
+    }
+    seenLayoutIds.add(layoutId);
+    const output = normalizedOutputsByLayoutId.get(layoutId);
+    if (output) {
+      rows.push({
+        ...output,
+        page_id: Number.isInteger(Number(layout?.page_id)) ? Number(layout.page_id) : output.page_id,
+        class_name: String(layout?.class_name || output.class_name || ""),
+        reading_order: Number.isInteger(Number(layout?.reading_order))
+          ? Number(layout.reading_order)
+          : Number(output.reading_order),
+        orientation: String(layout?.orientation || output.orientation || "horizontal"),
+        effective_orientation: String(layout?.effective_orientation || output.effective_orientation || "horizontal"),
+        bbox: layout?.bbox && typeof layout.bbox === "object" ? layout.bbox : output.bbox,
+        bound_target_ids: Array.isArray(layout?.bound_target_ids)
+          ? layout.bound_target_ids
+          : output.bound_target_ids,
+      });
+      continue;
+    }
+    rows.push(buildMissingOutputRow(layout, pageId));
+  }
+
+  for (const [layoutId, output] of normalizedOutputsByLayoutId.entries()) {
+    if (seenLayoutIds.has(layoutId)) {
+      continue;
+    }
+    rows.push(output);
+  }
+
+  rows.sort((a, b) => {
+    const readingOrderDiff = Number(a.reading_order) - Number(b.reading_order);
+    if (readingOrderDiff !== 0) {
+      return readingOrderDiff;
+    }
+    return Number(a.layout_id) - Number(b.layout_id);
+  });
+  return rows;
+}
+
 const STRUCTURED_TABLE_ALLOWED_TAGS = new Set([
   "table",
   "caption",

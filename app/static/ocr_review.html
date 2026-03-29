@@ -1065,9 +1065,20 @@
         box-shadow: 0 0 0 1px rgba(176, 83, 70, 0.2);
       }
 
+      .recon-item.ocr-missing {
+        border-color: #b18034;
+        box-shadow: 0 0 0 1px rgba(177, 128, 52, 0.2);
+      }
+
       .recon-item-content.ocr-failed {
         color: #7a2b22;
         background: rgba(231, 197, 188, 0.38);
+        font-style: italic;
+      }
+
+      .recon-item-content.ocr-missing {
+        color: #6f4b12;
+        background: rgba(238, 216, 176, 0.42);
         font-style: italic;
       }
 
@@ -1307,6 +1318,12 @@
         border-color: #b05346;
         color: #7a2b22;
         background: rgba(255, 240, 235, 0.86);
+      }
+
+      .box-label.ocr-missing {
+        border-color: #b18034;
+        color: #6f4b12;
+        background: rgba(252, 245, 224, 0.92);
       }
 
       .recon-restore-btn {

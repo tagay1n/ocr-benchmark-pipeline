@@ -16,6 +16,7 @@ import {
   hasLocalDraftForLayout,
   hasRaisedInlineMarkdownTag,
   isAllowedStructuredTableTag,
+  expectedOutputFormatForLayoutClass,
   isRectOnscreen,
   isLineReviewRequiredOutput,
   isReconstructedRestoreDisabled,
@@ -36,6 +37,7 @@ import {
   resolveOutputEffectiveOrientation,
   resolveViewportScrollSyncUpdate,
   resolveEditorDrawerLayout,
+  mergeLayoutsWithOcrOutputs,
   pruneDraftReviewStateForLayouts,
   sanitizeStructuredTableAttribute,
   tokenBoundsAtOffset,
@@ -173,6 +175,62 @@ test("isLineSyncEnabledOutputFormat enables line sync only for markdown outputs"
   assert.equal(isLineSyncEnabledOutputFormat("latex"), false);
   assert.equal(isLineSyncEnabledOutputFormat("skip"), false);
   assert.equal(isLineSyncEnabledOutputFormat(""), false);
+});
+
+test("expectedOutputFormatForLayoutClass resolves class-specific output formats", () => {
+  assert.equal(expectedOutputFormatForLayoutClass("table"), "html");
+  assert.equal(expectedOutputFormatForLayoutClass("formula"), "latex");
+  assert.equal(expectedOutputFormatForLayoutClass("picture"), "skip");
+  assert.equal(expectedOutputFormatForLayoutClass("section_header"), "markdown");
+  assert.equal(expectedOutputFormatForLayoutClass("unknown_custom"), "markdown");
+});
+
+test("mergeLayoutsWithOcrOutputs returns placeholders for layouts without OCR output", () => {
+  const rows = mergeLayoutsWithOcrOutputs({
+    pageId: 37,
+    layouts: [
+      {
+        id: 101,
+        page_id: 37,
+        class_name: "text",
+        reading_order: 2,
+        orientation: "horizontal",
+        effective_orientation: "horizontal",
+        bbox: { x1: 0.1, y1: 0.2, x2: 0.4, y2: 0.3 },
+      },
+      {
+        id: 102,
+        page_id: 37,
+        class_name: "table",
+        reading_order: 3,
+        orientation: "horizontal",
+        effective_orientation: "horizontal",
+        bbox: { x1: 0.2, y1: 0.4, x2: 0.8, y2: 0.7 },
+      },
+    ],
+    outputs: [
+      {
+        layout_id: 101,
+        page_id: 37,
+        class_name: "text",
+        output_format: "markdown",
+        content: "Body text",
+        extraction_status: "ok",
+        reading_order: 2,
+        orientation: "horizontal",
+        effective_orientation: "horizontal",
+        bbox: { x1: 0.1, y1: 0.2, x2: 0.4, y2: 0.3 },
+      },
+    ],
+  });
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].layout_id, 101);
+  assert.equal(rows[0].extraction_status, "ok");
+  assert.equal(rows[1].layout_id, 102);
+  assert.equal(rows[1].extraction_status, "missing");
+  assert.equal(rows[1].output_format, "html");
+  assert.equal(rows[1].error_message, "OCR output is missing for this layout.");
 });
 
 test("isAllowedStructuredTableTag keeps native table structure tags and blocks unsafe tags", () => {
