@@ -176,6 +176,18 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Keep `ә` (`U+04D9`), not Latin `a` (`U+0061`).
   - Do not replace Cyrillic `А́` (`U+0410` + `U+0301`) with Latin `Á` (`U+00C1`) or Latin `Á` (`U+0041` + `U+0301`).
 
+- Header hierarchy policy:
+  - Default all extracted headers to level 4 (`#### `).
+  - If page structure clearly shows hierarchy, adjust header levels.
+  - Use fewer `#` for higher-level headers: `###` for higher, `##` for top-level on the page.
+  - Keep `####` for lower/subordinate headers when they are visually less prominent.
+  - Keep header levels consistent within the same page/document section.
+
+- Header hierarchy example:
+  - Top header: `## Chapter title`
+  - Subheader: `### Section title`
+  - Lower subheader: `#### Subsection title`
+
 ## Documentation Policy
 
 This repository keeps active project documentation in only two files:
