@@ -1772,6 +1772,25 @@ class PipelineStagesTests(unittest.TestCase):
             arrow_pixel = pixels.getpixel((arrow_x, arrow_y))
             self.assertNotEqual(arrow_pixel, (255, 255, 255))
 
+    def test_control_render_last_line_avoids_overstretch(self) -> None:
+        try:
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            self.skipTest("Pillow is required for final export tests.")
+
+        font = final_export._load_font(14)
+        plans = final_export._line_fit_plans_for_lines(
+            lines=["AAAA AAAA AAAA", "AA"],
+            font=font,
+            output_format="markdown",
+            target_width=240,
+        )
+        self.assertEqual(len(plans), 2)
+        self.assertGreaterEqual(float(plans[0]["horizontal_scale"]), 1.0)
+        self.assertLessEqual(float(plans[1]["horizontal_scale"]), float(plans[0]["horizontal_scale"]))
+        self.assertAlmostEqual(float(plans[1]["word_spacing"]), float(plans[0]["word_spacing"]), places=6)
+        self.assertAlmostEqual(float(plans[1]["letter_spacing"]), float(plans[0]["letter_spacing"]), places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

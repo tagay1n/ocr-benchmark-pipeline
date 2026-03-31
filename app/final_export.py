@@ -356,28 +356,17 @@ def _render_line_image(
     return image
 
 
-def _draw_fitted_line_on_canvas(
+def _fit_plan_for_single_line(
     *,
-    canvas: Any,
     line: str,
     font: Any,
     output_format: str | None,
-    target_left: int,
-    target_top: int,
     target_width: int,
-    target_height: int,
-) -> None:
-    try:
-        from PIL import Image
-    except ImportError as error:
-        raise ValueError("Pillow is required for final export.") from error
-
+    max_word_spacing: float = 3.5,
+    max_letter_spacing: float = 0.8,
+) -> dict[str, float]:
     safe_target_width = max(1, int(target_width))
-    safe_target_height = max(1, int(target_height))
     text = str(line or "")
-    if not text:
-        return
-
     normalized_format = str(output_format or "").strip().lower()
     has_combining_marks = _contains_combining_marks(text)
 
@@ -396,7 +385,7 @@ def _draw_fitted_line_on_canvas(
             gap = safe_target_width - measured_base
             gain_threshold = safe_target_width * 0.01
             if gap > gain_threshold:
-                word_spacing = min(3.5, gap / spaces_count)
+                word_spacing = min(float(max_word_spacing), gap / spaces_count)
 
         measured_after_word_spacing = _line_width_with_spacing(
             line=text,
@@ -409,7 +398,7 @@ def _draw_fitted_line_on_canvas(
             gap = safe_target_width - measured_after_word_spacing
             gain_threshold = safe_target_width * 0.004
             if gap > gain_threshold:
-                letter_spacing = min(0.8, gap / max(1, glyphs_count - 1))
+                letter_spacing = min(float(max_letter_spacing), gap / max(1, glyphs_count - 1))
 
     measured = _line_width_with_spacing(
         line=text,
@@ -423,6 +412,128 @@ def _draw_fitted_line_on_canvas(
         if normalized_format == "markdown" and has_combining_marks:
             horizontal_scale = min(1.0, horizontal_scale)
         horizontal_scale = max(0.18, min(8.0, horizontal_scale))
+    return {
+        "word_spacing": float(max(0.0, word_spacing)),
+        "letter_spacing": float(max(0.0, letter_spacing)),
+        "horizontal_scale": float(max(0.18, min(8.0, horizontal_scale))),
+    }
+
+
+def _median(values: list[float], fallback: float = 0.0) -> float:
+    sorted_values = sorted(
+        [
+            float(value)
+            for value in values
+            if isinstance(value, (int, float)) and math.isfinite(float(value))
+        ]
+    )
+    if not sorted_values:
+        return float(fallback)
+    mid = len(sorted_values) // 2
+    if len(sorted_values) % 2 == 1:
+        return float(sorted_values[mid])
+    return float((sorted_values[mid - 1] + sorted_values[mid]) / 2.0)
+
+
+def _line_fit_plans_for_lines(
+    *,
+    lines: list[str],
+    font: Any,
+    output_format: str | None,
+    target_width: int,
+) -> list[dict[str, float]]:
+    safe_lines = [str(line or "") for line in list(lines)]
+    if not safe_lines:
+        return []
+    normalized_format = str(output_format or "").strip().lower()
+    is_multiline = len(safe_lines) > 1
+    max_word_spacing = 6.0 if (normalized_format == "markdown" and is_multiline) else 3.5
+    max_letter_spacing = 1.2 if (normalized_format == "markdown" and is_multiline) else 0.8
+    plans = [
+        _fit_plan_for_single_line(
+            line=line,
+            font=font,
+            output_format=normalized_format,
+            target_width=target_width,
+            max_word_spacing=max_word_spacing,
+            max_letter_spacing=max_letter_spacing,
+        )
+        for line in safe_lines
+    ]
+    if normalized_format != "markdown" or len(plans) <= 1:
+        return plans
+
+    non_last = plans[:-1]
+    last_idx = len(plans) - 1
+    last_line = safe_lines[last_idx]
+    has_combining_marks = _contains_combining_marks(last_line)
+    median_word_spacing = 0.0 if has_combining_marks else max(0.0, _median([p["word_spacing"] for p in non_last], 0.0))
+    median_letter_spacing = 0.0 if has_combining_marks else max(
+        0.0,
+        _median([p["letter_spacing"] for p in non_last], 0.0),
+    )
+    measured_last = _line_width_with_spacing(
+        line=last_line,
+        font=font,
+        word_spacing=median_word_spacing,
+        letter_spacing=median_letter_spacing,
+    )
+    if not math.isfinite(measured_last) or measured_last <= 0:
+        return plans
+
+    fit_scale = max(0.18, min(8.0, float(max(1, target_width)) / measured_last))
+    if fit_scale < 1:
+        applied_scale = fit_scale
+    elif has_combining_marks:
+        applied_scale = 1.0
+    else:
+        median_scale = max(0.18, _median([p["horizontal_scale"] for p in non_last], 1.0))
+        applied_scale = max(1.0, min(median_scale, fit_scale))
+
+    if not last_line.strip() or not math.isfinite(applied_scale) or applied_scale <= 0:
+        return plans
+
+    plans[last_idx] = {
+        "word_spacing": float(median_word_spacing),
+        "letter_spacing": float(median_letter_spacing),
+        "horizontal_scale": float(max(0.18, min(8.0, applied_scale))),
+    }
+    return plans
+
+
+def _draw_fitted_line_on_canvas(
+    *,
+    canvas: Any,
+    line: str,
+    font: Any,
+    output_format: str | None,
+    target_left: int,
+    target_top: int,
+    target_width: int,
+    target_height: int,
+    fit_plan: dict[str, float] | None = None,
+) -> None:
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise ValueError("Pillow is required for final export.") from error
+
+    safe_target_width = max(1, int(target_width))
+    safe_target_height = max(1, int(target_height))
+    text = str(line or "")
+    if not text:
+        return
+
+    effective_fit_plan = fit_plan or _fit_plan_for_single_line(
+        line=text,
+        font=font,
+        output_format=output_format,
+        target_width=safe_target_width,
+    )
+    word_spacing = float(effective_fit_plan.get("word_spacing", 0.0))
+    letter_spacing = float(effective_fit_plan.get("letter_spacing", 0.0))
+    horizontal_scale = float(effective_fit_plan.get("horizontal_scale", 1.0))
+    horizontal_scale = max(0.18, min(8.0, horizontal_scale))
 
     line_image = _render_line_image(
         line=text,
@@ -643,10 +754,17 @@ def _draw_reconstructed_canvas(
         )
         max_visible_lines = max(1, available_height // max(1, line_height))
         visible_lines = wrapped_lines[:max_visible_lines]
+        line_fit_plans = _line_fit_plans_for_lines(
+            lines=visible_lines,
+            font=font,
+            output_format=output_format,
+            target_width=available_width,
+        )
         for line_index, line in enumerate(visible_lines):
             y = content_box_y1 + (line_index * line_height)
             if y >= content_box_y2:
                 break
+            line_fit_plan = line_fit_plans[line_index] if line_index < len(line_fit_plans) else None
             _draw_fitted_line_on_canvas(
                 canvas=canvas,
                 line=line,
@@ -656,6 +774,7 @@ def _draw_reconstructed_canvas(
                 target_top=y,
                 target_width=available_width,
                 target_height=line_height,
+                fit_plan=line_fit_plan,
             )
 
     _draw_caption_binding_arrows(draw, items=ordered_items, width=width, height=height)
