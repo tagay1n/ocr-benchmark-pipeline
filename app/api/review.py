@@ -452,6 +452,7 @@ def run_final_export(payload: FinalExportRequest) -> dict[str, object]:
         )
         raise _http_exception_from_value_error(error) from error
 
+    dataset_file = result.get("dataset_file", result["metadata_file"])
     emit_lifecycle_completed(
         stage=STAGE_FINALIZATION,
         event_type=EVENT_EXPORT_COMPLETED,
@@ -461,6 +462,7 @@ def run_final_export(payload: FinalExportRequest) -> dict[str, object]:
         ),
         data={
             "export_dir": result["export_dir"],
+            "dataset_file": dataset_file,
             "metadata_file": result["metadata_file"],
             "page_count": result["page_count"],
             "image_count": result["image_count"],

@@ -1647,7 +1647,11 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(result["image_count"], 1)
         self.assertEqual(result["reconstructed_count"], 1)
 
+        self.assertIn("dataset_file", result)
         metadata_path = Path(result["metadata_file"])
+        dataset_path = Path(result["dataset_file"])
+        self.assertEqual(metadata_path, dataset_path)
+        self.assertEqual(dataset_path.name, "dataset.jsonl")
         self.assertTrue(metadata_path.exists())
         rows = [
             json.loads(line)
@@ -1657,10 +1661,14 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(int(row["page_id"]), reviewed_page_id)
-        self.assertEqual(row["file_name"], "images/export/reviewed.png")
-        self.assertEqual(row["reconstructed_file_name"], "reconstructed/export/reviewed.png")
+        self.assertEqual(row["image"], "images/export/reviewed.png")
+        self.assertEqual(row["control"], "control/export/reviewed.png")
         self.assertEqual(int(row["width"]), 16)
         self.assertEqual(int(row["height"]), 12)
+        control_path = Path(result["export_dir"]) / str(row["control"])
+        self.assertTrue(control_path.exists())
+        with Image.open(control_path) as control_image:
+            self.assertEqual(control_image.size, (32, 12))
 
         items = list(row["items"])
         self.assertEqual([int(item["order"]) for item in items], [1, 2, 3])
