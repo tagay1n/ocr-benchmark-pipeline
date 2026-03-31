@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from html import unescape
+from html import escape, unescape
+from html.parser import HTMLParser
 from io import BytesIO
 import json
 import math
 from pathlib import Path
 import re
 import shutil
+import subprocess
+import tempfile
 from typing import Any
 import unicodedata
 
@@ -42,6 +45,8 @@ _FALLBACK_COLORS: tuple[tuple[int, int, int], ...] = (
 )
 _CAPTION_TARGET_CLASSES = frozenset({"table", "picture", "formula"})
 _SOURCE_CROP_CLASSES = frozenset({"table", "picture"})
+_HTML_TABLE_ALLOWED_TAGS = frozenset({"table", "thead", "tbody", "tr", "th", "td", "br"})
+_HTML_TABLE_ALLOWED_ATTRIBUTES = frozenset({"rowspan", "colspan"})
 
 
 def _timestamp_folder_name() -> str:
@@ -265,6 +270,207 @@ def _content_text_for_render(item: dict[str, Any]) -> str:
     if len(text) > 4000:
         text = text[:4000]
     return text
+
+
+class _StructuredTableHtmlSanitizer(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: list[str] = []
+        self._stack: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        normalized = str(tag or "").strip().lower()
+        if normalized not in _HTML_TABLE_ALLOWED_TAGS:
+            return
+        if normalized == "br":
+            self._parts.append("<br>")
+            return
+        safe_attrs: list[str] = []
+        for name_raw, value_raw in attrs:
+            name = str(name_raw or "").strip().lower()
+            if name not in _HTML_TABLE_ALLOWED_ATTRIBUTES:
+                continue
+            value = "" if value_raw is None else str(value_raw).strip()
+            if not value:
+                continue
+            if not value.isdigit():
+                continue
+            numeric_value = max(1, min(200, int(value)))
+            safe_attrs.append(f' {name}="{numeric_value}"')
+        self._parts.append(f"<{normalized}{''.join(safe_attrs)}>")
+        self._stack.append(normalized)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        normalized = str(tag or "").strip().lower()
+        if normalized == "br" or normalized not in _HTML_TABLE_ALLOWED_TAGS:
+            return
+        if not self._stack:
+            return
+        for index in range(len(self._stack) - 1, -1, -1):
+            if self._stack[index] != normalized:
+                continue
+            for close_tag in reversed(self._stack[index:]):
+                self._parts.append(f"</{close_tag}>")
+            self._stack = self._stack[:index]
+            return
+
+    def handle_data(self, data: str) -> None:
+        if not data:
+            return
+        self._parts.append(escape(data))
+
+    def html(self) -> str:
+        while self._stack:
+            self._parts.append(f"</{self._stack.pop()}>")
+        return "".join(self._parts)
+
+
+def _extract_first_table_fragment(raw_html: str) -> str:
+    text = str(raw_html or "")
+    if not text:
+        return ""
+    match = re.search(r"<table\b[\s\S]*?</table>", text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return str(match.group(0))
+
+
+def _sanitize_table_html(raw_html: str) -> str:
+    fragment = _extract_first_table_fragment(raw_html)
+    if not fragment:
+        return ""
+    parser = _StructuredTableHtmlSanitizer()
+    try:
+        parser.feed(fragment)
+        parser.close()
+    except Exception:
+        return ""
+    safe_html = parser.html().strip()
+    if "<table" not in safe_html.lower() or "</table>" not in safe_html.lower():
+        return ""
+    return safe_html
+
+
+def _find_headless_browser_binary() -> str:
+    for candidate in ("google-chrome", "chromium", "chromium-browser"):
+        path = shutil.which(candidate)
+        if path:
+            return path
+    return ""
+
+
+def _render_html_document_via_browser(
+    *,
+    document_html: str,
+    target_width: int,
+    target_height: int,
+) -> Any | None:
+    browser_binary = _find_headless_browser_binary()
+    if not browser_binary:
+        return None
+    safe_width = max(16, int(target_width))
+    safe_height = max(16, int(target_height))
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+
+    with tempfile.TemporaryDirectory(prefix="ocr-table-render-") as temp_dir_raw:
+        temp_dir = Path(temp_dir_raw)
+        html_path = temp_dir / "table.html"
+        screenshot_path = temp_dir / "table.png"
+        html_path.write_text(str(document_html or ""), encoding="utf-8")
+        command = [
+            browser_binary,
+            "--headless",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-extensions",
+            "--disable-software-rasterizer",
+            "--disable-crash-reporter",
+            "--disable-breakpad",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--no-sandbox",
+            "--force-device-scale-factor=1",
+            "--virtual-time-budget=2500",
+            f"--window-size={safe_width},{safe_height}",
+            f"--screenshot={str(screenshot_path)}",
+            str(html_path.resolve().as_uri()),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=25,
+            )
+        except Exception:
+            return None
+        if completed.returncode != 0 or not screenshot_path.exists():
+            return None
+        try:
+            with Image.open(screenshot_path) as image:
+                rendered = image.convert("RGBA")
+        except Exception:
+            return None
+        if rendered.size != (safe_width, safe_height):
+            rendered = rendered.resize((safe_width, safe_height), Image.Resampling.LANCZOS)
+        return rendered
+
+
+def _render_html_table_image(
+    *,
+    html_source: str,
+    target_width: int,
+    target_height: int,
+) -> Any | None:
+    safe_table_html = _sanitize_table_html(html_source)
+    if not safe_table_html:
+        return None
+    safe_width = max(8, int(target_width))
+    safe_height = max(8, int(target_height))
+    document_html = (
+        "<!doctype html>"
+        "<html><head><meta charset='utf-8'>"
+        "<style>"
+        f"html, body {{ margin:0; padding:0; width:{safe_width}px; height:{safe_height}px; background:#fff; }}"
+        "#root { width:100%; height:100%; overflow:hidden; display:flex; align-items:stretch; justify-content:stretch; }"
+        "#content { width:100%; height:100%; font-family:'DejaVu Sans','Arial','Liberation Sans',sans-serif; "
+        "line-height:1.1; color:#2d3230; }"
+        "#content table { width:100%; border-collapse:collapse; margin:0 auto; table-layout:auto; "
+        "border:2px solid #9f9686; }"
+        "#content th, #content td { border:1.5px solid #9f9686; padding:2px 4px; font-size:inherit; text-align:left; "
+        "vertical-align:top; white-space:normal; word-break:break-word; overflow-wrap:anywhere; }"
+        "</style></head><body>"
+        f"<div id='root'><div id='content'>{safe_table_html}</div></div>"
+        "<script>"
+        "(function(){"
+        "const root=document.getElementById('root');"
+        "const content=document.getElementById('content');"
+        "if(!root||!content){return;}"
+        "const fits=()=>content.scrollWidth<=root.clientWidth+1&&content.scrollHeight<=root.clientHeight+1;"
+        "let low=6,high=72,best=6;"
+        "while(low<=high){"
+        "const mid=(low+high)>>1;"
+        "content.style.fontSize=String(mid)+'px';"
+        "if(fits()){best=mid;low=mid+1;}else{high=mid-1;}"
+        "}"
+        "content.style.fontSize=String(best)+'px';"
+        "})();"
+        "</script>"
+        "</body></html>"
+    )
+    return _render_html_document_via_browser(
+        document_html=document_html,
+        target_width=safe_width,
+        target_height=safe_height,
+    )
 
 
 def _formula_render_candidates(raw_value: str) -> list[str]:
@@ -824,10 +1030,6 @@ def _draw_reconstructed_canvas(
         if normalized_class_name == "picture":
             continue
 
-        text = _content_text_for_render(item)
-        if not text:
-            continue
-
         content_box_x1 = min(width - 1, max(0, x1 + 2))
         content_box_y1 = min(height - 1, max(0, y1 + 2))
         content_box_x2 = max(content_box_x1 + 1, min(width, x2 - 2))
@@ -835,6 +1037,22 @@ def _draw_reconstructed_canvas(
         available_width = max(1, content_box_x2 - content_box_x1)
         available_height = max(1, content_box_y2 - content_box_y1)
         output_format = None if item.get("content_format") is None else str(item["content_format"])
+        normalized_output_format = str(output_format or "").strip().lower()
+        raw_content = "" if item.get("content") is None else str(item.get("content"))
+
+        if normalized_class_name == "table" and normalized_output_format == "html":
+            table_image = _render_html_table_image(
+                html_source=raw_content,
+                target_width=available_width,
+                target_height=available_height,
+            )
+            if table_image is not None:
+                canvas.alpha_composite(table_image, (content_box_x1, content_box_y1))
+                continue
+
+        text = _content_text_for_render(item)
+        if not text:
+            continue
 
         if normalized_class_name == "formula":
             formula_image = _render_formula_latex_image(text)
@@ -848,7 +1066,6 @@ def _draw_reconstructed_canvas(
                     height=available_height,
                 )
                 continue
-
         visible_lines = _control_render_lines(text)
         line_count = max(1, len(visible_lines))
         slot_height = max(1.0, available_height / line_count)

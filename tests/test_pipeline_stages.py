@@ -1812,6 +1812,57 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertGreater(int(image.width), 0)
         self.assertGreater(int(image.height), 0)
 
+    def test_control_render_uses_html_table_image_when_available(self) -> None:
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is required for final export tests.")
+
+        source = Image.new("RGB", (120, 90), (230, 230, 230))
+        table_overlay = Image.new("RGBA", (80, 40), (18, 66, 120, 255))
+        items = [
+            {
+                "order": 1,
+                "layout_id": 1,
+                "class_name": "table",
+                "bbox": {"x1": 0.1, "y1": 0.2, "x2": 0.9, "y2": 0.8},
+                "content_format": "html",
+                "content": "<table><tr><td>A</td><td>B</td></tr></table>",
+            }
+        ]
+
+        with patch.object(final_export, "_render_html_table_image", return_value=table_overlay) as render_mock:
+            rendered = final_export._draw_reconstructed_canvas(
+                width=120,
+                height=90,
+                items=items,
+                source_image=source,
+            )
+
+        render_mock.assert_called_once()
+        sample = rendered.convert("RGB").getpixel((60, 45))
+        self.assertEqual(sample, (18, 66, 120))
+
+    def test_render_html_table_image_uses_solid_table_borders(self) -> None:
+        captured_document: dict[str, object] = {}
+
+        def fake_browser_render(*, document_html: str, target_width: int, target_height: int):
+            captured_document["html"] = document_html
+            captured_document["width"] = target_width
+            captured_document["height"] = target_height
+            return None
+
+        with patch.object(final_export, "_render_html_document_via_browser", side_effect=fake_browser_render):
+            final_export._render_html_table_image(
+                html_source="<table><tr><td>A</td></tr></table>",
+                target_width=240,
+                target_height=120,
+            )
+
+        html = str(captured_document.get("html") or "")
+        self.assertIn("border:2px solid #9f9686", html)
+        self.assertIn("border:1.5px solid #9f9686", html)
+
 
 if __name__ == "__main__":
     unittest.main()
