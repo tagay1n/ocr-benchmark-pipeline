@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from io import BytesIO
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -327,6 +328,79 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(warning["normalized_token"], "А")
         self.assertEqual(warning["replacements"][0]["from"], "Á")
         self.assertEqual(warning["replacements"][0]["to"], "А")
+
+    def test_crop_layout_png_bytes_rotates_vertical_clip_when_requested(self) -> None:
+        try:
+            from PIL import Image
+        except ImportError:
+            self.skipTest("Pillow is required for crop rotation tests.")
+
+        image_path = self.test_settings.source_dir / "ocr" / "rotate-source.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        image = Image.new("RGB", (2, 3))
+        image.putdata(
+            [
+                (255, 0, 0),   # (0,0)
+                (0, 255, 0),   # (1,0)
+                (0, 0, 255),   # (0,1)
+                (255, 255, 0), # (1,1)
+                (0, 255, 255), # (0,2)
+                (255, 0, 255), # (1,2)
+            ]
+        )
+        image.save(image_path, format="PNG")
+
+        bbox = {"x1": 0.0, "y1": 0.0, "x2": 1.0, "y2": 1.0}
+        raw_bytes = ocr_extract._crop_layout_png_bytes(image_path, bbox)
+        rotated_bytes = ocr_extract._crop_layout_png_bytes(
+            image_path,
+            bbox,
+            rotate_for_vertical=True,
+        )
+
+        with Image.open(BytesIO(raw_bytes)) as raw_image, Image.open(BytesIO(rotated_bytes)) as rotated_image:
+            self.assertEqual(raw_image.size, (2, 3))
+            self.assertEqual(rotated_image.size, (3, 2))
+            self.assertEqual(raw_image.getpixel((0, 0)), (255, 0, 0))
+            self.assertEqual(rotated_image.getpixel((0, 0)), (0, 255, 255))
+            self.assertEqual(rotated_image.getpixel((2, 0)), (255, 0, 0))
+
+    def test_extract_ocr_for_page_rotates_vertical_markdown_clips_before_gemini(self) -> None:
+        self._write_image("ocr/vertical-rotate-flag.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                orientation="vertical",
+                bbox=main.BBoxPayload(x1=0.1, y1=0.05, x2=0.2, y2=0.9),
+            ),
+        )
+        main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=2,
+                orientation="horizontal",
+                bbox=main.BBoxPayload(x1=0.3, y1=0.1, x2=0.9, y2=0.25),
+            ),
+        )
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes") as crop_mock, patch.object(
+            ocr_extract,
+            "_gemini_generate_content",
+            side_effect=["vertical-text", "horizontal-text"],
+        ):
+            result = ocr_extract.extract_ocr_for_page(page_id)
+
+        self.assertEqual(result["extracted_count"], 2)
+        self.assertEqual(crop_mock.call_count, 2)
+        first_kwargs = crop_mock.call_args_list[0].kwargs
+        second_kwargs = crop_mock.call_args_list[1].kwargs
+        self.assertTrue(bool(first_kwargs.get("rotate_for_vertical")))
+        self.assertFalse(bool(second_kwargs.get("rotate_for_vertical")))
 
     def test_extract_ocr_for_page_rejects_unknown_layout_ids(self) -> None:
         self._write_image("ocr/a.png")

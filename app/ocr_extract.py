@@ -11,6 +11,7 @@ from sqlalchemy import delete, select
 from .config import settings
 from .db import get_session
 from .layout_classes import normalize_class_name
+from .layout_orientation import is_effective_vertical
 from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 from .models import Layout, OcrOutput, Page
 from .ocr_content_postprocess import (
@@ -148,7 +149,12 @@ def _prompt_for_layout(layout: dict[str, Any], *, prompt_template: str) -> tuple
     return (rendered_prompt.prompt, rendered_prompt.output_format)
 
 
-def _crop_layout_png_bytes(image_path: Path, bbox: dict[str, float]) -> bytes:
+def _crop_layout_png_bytes(
+    image_path: Path,
+    bbox: dict[str, float],
+    *,
+    rotate_for_vertical: bool = False,
+) -> bytes:
     try:
         from PIL import Image
     except ImportError as error:
@@ -166,6 +172,8 @@ def _crop_layout_png_bytes(image_path: Path, bbox: dict[str, float]) -> bytes:
         bottom = min(height, max(top + 1, int(round(y2 * height))))
 
         clip = image.crop((left, top, right, bottom))
+        if rotate_for_vertical:
+            clip = clip.rotate(-90, expand=True)
         output = BytesIO()
         clip.save(output, format="PNG")
         return output.getvalue()
@@ -205,6 +213,20 @@ def _fetch_page_layouts(page_id: int) -> list[dict[str, Any]]:
                 "y2": float(layout.y2),
             },
             "reading_order": int(layout.reading_order),
+            "orientation": str(getattr(layout, "orientation", "horizontal")),
+            "effective_orientation": (
+                "vertical"
+                if is_effective_vertical(
+                    orientation=str(getattr(layout, "orientation", "horizontal")),
+                    bbox={
+                        "x1": float(layout.x1),
+                        "y1": float(layout.y1),
+                        "x2": float(layout.x2),
+                        "y2": float(layout.y2),
+                    },
+                )
+                else "horizontal"
+            ),
         }
         for layout in layouts
     ]
@@ -345,7 +367,15 @@ def extract_ocr_for_page(
                 )
             continue
 
-        image_bytes = _crop_layout_png_bytes(image_path, layout["bbox"])
+        rotate_for_vertical = (
+            output_format == "markdown"
+            and str(layout.get("effective_orientation") or "").strip().lower() == "vertical"
+        )
+        image_bytes = _crop_layout_png_bytes(
+            image_path,
+            layout["bbox"],
+            rotate_for_vertical=rotate_for_vertical,
+        )
         last_error: str | None = None
         response_text = ""
         used_key = ""
