@@ -265,6 +265,12 @@ def _content_text_for_render(item: dict[str, Any]) -> str:
     return text
 
 
+def _control_render_lines(text: str) -> list[str]:
+    normalized = str(text or "").replace("\r\n", "\n")
+    lines = normalized.split("\n")
+    return lines if lines else [""]
+
+
 def _contains_combining_marks(value: str) -> bool:
     for char in str(value or ""):
         if unicodedata.combining(char):
@@ -721,15 +727,22 @@ def _draw_reconstructed_canvas(
         label_text = f"{order_label}. {_format_class_label(class_name)}"
         label_font = _load_font(10)
         label_width, label_height = _text_size(draw, label_text, label_font)
-        label_box_x2 = min(width - 1, x1 + label_width + 4)
-        label_box_y2 = min(height - 1, y1 + label_height + 4)
+        label_box_x1 = max(0, x1)
+        label_box_x2 = min(width - 1, label_box_x1 + label_width + 4)
+        label_box_y2 = max(0, y1 - 1)
+        label_box_y1 = max(0, label_box_y2 - (label_height + 4))
         draw.rectangle(
-            [(x1, y1), (label_box_x2, label_box_y2)],
+            [(label_box_x1, label_box_y1), (label_box_x2, label_box_y2)],
             fill=(255, 255, 255, 236),
             outline=(color[0], color[1], color[2], 180),
             width=1,
         )
-        draw.text((x1 + 2, y1 + 2), label_text, fill=(color[0], color[1], color[2], 255), font=label_font)
+        draw.text(
+            (label_box_x1 + 2, label_box_y1 + 2),
+            label_text,
+            fill=(color[0], color[1], color[2], 255),
+            font=label_font,
+        )
 
         if normalized_class_name == "picture":
             continue
@@ -745,15 +758,24 @@ def _draw_reconstructed_canvas(
         available_width = max(1, content_box_x2 - content_box_x1)
         available_height = max(1, content_box_y2 - content_box_y1)
         output_format = None if item.get("content_format") is None else str(item["content_format"])
-        font, wrapped_lines, line_height = _fit_wrapped_lines(
-            draw,
-            text,
-            output_format=output_format,
-            max_width=available_width,
-            max_height=available_height,
-        )
-        max_visible_lines = max(1, available_height // max(1, line_height))
-        visible_lines = wrapped_lines[:max_visible_lines]
+        visible_lines = _control_render_lines(text)
+        line_count = max(1, len(visible_lines))
+        slot_height = max(1.0, available_height / line_count)
+        line_height_ratio = _line_height_ratio_for_output_format(output_format)
+        max_font_size = max(2, min(72, int(round(available_height * 2.2))))
+        low_font = 2
+        high_font = max_font_size
+        best_font_size = low_font
+        while low_font <= high_font:
+            mid_font = (low_font + high_font) // 2
+            candidate_line_height = max(1.0, float(mid_font) * float(line_height_ratio))
+            if candidate_line_height <= slot_height + 0.5:
+                best_font_size = mid_font
+                low_font = mid_font + 1
+            else:
+                high_font = mid_font - 1
+
+        font = _load_font(best_font_size)
         line_fit_plans = _line_fit_plans_for_lines(
             lines=visible_lines,
             font=font,
@@ -761,9 +783,13 @@ def _draw_reconstructed_canvas(
             target_width=available_width,
         )
         for line_index, line in enumerate(visible_lines):
-            y = content_box_y1 + (line_index * line_height)
-            if y >= content_box_y2:
-                break
+            slot_top = content_box_y1 + int(round((line_index * available_height) / line_count))
+            if line_index >= line_count - 1:
+                slot_bottom = content_box_y2
+            else:
+                slot_bottom = content_box_y1 + int(round(((line_index + 1) * available_height) / line_count))
+            slot_top = max(content_box_y1, min(content_box_y2 - 1, slot_top))
+            slot_bottom = max(slot_top + 1, min(content_box_y2, slot_bottom))
             line_fit_plan = line_fit_plans[line_index] if line_index < len(line_fit_plans) else None
             _draw_fitted_line_on_canvas(
                 canvas=canvas,
@@ -771,9 +797,9 @@ def _draw_reconstructed_canvas(
                 font=font,
                 output_format=output_format,
                 target_left=content_box_x1,
-                target_top=y,
+                target_top=slot_top,
                 target_width=available_width,
-                target_height=line_height,
+                target_height=slot_bottom - slot_top,
                 fit_plan=line_fit_plan,
             )
 

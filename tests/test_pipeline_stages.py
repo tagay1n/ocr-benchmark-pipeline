@@ -1760,6 +1760,15 @@ class PipelineStagesTests(unittest.TestCase):
             pic_mid_y = int(round(((float(pic_bbox["y1"]) + float(pic_bbox["y2"])) / 2.0) * 120))
             pic_sample = pixels.getpixel((160 + max(0, min(159, pic_mid_x)), max(0, min(119, pic_mid_y))))
             self.assertEqual(pic_sample, (70, 90, 110))
+            pic_inside_top_left_x = int(round(float(pic_bbox["x1"]) * 160)) + 3
+            pic_inside_top_left_y = int(round(float(pic_bbox["y1"]) * 120)) + 3
+            pic_inside_top_left_sample = pixels.getpixel(
+                (
+                    160 + max(0, min(159, pic_inside_top_left_x)),
+                    max(0, min(119, pic_inside_top_left_y)),
+                )
+            )
+            self.assertEqual(pic_inside_top_left_sample, (70, 90, 110))
 
             # Caption binding arrow should be visible between caption and target.
             caption_rect = _rect_from_bbox(caption_item["bbox"])
@@ -1790,6 +1799,12 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertLessEqual(float(plans[1]["horizontal_scale"]), float(plans[0]["horizontal_scale"]))
         self.assertAlmostEqual(float(plans[1]["word_spacing"]), float(plans[0]["word_spacing"]), places=6)
         self.assertAlmostEqual(float(plans[1]["letter_spacing"]), float(plans[0]["letter_spacing"]), places=6)
+
+    def test_control_render_preserves_original_line_breaks_without_word_wrap(self) -> None:
+        lines = final_export._control_render_lines("alpha beta gamma")
+        self.assertEqual(lines, ["alpha beta gamma"])
+        lines_two = final_export._control_render_lines("alpha beta\ngamma")
+        self.assertEqual(lines_two, ["alpha beta", "gamma"])
 
 
 if __name__ == "__main__":
