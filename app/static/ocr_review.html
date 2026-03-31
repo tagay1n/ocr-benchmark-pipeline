@@ -15,6 +15,7 @@
         --accent: #0b7a75;
         --danger: #a52222;
         --border: #e0dccf;
+        --ocr-diacritic-font-family: "Noto Sans", "IBM Plex Sans", "Segoe UI", sans-serif;
       }
 
       * {
@@ -998,7 +999,7 @@
         display: inline-block;
         white-space: pre;
         transform-origin: top left;
-        font-family: "IBM Plex Sans", "Noto Sans", "Segoe UI", sans-serif;
+        font-family: var(--ocr-diacritic-font-family);
       }
 
       .recon-item-content.preserve-lines .recon-preserve-heading {
@@ -1490,7 +1491,7 @@
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 10px;
-        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        font-family: var(--ocr-diacritic-font-family);
         font-size: var(--expanded-editor-font-size);
         line-height: 1.45;
         resize: none;
@@ -1515,7 +1516,7 @@
       }
 
       .editor-cm .cm-scroller {
-        font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+        font-family: var(--ocr-diacritic-font-family);
         font-size: var(--expanded-editor-font-size);
         line-height: 1.45;
       }

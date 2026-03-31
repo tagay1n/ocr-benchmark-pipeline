@@ -203,6 +203,31 @@ test("ocr review HTML no longer hardcodes class color map", () => {
   assert.equal(moduleCode.includes("const CLASS_COLORS = {"), false);
 });
 
+test("ocr review toolbar preserves selection before markdown actions", () => {
+  const moduleCode = readModule("app/static/js/ocr_review_page.mjs");
+  assert.match(
+    moduleCode,
+    /editorActionStressMarkBtn\.addEventListener\("pointerdown",\s*\(event\)\s*=>\s*{\s*event\.preventDefault\(\);\s*}\);/m,
+  );
+});
+
+test("ocr review uses shared font stack for diacritics in reconstruction and editor", () => {
+  const html = readHtml("app/static/ocr_review.html");
+  assert.match(html, /--ocr-diacritic-font-family:/m);
+  assert.match(
+    html,
+    /\.recon-item-content\.preserve-lines \.recon-preserve-line-text\s*{[\s\S]*font-family:\s*var\(--ocr-diacritic-font-family\);/m,
+  );
+  assert.match(
+    html,
+    /\.editor-textarea\s*{[\s\S]*font-family:\s*var\(--ocr-diacritic-font-family\);/m,
+  );
+  assert.match(
+    html,
+    /\.editor-cm \.cm-scroller\s*{[\s\S]*font-family:\s*var\(--ocr-diacritic-font-family\);/m,
+  );
+});
+
 test("ocr review init picks first unapproved line for first pending bbox", () => {
   const moduleCode = readModule("app/static/js/ocr_review_page.mjs");
   assert.match(

@@ -6124,6 +6124,24 @@
       expandedEditorCloseBtn.addEventListener("click", () => {
         closeExpandedEditor();
       });
+      editorActionBoldBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+      });
+      editorActionItalicBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+      });
+      editorActionStressMarkBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+      });
+      editorActionInlineFormulaBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+      });
+      editorActionListItemBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+      });
+      editorActionOrderedListItemBtn.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+      });
       editorActionBoldBtn.addEventListener("click", () => {
         applyMarkdownAction("bold");
       });
