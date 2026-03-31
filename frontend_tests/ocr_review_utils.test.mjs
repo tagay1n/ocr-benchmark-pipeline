@@ -6,6 +6,7 @@ import {
   applyLinePrefixMarkdown,
   containsCombiningMarks,
   computeLineReviewDisplayGeometry,
+  computeLineReviewSourceRenderPlan,
   computeReconstructedImageCropStyle,
   computeViewportAutoCenterTarget,
   computeEditorToolbarState,
@@ -113,6 +114,110 @@ test("computeLineReviewDisplayGeometry adapts width by crop aspect and clamps to
   assert.equal(geometry.heightPx, 62);
   assert.equal(geometry.widthRatio, 0.12);
   assert.equal(geometry.leftRatio, 0.44);
+});
+
+test("computeLineReviewDisplayGeometry uses rotated crop aspect for vertical line review lanes", () => {
+  const baseParams = {
+    bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.9 },
+    crop: { cropWidth: 0.1, cropHeight: 0.8 },
+    reelWidth: 1000,
+    imageWidth: 1000,
+    imageHeight: 2000,
+    targetHeightPx: 44,
+    minHeightPx: 30,
+    maxHeightPx: 62,
+    minWidthPx: 120,
+    minWidthRatioFallback: 0.08,
+    maxWidthRatio: 0.94,
+  };
+  const horizontal = computeLineReviewDisplayGeometry(baseParams);
+  const vertical = computeLineReviewDisplayGeometry({
+    ...baseParams,
+    rotateForVertical: true,
+  });
+
+  assert.equal(horizontal.heightPx, 62);
+  assert.equal(horizontal.widthRatio, 0.12);
+  assert.equal(vertical.heightPx, 44);
+  assert.equal(vertical.widthRatio, 0.704);
+  assert.equal(vertical.leftRatio, 0.14800000000000002);
+});
+
+test("computeLineReviewSourceRenderPlan keeps horizontal crop orientation unchanged", () => {
+  const plan = computeLineReviewSourceRenderPlan({
+    crop: {
+      cropLeft: 0.1,
+      cropTop: 0.2,
+      cropWidth: 0.3,
+      cropHeight: 0.4,
+    },
+    imageWidth: 2000,
+    imageHeight: 1000,
+    rotateForVertical: false,
+  });
+  assert.deepEqual(plan, {
+    sourceX: 200,
+    sourceY: 200,
+    sourceWidth: 600,
+    sourceHeight: 400,
+    canvasWidth: 600,
+    canvasHeight: 400,
+    quarterTurnsClockwise: 0,
+  });
+});
+
+test("computeLineReviewSourceRenderPlan rotates vertical crop by 90 degrees for line review", () => {
+  const plan = computeLineReviewSourceRenderPlan({
+    crop: {
+      cropLeft: 0.2,
+      cropTop: 0.1,
+      cropWidth: 0.1,
+      cropHeight: 0.5,
+    },
+    imageWidth: 1000,
+    imageHeight: 1200,
+    rotateForVertical: true,
+  });
+  assert.deepEqual(plan, {
+    sourceX: 200,
+    sourceY: 120,
+    sourceWidth: 100,
+    sourceHeight: 600,
+    canvasWidth: 600,
+    canvasHeight: 100,
+    quarterTurnsClockwise: 1,
+  });
+});
+
+test("computeLineReviewSourceRenderPlan returns null for invalid crop/image sizes", () => {
+  assert.equal(
+    computeLineReviewSourceRenderPlan({
+      crop: {
+        cropLeft: 0.1,
+        cropTop: 0.2,
+        cropWidth: 0,
+        cropHeight: 0.4,
+      },
+      imageWidth: 1000,
+      imageHeight: 1200,
+      rotateForVertical: false,
+    }),
+    null,
+  );
+  assert.equal(
+    computeLineReviewSourceRenderPlan({
+      crop: {
+        cropLeft: 0.1,
+        cropTop: 0.2,
+        cropWidth: 0.3,
+        cropHeight: 0.4,
+      },
+      imageWidth: 0,
+      imageHeight: 1200,
+      rotateForVertical: false,
+    }),
+    null,
+  );
 });
 
 test("resolveStretchableLineText prefers rendered text over raw markdown/html source", () => {

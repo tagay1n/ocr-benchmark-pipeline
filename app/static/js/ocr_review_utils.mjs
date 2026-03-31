@@ -1168,6 +1168,7 @@ export function computeLineReviewDisplayGeometry({
   reelWidth = 0,
   imageWidth = 0,
   imageHeight = 0,
+  rotateForVertical = false,
   targetHeightPx = 44,
   minHeightPx = 30,
   maxHeightPx = 62,
@@ -1196,8 +1197,12 @@ export function computeLineReviewDisplayGeometry({
     cropWidth > 0 &&
     cropHeight > 0
   ) {
-    const imageAspectRatio = safeImageHeight / safeImageWidth;
-    const cropAspectRatio = (cropHeight / cropWidth) * imageAspectRatio;
+    const cropPixelWidth = cropWidth * safeImageWidth;
+    const cropPixelHeight = cropHeight * safeImageHeight;
+    const rotated = Boolean(rotateForVertical);
+    const displayPixelWidth = rotated ? cropPixelHeight : cropPixelWidth;
+    const displayPixelHeight = rotated ? cropPixelWidth : cropPixelHeight;
+    const cropAspectRatio = displayPixelHeight / Math.max(1e-6, displayPixelWidth);
     const aspectFactor = safeReelWidth * cropAspectRatio;
     if (Number.isFinite(aspectFactor) && aspectFactor > 0) {
       const minWidthRatioFromPx = Math.max(
@@ -1225,6 +1230,53 @@ export function computeLineReviewDisplayGeometry({
     widthRatio: safeWidth,
     contentWidth,
     heightPx: safeHeight,
+  };
+}
+
+export function computeLineReviewSourceRenderPlan({
+  crop = null,
+  imageWidth = 0,
+  imageHeight = 0,
+  rotateForVertical = false,
+} = {}) {
+  const widthPx = Number(imageWidth);
+  const heightPx = Number(imageHeight);
+  if (!Number.isFinite(widthPx) || !Number.isFinite(heightPx) || widthPx <= 0 || heightPx <= 0) {
+    return null;
+  }
+
+  const cropLeft = Number(crop?.cropLeft);
+  const cropTop = Number(crop?.cropTop);
+  const cropWidth = Number(crop?.cropWidth);
+  const cropHeight = Number(crop?.cropHeight);
+  if (
+    !Number.isFinite(cropLeft) ||
+    !Number.isFinite(cropTop) ||
+    !Number.isFinite(cropWidth) ||
+    !Number.isFinite(cropHeight) ||
+    cropLeft < 0 ||
+    cropTop < 0 ||
+    cropWidth <= 0 ||
+    cropHeight <= 0
+  ) {
+    return null;
+  }
+
+  const sourceX = Math.max(0, Math.min(widthPx, cropLeft * widthPx));
+  const sourceY = Math.max(0, Math.min(heightPx, cropTop * heightPx));
+  const sourceWidth = Math.max(1, Math.min(widthPx - sourceX, cropWidth * widthPx));
+  const sourceHeight = Math.max(1, Math.min(heightPx - sourceY, cropHeight * heightPx));
+  const rotate = Boolean(rotateForVertical);
+  const canvasWidth = Math.max(1, Math.round(rotate ? sourceHeight : sourceWidth));
+  const canvasHeight = Math.max(1, Math.round(rotate ? sourceWidth : sourceHeight));
+  return {
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    canvasWidth,
+    canvasHeight,
+    quarterTurnsClockwise: rotate ? 1 : 0,
   };
 }
 

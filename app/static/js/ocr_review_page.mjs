@@ -35,6 +35,7 @@
         computeEditorToolbarState,
         computeReconstructedImageCropStyle,
         computeLineReviewDisplayGeometry,
+        computeLineReviewSourceRenderPlan,
         computeFloatingControlPlacement,
         countTextLines,
         detectEditorValidationIssues,
@@ -3356,6 +3357,7 @@
         return computeLineReviewDisplayGeometry({
           bbox: output?.bbox,
           crop,
+          rotateForVertical: useVerticalLineAxis(output),
           reelWidth: Number(lineReviewReel?.clientWidth || 0),
           imageWidth: Number(pageImage.naturalWidth || pageImage.width || 0),
           imageHeight: Number(pageImage.naturalHeight || pageImage.height || 0),
@@ -3381,27 +3383,54 @@
         }
       }
 
-      function renderLineReviewSourceLine(node, crop) {
+      function renderLineReviewSourceLine(node, crop, { rotateForVertical = false } = {}) {
         if (!(node instanceof Element) || !crop) {
           return;
         }
-        const imageUrl = String(pageImage.currentSrc || pageImage.src || "");
-        if (!imageUrl) {
+        const imageWidth = Number(pageImage.naturalWidth || pageImage.width || 0);
+        const imageHeight = Number(pageImage.naturalHeight || pageImage.height || 0);
+        if (!pageImage.complete || imageWidth <= 0 || imageHeight <= 0) {
           return;
         }
-        const image = document.createElement("img");
-        image.src = imageUrl;
-        image.alt = "";
-        image.draggable = false;
-        const cropWidth = Math.max(1e-6, Number(crop.cropWidth || crop.contentWidth || 1));
-        const cropHeight = Math.max(1e-6, Number(crop.cropHeight || 1));
-        const cropLeft = Math.max(0, Number(crop.cropLeft ?? crop.normalizedRect?.x1 ?? 0));
-        const cropTop = Math.max(0, Number(crop.cropTop ?? 0));
-        image.style.width = `${100 / cropWidth}%`;
-        image.style.height = `${100 / cropHeight}%`;
-        image.style.left = `${(-cropLeft / cropWidth) * 100}%`;
-        image.style.top = `${(-cropTop / cropHeight) * 100}%`;
-        node.appendChild(image);
+        const plan = computeLineReviewSourceRenderPlan({
+          crop,
+          imageWidth,
+          imageHeight,
+          rotateForVertical,
+        });
+        if (!plan) {
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = Number(plan.canvasWidth);
+        canvas.height = Number(plan.canvasHeight);
+        canvas.style.position = "absolute";
+        canvas.style.inset = "0";
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
+        canvas.style.display = "block";
+        const context = canvas.getContext("2d");
+        if (!context) {
+          return;
+        }
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        if (Number(plan.quarterTurnsClockwise) === 1) {
+          context.translate(canvas.width, 0);
+          context.rotate(Math.PI / 2);
+        }
+        context.drawImage(
+          pageImage,
+          Number(plan.sourceX),
+          Number(plan.sourceY),
+          Number(plan.sourceWidth),
+          Number(plan.sourceHeight),
+          0,
+          0,
+          Number(plan.sourceWidth),
+          Number(plan.sourceHeight),
+        );
+        node.appendChild(canvas);
       }
 
       function applyLineReviewHorizontalGeometry(node, output, geometry = null) {
@@ -3506,7 +3535,7 @@
         geminiLane.appendChild(geminiLine);
         slot.appendChild(geminiLane);
         applyLineReviewLaneHeights(sourceLane, geminiLane, displayGeometry.heightPx);
-        renderLineReviewSourceLine(sourceLine, sourceCrop);
+        renderLineReviewSourceLine(sourceLine, sourceCrop, { rotateForVertical: isVertical });
         const isFormulaLine = String(output?.output_format || "").toLowerCase() === "latex";
         if (isFormulaLine) {
           applyLineReviewHorizontalGeometry(geminiLine, output, {
@@ -6272,4 +6301,3 @@
       init().catch((error) => {
         setStatus(`Initialization failed: ${error.message}`, { isError: true });
       });
-        const isVertical = String(lineNode.dataset.lineOrientation || "").toLowerCase() === "vertical";
