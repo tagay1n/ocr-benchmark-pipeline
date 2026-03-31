@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from html import unescape
 import json
+import math
 from pathlib import Path
+import re
 import shutil
 from typing import Any
+import unicodedata
 
 from sqlalchemy import select
 
@@ -35,6 +39,7 @@ _FALLBACK_COLORS: tuple[tuple[int, int, int], ...] = (
     (83, 121, 135),
     (110, 107, 63),
 )
+_CAPTION_TARGET_CLASSES = frozenset({"table", "picture", "formula"})
 
 
 def _timestamp_folder_name() -> str:
@@ -117,6 +122,13 @@ def _text_size(draw: Any, text: str, font: Any, *, spacing: int = 0) -> tuple[in
     return int(max(0, right - left)), int(max(0, bottom - top))
 
 
+def _font_text_size(font: Any, text: str) -> tuple[int, int]:
+    if not text:
+        return (0, 0)
+    left, top, right, bottom = font.getbbox(text)
+    return int(max(0, right - left)), int(max(0, bottom - top))
+
+
 def _split_chunk_to_width(draw: Any, chunk: str, font: Any, max_width: int) -> list[str]:
     if not chunk:
         return [""]
@@ -172,6 +184,354 @@ def _line_height_ratio_for_output_format(output_format: str | None) -> float:
     return 1.1
 
 
+def _format_class_label(class_name: str) -> str:
+    normalized = _normalize_class_name(class_name).replace("_", " ").strip()
+    if not normalized:
+        return ""
+    return normalized[:1].upper() + normalized[1:]
+
+
+def _normalized_rect_from_bbox(bbox: dict[str, Any] | None) -> dict[str, float] | None:
+    if not isinstance(bbox, dict):
+        return None
+    try:
+        x1 = float(bbox.get("x1", 0.0))
+        y1 = float(bbox.get("y1", 0.0))
+        x2 = float(bbox.get("x2", 0.0))
+        y2 = float(bbox.get("y2", 0.0))
+    except (TypeError, ValueError):
+        return None
+    return {
+        "left": max(0.0, min(1.0, min(x1, x2))),
+        "right": max(0.0, min(1.0, max(x1, x2))),
+        "top": max(0.0, min(1.0, min(y1, y2))),
+        "bottom": max(0.0, min(1.0, max(y1, y2))),
+    }
+
+
+def _shortest_connector_between_rects(
+    source_rect: dict[str, float],
+    target_rect: dict[str, float],
+) -> dict[str, dict[str, float]]:
+    if source_rect["right"] < target_rect["left"]:
+        source_x = source_rect["right"]
+        target_x = target_rect["left"]
+    elif target_rect["right"] < source_rect["left"]:
+        source_x = source_rect["left"]
+        target_x = target_rect["right"]
+    else:
+        overlap_left = max(source_rect["left"], target_rect["left"])
+        overlap_right = min(source_rect["right"], target_rect["right"])
+        overlap_mid_x = (overlap_left + overlap_right) / 2.0
+        source_x = overlap_mid_x
+        target_x = overlap_mid_x
+
+    if source_rect["bottom"] < target_rect["top"]:
+        source_y = source_rect["bottom"]
+        target_y = target_rect["top"]
+    elif target_rect["bottom"] < source_rect["top"]:
+        source_y = source_rect["top"]
+        target_y = target_rect["bottom"]
+    else:
+        overlap_top = max(source_rect["top"], target_rect["top"])
+        overlap_bottom = min(source_rect["bottom"], target_rect["bottom"])
+        overlap_mid_y = (overlap_top + overlap_bottom) / 2.0
+        source_y = overlap_mid_y
+        target_y = overlap_mid_y
+
+    return {
+        "source": {"x": source_x, "y": source_y},
+        "target": {"x": target_x, "y": target_y},
+    }
+
+
+def _content_text_for_render(item: dict[str, Any]) -> str:
+    raw_content = item.get("content")
+    if raw_content is None:
+        return ""
+    text = str(raw_content)
+    output_format = str(item.get("content_format") or "").strip().lower()
+    if output_format == "html":
+        # Preserve readable table/text signal without exposing raw tags.
+        text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"</\s*(p|tr|li|div|h[1-6])\s*>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", " ", text, flags=re.DOTALL)
+        text = unescape(text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r" ?\n ?", "\n", text)
+        text = text.strip()
+    if len(text) > 4000:
+        text = text[:4000]
+    return text
+
+
+def _contains_combining_marks(value: str) -> bool:
+    for char in str(value or ""):
+        if unicodedata.combining(char):
+            return True
+    return False
+
+
+def _count_stretchable_spaces(value: str) -> int:
+    count = 0
+    for char in str(value or ""):
+        if char == " ":
+            count += 1
+    return count
+
+
+def _count_stretchable_glyphs(value: str) -> int:
+    count = 0
+    for char in str(value or ""):
+        if char in {" ", "\n", "\r", "\t"}:
+            continue
+        count += 1
+    return count
+
+
+def _line_width_with_spacing(
+    *,
+    line: str,
+    font: Any,
+    word_spacing: float,
+    letter_spacing: float,
+) -> float:
+    text = str(line or "")
+    if not text:
+        return 0.0
+    last_stretchable_index = -1
+    for index, char in enumerate(text):
+        if char not in {" ", "\n", "\r", "\t"}:
+            last_stretchable_index = index
+    width = 0.0
+    for index, char in enumerate(text):
+        char_width, _ = _font_text_size(font, char)
+        width += float(char_width)
+        if char == " ":
+            width += max(0.0, float(word_spacing))
+        if index != last_stretchable_index and char not in {" ", "\n", "\r", "\t"}:
+            width += max(0.0, float(letter_spacing))
+    return max(0.0, width)
+
+
+def _render_line_image(
+    *,
+    line: str,
+    font: Any,
+    fill_rgba: tuple[int, int, int, int],
+    word_spacing: float,
+    letter_spacing: float,
+) -> Any:
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as error:
+        raise ValueError("Pillow is required for final export.") from error
+
+    text = str(line or "")
+    line_width = max(1, int(math.ceil(_line_width_with_spacing(
+        line=text,
+        font=font,
+        word_spacing=word_spacing,
+        letter_spacing=letter_spacing,
+    ))))
+    ascent, descent = font.getmetrics()
+    base_height = max(1, int(ascent + descent))
+    image = Image.new("RGBA", (line_width + 2, base_height + 2), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+
+    last_stretchable_index = -1
+    for index, char in enumerate(text):
+        if char not in {" ", "\n", "\r", "\t"}:
+            last_stretchable_index = index
+
+    cursor_x = 0.0
+    for index, char in enumerate(text):
+        draw.text((cursor_x, 1), char, fill=fill_rgba, font=font)
+        char_width, _ = _font_text_size(font, char)
+        cursor_x += float(char_width)
+        if char == " ":
+            cursor_x += max(0.0, float(word_spacing))
+        if index != last_stretchable_index and char not in {" ", "\n", "\r", "\t"}:
+            cursor_x += max(0.0, float(letter_spacing))
+    return image
+
+
+def _draw_fitted_line_on_canvas(
+    *,
+    canvas: Any,
+    line: str,
+    font: Any,
+    output_format: str | None,
+    target_left: int,
+    target_top: int,
+    target_width: int,
+    target_height: int,
+) -> None:
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise ValueError("Pillow is required for final export.") from error
+
+    safe_target_width = max(1, int(target_width))
+    safe_target_height = max(1, int(target_height))
+    text = str(line or "")
+    if not text:
+        return
+
+    normalized_format = str(output_format or "").strip().lower()
+    has_combining_marks = _contains_combining_marks(text)
+
+    word_spacing = 0.0
+    letter_spacing = 0.0
+    measured_base = _line_width_with_spacing(
+        line=text,
+        font=font,
+        word_spacing=0.0,
+        letter_spacing=0.0,
+    )
+
+    if normalized_format == "markdown" and not has_combining_marks and measured_base > 0:
+        spaces_count = _count_stretchable_spaces(text)
+        if spaces_count > 0:
+            gap = safe_target_width - measured_base
+            gain_threshold = safe_target_width * 0.01
+            if gap > gain_threshold:
+                word_spacing = min(3.5, gap / spaces_count)
+
+        measured_after_word_spacing = _line_width_with_spacing(
+            line=text,
+            font=font,
+            word_spacing=word_spacing,
+            letter_spacing=0.0,
+        )
+        glyphs_count = _count_stretchable_glyphs(text)
+        if glyphs_count > 1:
+            gap = safe_target_width - measured_after_word_spacing
+            gain_threshold = safe_target_width * 0.004
+            if gap > gain_threshold:
+                letter_spacing = min(0.8, gap / max(1, glyphs_count - 1))
+
+    measured = _line_width_with_spacing(
+        line=text,
+        font=font,
+        word_spacing=word_spacing,
+        letter_spacing=letter_spacing,
+    )
+    horizontal_scale = 1.0
+    if normalized_format != "html" and measured > 0:
+        horizontal_scale = safe_target_width / measured
+        if normalized_format == "markdown" and has_combining_marks:
+            horizontal_scale = min(1.0, horizontal_scale)
+        horizontal_scale = max(0.18, min(8.0, horizontal_scale))
+
+    line_image = _render_line_image(
+        line=text,
+        font=font,
+        fill_rgba=(45, 50, 48, 255),
+        word_spacing=word_spacing,
+        letter_spacing=letter_spacing,
+    )
+    if abs(horizontal_scale - 1.0) > 1e-3:
+        scaled_width = max(1, int(round(line_image.width * horizontal_scale)))
+        line_image = line_image.resize((scaled_width, line_image.height), Image.Resampling.BICUBIC)
+
+    if line_image.width > safe_target_width:
+        line_image = line_image.crop((0, 0, safe_target_width, line_image.height))
+
+    paste_y = int(target_top + max(0, (safe_target_height - line_image.height) // 2))
+    canvas.alpha_composite(line_image, (int(target_left), paste_y))
+
+
+def _draw_arrow_line(
+    draw: Any,
+    *,
+    source_x: float,
+    source_y: float,
+    target_x: float,
+    target_y: float,
+    color_rgba: tuple[int, int, int, int],
+) -> None:
+    dx = target_x - source_x
+    dy = target_y - source_y
+    length = math.hypot(dx, dy)
+    if not math.isfinite(length) or length <= 1e-4:
+        return
+    unit_x = dx / length
+    unit_y = dy / length
+    arrow_length = 8.0
+    arrow_half_width = 4.0
+
+    base_x = target_x - (unit_x * arrow_length)
+    base_y = target_y - (unit_y * arrow_length)
+    perp_x = -unit_y
+    perp_y = unit_x
+
+    draw.line([(source_x, source_y), (base_x, base_y)], fill=color_rgba, width=2)
+    draw.polygon(
+        [
+            (target_x, target_y),
+            (base_x + (perp_x * arrow_half_width), base_y + (perp_y * arrow_half_width)),
+            (base_x - (perp_x * arrow_half_width), base_y - (perp_y * arrow_half_width)),
+        ],
+        fill=color_rgba,
+    )
+
+
+def _draw_caption_binding_arrows(
+    draw: Any,
+    *,
+    items: list[dict[str, Any]],
+    width: int,
+    height: int,
+) -> None:
+    by_layout_id: dict[int, dict[str, Any]] = {}
+    for item in items:
+        try:
+            layout_id = int(item.get("layout_id", 0))
+        except (TypeError, ValueError):
+            continue
+        if layout_id > 0:
+            by_layout_id[layout_id] = item
+
+    for caption_item in items:
+        if _normalize_class_name(str(caption_item.get("class_name") or "")) != "caption":
+            continue
+        source_rect = _normalized_rect_from_bbox(caption_item.get("bbox"))
+        if source_rect is None:
+            continue
+        target_ids = caption_item.get("caption_targets")
+        if not isinstance(target_ids, list):
+            continue
+        for target_layout_id_raw in target_ids:
+            try:
+                target_layout_id = int(target_layout_id_raw)
+            except (TypeError, ValueError):
+                continue
+            target_item = by_layout_id.get(target_layout_id)
+            if not target_item:
+                continue
+            target_class_name = _normalize_class_name(str(target_item.get("class_name") or ""))
+            if target_class_name not in _CAPTION_TARGET_CLASSES:
+                continue
+            target_rect = _normalized_rect_from_bbox(target_item.get("bbox"))
+            if target_rect is None:
+                continue
+
+            connector = _shortest_connector_between_rects(source_rect, target_rect)
+            source_x = max(0, min(width - 1, float(connector["source"]["x"]) * width))
+            source_y = max(0, min(height - 1, float(connector["source"]["y"]) * height))
+            target_x = max(0, min(width - 1, float(connector["target"]["x"]) * width))
+            target_y = max(0, min(height - 1, float(connector["target"]["y"]) * height))
+            _draw_arrow_line(
+                draw,
+                source_x=source_x,
+                source_y=source_y,
+                target_x=target_x,
+                target_y=target_y,
+                color_rgba=(73, 111, 152, 190),
+            )
+
+
 def _fit_wrapped_lines(
     draw: Any,
     text: str,
@@ -217,46 +577,53 @@ def _draw_reconstructed_canvas(
     width: int,
     height: int,
     items: list[dict[str, Any]],
+    source_image: Any,
 ) -> Any:
     try:
         from PIL import Image, ImageDraw
     except ImportError as error:
         raise ValueError("Pillow is required for final export.") from error
 
-    canvas = Image.new("RGB", (width, height), (255, 255, 255))
-    draw = ImageDraw.Draw(canvas)
+    canvas = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(canvas, "RGBA")
+    ordered_items = sorted(
+        list(items),
+        key=lambda item: (
+            int(item.get("order", 0)),
+            int(item.get("layout_id", 0)),
+        ),
+    )
 
-    for item in items:
+    for item in ordered_items:
         bbox = item.get("bbox") or {}
         x1, y1, x2, y2 = _bbox_pixels(bbox, width=width, height=height)
         class_name = str(item.get("class_name") or "")
+        normalized_class_name = _normalize_class_name(class_name)
         color = _color_for_class(class_name)
-        draw.rectangle([(x1, y1), (x2, y2)], outline=color, width=1)
+        if normalized_class_name in _CAPTION_TARGET_CLASSES:
+            crop = source_image.crop((x1, y1, x2, y2)).convert("RGBA")
+            canvas.paste(crop, (x1, y1))
 
-        coords_label = ",".join(
-            [
-                f"x1={json.dumps(float(bbox.get('x1', 0.0)), ensure_ascii=False)}",
-                f"y1={json.dumps(float(bbox.get('y1', 0.0)), ensure_ascii=False)}",
-                f"x2={json.dumps(float(bbox.get('x2', 0.0)), ensure_ascii=False)}",
-                f"y2={json.dumps(float(bbox.get('y2', 0.0)), ensure_ascii=False)}",
-            ]
-        )
+        draw.rectangle([(x1, y1), (x2, y2)], outline=(color[0], color[1], color[2], 200), width=1)
+
         order_label = json.dumps(int(item.get("order", 0)), ensure_ascii=False)
-        label_text = f"{order_label}. {class_name} ({coords_label})"
+        label_text = f"{order_label}. {_format_class_label(class_name)}"
         label_font = _load_font(10)
         label_width, label_height = _text_size(draw, label_text, label_font)
         label_box_x2 = min(width - 1, x1 + label_width + 4)
         label_box_y2 = min(height - 1, y1 + label_height + 4)
-        draw.rectangle([(x1, y1), (label_box_x2, label_box_y2)], fill=(255, 255, 255), outline=color, width=1)
-        draw.text((x1 + 2, y1 + 2), label_text, fill=color, font=label_font)
+        draw.rectangle(
+            [(x1, y1), (label_box_x2, label_box_y2)],
+            fill=(255, 255, 255, 236),
+            outline=(color[0], color[1], color[2], 180),
+            width=1,
+        )
+        draw.text((x1 + 2, y1 + 2), label_text, fill=(color[0], color[1], color[2], 255), font=label_font)
 
-        content = item.get("content")
-        if content is None:
+        if normalized_class_name == "picture":
             continue
 
-        text = str(content)
-        if len(text) > 4000:
-            text = text[:4000]
+        text = _content_text_for_render(item)
         if not text:
             continue
 
@@ -280,9 +647,19 @@ def _draw_reconstructed_canvas(
             y = content_box_y1 + (line_index * line_height)
             if y >= content_box_y2:
                 break
-            draw.text((content_box_x1, y), line, fill=(45, 50, 48), font=font)
+            _draw_fitted_line_on_canvas(
+                canvas=canvas,
+                line=line,
+                font=font,
+                output_format=output_format,
+                target_left=content_box_x1,
+                target_top=y,
+                target_width=available_width,
+                target_height=line_height,
+            )
 
-    return canvas
+    _draw_caption_binding_arrows(draw, items=ordered_items, width=width, height=height)
+    return canvas.convert("RGB")
 
 
 def _draw_control_image(
@@ -302,7 +679,12 @@ def _draw_control_image(
         source = source_image.convert("RGB")
         if source.size != (width, height):
             source = source.resize((width, height))
-    reconstructed = _draw_reconstructed_canvas(width=width, height=height, items=items)
+        reconstructed = _draw_reconstructed_canvas(
+            width=width,
+            height=height,
+            items=items,
+            source_image=source,
+        )
     control = Image.new("RGB", (width * 2, height), (248, 248, 248))
     control.paste(source, (0, 0))
     control.paste(reconstructed, (width, 0))

@@ -1571,7 +1571,7 @@ class PipelineStagesTests(unittest.TestCase):
         def write_png(rel_path: str, color: tuple[int, int, int]) -> None:
             path = self.test_settings.source_dir / rel_path
             path.parent.mkdir(parents=True, exist_ok=True)
-            image = Image.new("RGB", (16, 12), color)
+            image = Image.new("RGB", (160, 120), color)
             image.save(path, format="PNG")
 
         write_png("export/reviewed.png", (70, 90, 110))
@@ -1620,7 +1620,7 @@ class PipelineStagesTests(unittest.TestCase):
         self._set_page_ocr_done_with_outputs(
             reviewed_page_id,
             [
-                (int(text_layout["id"]), "text", "markdown", "body"),
+                (int(text_layout["id"]), "text", "markdown", "body body"),
                 (int(picture_layout["id"]), "picture", "skip", ""),
                 (int(caption_layout["id"]), "caption", "markdown", "caption"),
             ],
@@ -1663,19 +1663,19 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(int(row["page_id"]), reviewed_page_id)
         self.assertEqual(row["image"], "images/export/reviewed.png")
         self.assertEqual(row["control"], "control/export/reviewed.png")
-        self.assertEqual(int(row["width"]), 16)
-        self.assertEqual(int(row["height"]), 12)
+        self.assertEqual(int(row["width"]), 160)
+        self.assertEqual(int(row["height"]), 120)
         control_path = Path(result["export_dir"]) / str(row["control"])
         self.assertTrue(control_path.exists())
         with Image.open(control_path) as control_image:
-            self.assertEqual(control_image.size, (32, 12))
+            self.assertEqual(control_image.size, (320, 120))
 
         items = list(row["items"])
         self.assertEqual([int(item["order"]) for item in items], [1, 2, 3])
         text_item = next(item for item in items if item["class_name"] == "text")
         picture_item = next(item for item in items if item["class_name"] == "picture")
         caption_item = next(item for item in items if item["class_name"] == "caption")
-        self.assertEqual(text_item["content"], "body")
+        self.assertEqual(text_item["content"], "body body")
         self.assertEqual(text_item["content_format"], "markdown")
         self.assertNotIn("content", picture_item)
         self.assertNotIn("content_format", picture_item)
@@ -1687,6 +1687,90 @@ class PipelineStagesTests(unittest.TestCase):
                 value = float(item["bbox"][coord])
                 self.assertGreaterEqual(value, 0.0)
                 self.assertLessEqual(value, 1.0)
+
+        def _rect_from_bbox(bbox: dict[str, object]) -> dict[str, float] | None:
+            try:
+                x1 = float(bbox["x1"])
+                y1 = float(bbox["y1"])
+                x2 = float(bbox["x2"])
+                y2 = float(bbox["y2"])
+            except (TypeError, ValueError, KeyError):
+                return None
+            return {
+                "left": max(0.0, min(1.0, min(x1, x2))),
+                "right": max(0.0, min(1.0, max(x1, x2))),
+                "top": max(0.0, min(1.0, min(y1, y2))),
+                "bottom": max(0.0, min(1.0, max(y1, y2))),
+            }
+
+        def _connector(source_rect: dict[str, float], target_rect: dict[str, float]) -> tuple[float, float]:
+            if source_rect["right"] < target_rect["left"]:
+                source_x = source_rect["right"]
+                target_x = target_rect["left"]
+            elif target_rect["right"] < source_rect["left"]:
+                source_x = source_rect["left"]
+                target_x = target_rect["right"]
+            else:
+                overlap_left = max(source_rect["left"], target_rect["left"])
+                overlap_right = min(source_rect["right"], target_rect["right"])
+                overlap_mid = (overlap_left + overlap_right) / 2.0
+                source_x = overlap_mid
+                target_x = overlap_mid
+
+            if source_rect["bottom"] < target_rect["top"]:
+                source_y = source_rect["bottom"]
+                target_y = target_rect["top"]
+            elif target_rect["bottom"] < source_rect["top"]:
+                source_y = source_rect["top"]
+                target_y = target_rect["bottom"]
+            else:
+                overlap_top = max(source_rect["top"], target_rect["top"])
+                overlap_bottom = min(source_rect["bottom"], target_rect["bottom"])
+                overlap_mid = (overlap_top + overlap_bottom) / 2.0
+                source_y = overlap_mid
+                target_y = overlap_mid
+            return ((source_x + target_x) / 2.0, (source_y + target_y) / 2.0)
+
+        with Image.open(control_path) as control_image:
+            pixels = control_image.convert("RGB")
+            # Text rendering should reach deep into bbox width (approximate typography fit).
+            text_bbox = text_item["bbox"]
+            text_x1 = int(round(float(text_bbox["x1"]) * 160))
+            text_y1 = int(round(float(text_bbox["y1"]) * 120))
+            text_x2 = int(round(float(text_bbox["x2"]) * 160))
+            text_y2 = int(round(float(text_bbox["y2"]) * 120))
+            sample_x_start = max(text_x1 + 2, text_x1 + int((text_x2 - text_x1) * 0.82))
+            sample_x_end = max(sample_x_start + 1, text_x2 - 3)
+            sample_y_start = max(text_y1 + 4, text_y1 + int((text_y2 - text_y1) * 0.28))
+            sample_y_end = max(sample_y_start + 1, text_y2 - 4)
+            has_dark_text_pixel = False
+            for sx in range(sample_x_start, sample_x_end):
+                for sy in range(sample_y_start, sample_y_end):
+                    px = pixels.getpixel((160 + max(0, min(159, sx)), max(0, min(119, sy))))
+                    if max(px) < 150:
+                        has_dark_text_pixel = True
+                        break
+                if has_dark_text_pixel:
+                    break
+            self.assertTrue(has_dark_text_pixel)
+
+            # Visual classes should reuse source crop in reconstructed half.
+            pic_bbox = picture_item["bbox"]
+            pic_mid_x = int(round(((float(pic_bbox["x1"]) + float(pic_bbox["x2"])) / 2.0) * 160))
+            pic_mid_y = int(round(((float(pic_bbox["y1"]) + float(pic_bbox["y2"])) / 2.0) * 120))
+            pic_sample = pixels.getpixel((160 + max(0, min(159, pic_mid_x)), max(0, min(119, pic_mid_y))))
+            self.assertEqual(pic_sample, (70, 90, 110))
+
+            # Caption binding arrow should be visible between caption and target.
+            caption_rect = _rect_from_bbox(caption_item["bbox"])
+            target_rect = _rect_from_bbox(picture_item["bbox"])
+            self.assertIsNotNone(caption_rect)
+            self.assertIsNotNone(target_rect)
+            mid_x_norm, mid_y_norm = _connector(caption_rect, target_rect)  # type: ignore[arg-type]
+            arrow_x = 160 + max(0, min(159, int(round(mid_x_norm * 160))))
+            arrow_y = max(0, min(119, int(round(mid_y_norm * 120))))
+            arrow_pixel = pixels.getpixel((arrow_x, arrow_y))
+            self.assertNotEqual(arrow_pixel, (255, 255, 255))
 
 
 if __name__ == "__main__":
