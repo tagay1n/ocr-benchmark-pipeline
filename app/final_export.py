@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from html import unescape
+from io import BytesIO
 import json
 import math
 from pathlib import Path
@@ -40,6 +41,7 @@ _FALLBACK_COLORS: tuple[tuple[int, int, int], ...] = (
     (110, 107, 63),
 )
 _CAPTION_TARGET_CLASSES = frozenset({"table", "picture", "formula"})
+_SOURCE_CROP_CLASSES = frozenset({"table", "picture"})
 
 
 def _timestamp_folder_name() -> str:
@@ -263,6 +265,81 @@ def _content_text_for_render(item: dict[str, Any]) -> str:
     if len(text) > 4000:
         text = text[:4000]
     return text
+
+
+def _formula_render_candidates(raw_value: str) -> list[str]:
+    text = str(raw_value or "").strip()
+    if not text:
+        return []
+    candidates: list[str] = [text]
+    if text.startswith("$$") and text.endswith("$$") and len(text) >= 4:
+        candidates.append(text[2:-2].strip())
+    if text.startswith("$") and text.endswith("$") and len(text) >= 2:
+        candidates.append(text[1:-1].strip())
+    if "\n" in text:
+        candidates.append(text.replace("\n", r"\\"))
+        candidates.append(" ".join(part.strip() for part in text.splitlines() if part.strip()))
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _render_formula_latex_image(latex_source: str) -> Any | None:
+    try:
+        from matplotlib.mathtext import math_to_image
+        from PIL import Image
+    except ImportError:
+        return None
+
+    for candidate in _formula_render_candidates(latex_source):
+        output = BytesIO()
+        try:
+            math_to_image(candidate, output, dpi=220, format="png")
+            output.seek(0)
+            with Image.open(output) as image:
+                rendered = image.convert("RGBA")
+            if rendered.width <= 0 or rendered.height <= 0:
+                continue
+            return rendered
+        except Exception:
+            continue
+    return None
+
+
+def _draw_formula_into_bbox(
+    *,
+    canvas: Any,
+    formula_image: Any,
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+) -> None:
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise ValueError("Pillow is required for final export.") from error
+
+    target_width = max(1, int(width))
+    target_height = max(1, int(height))
+    source_width = max(1, int(formula_image.width))
+    source_height = max(1, int(formula_image.height))
+
+    fit_scale = min(target_width / source_width, target_height / source_height)
+    if not math.isfinite(fit_scale) or fit_scale <= 0:
+        return
+    rendered_width = max(1, int(round(source_width * fit_scale)))
+    rendered_height = max(1, int(round(source_height * fit_scale)))
+    resized = formula_image.resize((rendered_width, rendered_height), Image.Resampling.LANCZOS)
+    offset_x = int(left + max(0, (target_width - rendered_width) // 2))
+    offset_y = int(top + max(0, (target_height - rendered_height) // 2))
+    canvas.alpha_composite(resized, (offset_x, offset_y))
 
 
 def _control_render_lines(text: str) -> list[str]:
@@ -717,7 +794,7 @@ def _draw_reconstructed_canvas(
         class_name = str(item.get("class_name") or "")
         normalized_class_name = _normalize_class_name(class_name)
         color = _color_for_class(class_name)
-        if normalized_class_name in _CAPTION_TARGET_CLASSES:
+        if normalized_class_name in _SOURCE_CROP_CLASSES:
             crop = source_image.crop((x1, y1, x2, y2)).convert("RGBA")
             canvas.paste(crop, (x1, y1))
 
@@ -758,6 +835,20 @@ def _draw_reconstructed_canvas(
         available_width = max(1, content_box_x2 - content_box_x1)
         available_height = max(1, content_box_y2 - content_box_y1)
         output_format = None if item.get("content_format") is None else str(item["content_format"])
+
+        if normalized_class_name == "formula":
+            formula_image = _render_formula_latex_image(text)
+            if formula_image is not None:
+                _draw_formula_into_bbox(
+                    canvas=canvas,
+                    formula_image=formula_image,
+                    left=content_box_x1,
+                    top=content_box_y1,
+                    width=available_width,
+                    height=available_height,
+                )
+                continue
+
         visible_lines = _control_render_lines(text)
         line_count = max(1, len(visible_lines))
         slot_height = max(1.0, available_height / line_count)

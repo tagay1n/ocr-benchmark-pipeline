@@ -1806,6 +1806,12 @@ class PipelineStagesTests(unittest.TestCase):
         lines_two = final_export._control_render_lines("alpha beta\ngamma")
         self.assertEqual(lines_two, ["alpha beta", "gamma"])
 
+    def test_formula_latex_raster_render_returns_non_empty_image(self) -> None:
+        image = final_export._render_formula_latex_image(r"\frac{a}{b}")
+        self.assertIsNotNone(image)
+        self.assertGreater(int(image.width), 0)
+        self.assertGreater(int(image.height), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
