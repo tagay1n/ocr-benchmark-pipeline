@@ -92,7 +92,7 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(html.includes("layout-bbox-editor"), true);
   assert.equal(html.includes('id="magnifier-toggle-btn"'), true);
   assert.equal(html.includes('id="layout-order-mode"'), true);
-  assert.equal(html.includes('id="status-line"'), true);
+  assert.equal(html.includes('id="status-line"'), false);
   assert.equal(html.includes('id="detect-modal-model"'), true);
   assert.equal(html.includes('id="detect-modal-top-config"'), true);
   assert.equal(html.includes('src="/static/js/layout_review_page.mjs"'), true);

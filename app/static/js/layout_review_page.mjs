@@ -16,11 +16,11 @@
         nextLayoutReviewUrl,
         normalizeLayoutOrderMode,
         normalizeZoomMode,
+        moveReadingOrderIdToOrder,
         pointHandleForCoordinateKey,
         previousHistoryPageId,
         reorderReadingOrderIds,
         summarizeDraftChangesForReorder,
-        swapReadingOrderIds,
         shiftDraftReadingOrdersAfterInsertion,
         ZOOM_PRESET_PERCENTS,
         updateReviewHistoryOnVisit,
@@ -1304,7 +1304,7 @@
         if (targetOrder === currentIndex + 1) {
           return false;
         }
-        const nextOrder = swapReadingOrderIds({
+        const nextOrder = moveReadingOrderIdToOrder({
           orderedIds,
           movedId: normalizedLayoutId,
           targetOrder,

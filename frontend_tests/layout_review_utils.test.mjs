@@ -31,6 +31,7 @@ import {
   nextLayoutReviewUrl,
   pointHandleForCoordinateKey,
   previousHistoryPageId,
+  moveReadingOrderIdToOrder,
   reconstructionHorizontalScale,
   reconstructionLetterSpacing,
   reconstructionLineHeight,
@@ -619,6 +620,60 @@ test("swapReadingOrderIds rejects invalid payload", () => {
       orderedIds: null,
       movedId: 1,
       targetOrder: 1,
+    }),
+    null,
+  );
+});
+
+test("moveReadingOrderIdToOrder inserts moved item and shifts following items", () => {
+  assert.deepEqual(
+    moveReadingOrderIdToOrder({
+      orderedIds: [10, 20, 30, 40],
+      movedId: 20,
+      targetOrder: 4,
+    }),
+    [10, 30, 40, 20],
+  );
+  assert.deepEqual(
+    moveReadingOrderIdToOrder({
+      orderedIds: [10, 20, 30, 40],
+      movedId: 40,
+      targetOrder: 2,
+    }),
+    [10, 40, 20, 30],
+  );
+});
+
+test("moveReadingOrderIdToOrder clamps and validates input payload", () => {
+  assert.deepEqual(
+    moveReadingOrderIdToOrder({
+      orderedIds: [1, 2, 3],
+      movedId: 1,
+      targetOrder: 999,
+    }),
+    [2, 3, 1],
+  );
+  assert.deepEqual(
+    moveReadingOrderIdToOrder({
+      orderedIds: [1, 2, 3],
+      movedId: 2,
+      targetOrder: 2,
+    }),
+    [1, 2, 3],
+  );
+  assert.equal(
+    moveReadingOrderIdToOrder({
+      orderedIds: [1, 2, 3],
+      movedId: 99,
+      targetOrder: 1,
+    }),
+    null,
+  );
+  assert.equal(
+    moveReadingOrderIdToOrder({
+      orderedIds: [1, 2, 3],
+      movedId: 1,
+      targetOrder: "x",
     }),
     null,
   );

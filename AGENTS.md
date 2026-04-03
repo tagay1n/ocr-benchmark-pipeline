@@ -35,3 +35,4 @@ Use only these living docs:
 - Destructive operations require explicit confirmation.
 - Long-running actions should show immediate non-text busy feedback and lock duplicate submits.
 - Activity/status should come from backend events, not transient ad-hoc frontend banners.
+- Minimize textual status labels in UI; prefer non-text feedback patterns unless explicit text status is requested.
