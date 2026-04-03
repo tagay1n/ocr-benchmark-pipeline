@@ -467,6 +467,106 @@ export function hasContiguousUniqueReadingOrders(layouts) {
   return true;
 }
 
+function normalizeDraftClassNameForCompare(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function normalizeDraftOrientationForCompare(value) {
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/_/g, "-");
+  if (normalized === "vertical" || normalized === "v") {
+    return "vertical";
+  }
+  return "horizontal";
+}
+
+function normalizeDraftReadingOrderForCompare(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1) {
+    return null;
+  }
+  return numeric;
+}
+
+function normalizeDraftBboxCoordForCompare(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  return Math.round(numeric * 10000) / 10000;
+}
+
+function hasBlockingBboxDifference(draftBBox, baselineBBox) {
+  if (!draftBBox || typeof draftBBox !== "object" || !baselineBBox || typeof baselineBBox !== "object") {
+    return true;
+  }
+  const keys = ["x1", "y1", "x2", "y2"];
+  for (const key of keys) {
+    const draftValue = normalizeDraftBboxCoordForCompare(draftBBox[key]);
+    const baselineValue = normalizeDraftBboxCoordForCompare(baselineBBox[key]);
+    if (draftValue === null || baselineValue === null) {
+      return true;
+    }
+    if (draftValue !== baselineValue) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function summarizeDraftChangesForReorder({
+  localEditsById = {},
+  serverLayoutsById = {},
+} = {}) {
+  const readingOrderOnlyLayoutIds = [];
+  const blockingLayoutIds = [];
+  const localEdits = localEditsById && typeof localEditsById === "object" ? localEditsById : {};
+  const serverLayouts = serverLayoutsById && typeof serverLayoutsById === "object" ? serverLayoutsById : {};
+
+  for (const [rawLayoutId, rawDraft] of Object.entries(localEdits)) {
+    const layoutId = Number(rawLayoutId);
+    if (!Number.isInteger(layoutId) || layoutId <= 0) {
+      continue;
+    }
+    const draft = rawDraft && typeof rawDraft === "object" ? rawDraft : null;
+    const baseline = serverLayouts[String(layoutId)];
+    if (!draft || !baseline || typeof baseline !== "object") {
+      blockingLayoutIds.push(layoutId);
+      continue;
+    }
+
+    const classChanged =
+      normalizeDraftClassNameForCompare(draft.class_name) !==
+      normalizeDraftClassNameForCompare(baseline.class_name);
+    const orientationChanged =
+      normalizeDraftOrientationForCompare(draft.orientation) !==
+      normalizeDraftOrientationForCompare(baseline.orientation);
+    const bboxChanged = hasBlockingBboxDifference(draft.bbox, baseline.bbox);
+    const readingOrderChanged =
+      normalizeDraftReadingOrderForCompare(draft.reading_order) !==
+      normalizeDraftReadingOrderForCompare(baseline.reading_order);
+
+    if (classChanged || orientationChanged || bboxChanged) {
+      blockingLayoutIds.push(layoutId);
+      continue;
+    }
+    if (readingOrderChanged) {
+      readingOrderOnlyLayoutIds.push(layoutId);
+    }
+  }
+
+  readingOrderOnlyLayoutIds.sort((left, right) => left - right);
+  blockingLayoutIds.sort((left, right) => left - right);
+  return {
+    readingOrderOnlyLayoutIds,
+    blockingLayoutIds,
+    readingOrderOnlyDraftCount: readingOrderOnlyLayoutIds.length,
+    blockingDraftCount: blockingLayoutIds.length,
+  };
+}
+
 export function reorderReadingOrderIds({
   orderedIds,
   draggedId,

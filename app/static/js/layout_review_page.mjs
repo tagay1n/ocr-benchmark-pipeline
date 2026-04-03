@@ -19,6 +19,7 @@
         pointHandleForCoordinateKey,
         previousHistoryPageId,
         reorderReadingOrderIds,
+        summarizeDraftChangesForReorder,
         swapReadingOrderIds,
         shiftDraftReadingOrdersAfterInsertion,
         ZOOM_PRESET_PERCENTS,
@@ -736,12 +737,15 @@
         if (!statusLine) {
           if (isError) {
             console.error(message);
-            window.alert(message);
           }
           return;
         }
         statusLine.textContent = message;
         statusLine.classList.toggle("error", isError);
+      }
+
+      function pluralize(count, singular, plural = `${singular}s`) {
+        return Number(count) === 1 ? singular : plural;
       }
 
       function hasPendingLayoutDraftChanges() {
@@ -750,6 +754,67 @@
           state.deletedLayoutIds.size > 0 ||
           hasPendingCaptionBindingDraftChanges()
         );
+      }
+
+      function pendingCaptionBindingDraftCount() {
+        if (!state.layoutsLoaded) {
+          return 0;
+        }
+        let count = 0;
+        const captionIds = state.layouts
+          .filter((layout) => isCaptionClass(layout.class_name))
+          .map((layout) => String(layout.id));
+        for (const captionId of captionIds) {
+          const currentTargets = normalizeLayoutIdList(state.captionBindingsByCaptionId[captionId]);
+          const baselineTargets = normalizeLayoutIdList(state.serverCaptionBindingsByCaptionId[captionId]);
+          if (
+            currentTargets.length !== baselineTargets.length ||
+            currentTargets.some((targetId, index) => targetId !== baselineTargets[index])
+          ) {
+            count += 1;
+          }
+        }
+        return count;
+      }
+
+      function reorderDraftResolutionSummary() {
+        const localDraftSummary = summarizeDraftChangesForReorder({
+          localEditsById: state.localEditsById,
+          serverLayoutsById: state.serverLayoutsById,
+        });
+        const deletedCount = state.deletedLayoutIds.size;
+        const captionBindingCount = pendingCaptionBindingDraftCount();
+        const blockingDraftCount = localDraftSummary.blockingDraftCount;
+        const hasBlockingChanges =
+          blockingDraftCount > 0 || deletedCount > 0 || captionBindingCount > 0;
+        if (!hasBlockingChanges) {
+          return {
+            canReorder: true,
+            message: "",
+            readingOrderOnlyLayoutIds: localDraftSummary.readingOrderOnlyLayoutIds,
+          };
+        }
+        const details = [];
+        if (blockingDraftCount > 0) {
+          details.push(
+            `${blockingDraftCount} unsaved ${pluralize(blockingDraftCount, "layout edit", "layout edits")}`,
+          );
+        }
+        if (deletedCount > 0) {
+          details.push(
+            `${deletedCount} pending ${pluralize(deletedCount, "deletion", "deletions")}`,
+          );
+        }
+        if (captionBindingCount > 0) {
+          details.push(
+            `${captionBindingCount} pending ${pluralize(captionBindingCount, "caption binding change", "caption binding changes")}`,
+          );
+        }
+        return {
+          canReorder: false,
+          message: `Cannot recompute reading order while ${details.join(", ")} exist. Submit review or restore drafts first.`,
+          readingOrderOnlyLayoutIds: [],
+        };
       }
 
       function updateReviewBadge() {
@@ -1958,23 +2023,7 @@
       }
 
       function hasPendingCaptionBindingDraftChanges() {
-        if (!state.layoutsLoaded) {
-          return false;
-        }
-        const captionIds = state.layouts
-          .filter((layout) => isCaptionClass(layout.class_name))
-          .map((layout) => String(layout.id));
-        for (const captionId of captionIds) {
-          const currentTargets = normalizeLayoutIdList(state.captionBindingsByCaptionId[captionId]);
-          const baselineTargets = normalizeLayoutIdList(state.serverCaptionBindingsByCaptionId[captionId]);
-          if (
-            currentTargets.length !== baselineTargets.length ||
-            currentTargets.some((targetId, index) => targetId !== baselineTargets[index])
-          ) {
-            return true;
-          }
-        }
-        return false;
+        return pendingCaptionBindingDraftCount() > 0;
       }
 
       function findUnboundCaptionIds() {
@@ -2487,6 +2536,12 @@
         if (!state.page) {
           return;
         }
+        const draftResolution = reorderDraftResolutionSummary();
+        if (!draftResolution.canReorder) {
+          setStatus(draftResolution.message, { isError: true });
+          updateLayoutOrderControls();
+          return;
+        }
         const currentMode = currentLayoutOrderMode();
         if (nextMode === currentMode) {
           updateLayoutOrderControls();
@@ -2511,12 +2566,16 @@
         if (!state.page || state.layoutReorderInProgress) {
           return;
         }
-        if (hasPendingLayoutDraftChanges()) {
-          setStatus(
-            "Cannot reorder while local draft changes exist. Submit review (or restore drafts) first.",
-            { isError: true },
-          );
+        const draftResolution = reorderDraftResolutionSummary();
+        if (!draftResolution.canReorder) {
+          setStatus(draftResolution.message, { isError: true });
           return;
+        }
+        if (draftResolution.readingOrderOnlyLayoutIds.length > 0) {
+          for (const layoutId of draftResolution.readingOrderOnlyLayoutIds) {
+            delete state.localEditsById[String(layoutId)];
+          }
+          persistLayoutDraftState();
         }
 
         const mode = normalizeLayoutOrderMode(

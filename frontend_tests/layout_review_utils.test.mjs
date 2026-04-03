@@ -35,6 +35,7 @@ import {
   reconstructionLetterSpacing,
   reconstructionLineHeight,
   reconstructionWordSpacing,
+  summarizeDraftChangesForReorder,
   reorderReadingOrderIds,
   swapReadingOrderIds,
   shiftDraftReadingOrdersAfterInsertion,
@@ -453,6 +454,65 @@ test("hasContiguousUniqueReadingOrders validates strict 1..N order uniqueness", 
     ]),
     false,
   );
+});
+
+test("summarizeDraftChangesForReorder separates reading-order-only from blocking drafts", () => {
+  const summary = summarizeDraftChangesForReorder({
+    localEditsById: {
+      "10": {
+        class_name: "text",
+        reading_order: 2,
+        orientation: "horizontal",
+        bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 },
+      },
+      "11": {
+        class_name: "table",
+        reading_order: 3,
+        orientation: "horizontal",
+        bbox: { x1: 0.2, y1: 0.2, x2: 0.3, y2: 0.3 },
+      },
+    },
+    serverLayoutsById: {
+      "10": {
+        id: 10,
+        class_name: "text",
+        reading_order: 1,
+        orientation: "horizontal",
+        bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 },
+      },
+      "11": {
+        id: 11,
+        class_name: "text",
+        reading_order: 3,
+        orientation: "horizontal",
+        bbox: { x1: 0.2, y1: 0.2, x2: 0.3, y2: 0.3 },
+      },
+    },
+  });
+
+  assert.deepEqual(summary.readingOrderOnlyLayoutIds, [10]);
+  assert.deepEqual(summary.blockingLayoutIds, [11]);
+  assert.equal(summary.readingOrderOnlyDraftCount, 1);
+  assert.equal(summary.blockingDraftCount, 1);
+});
+
+test("summarizeDraftChangesForReorder treats missing server baseline as blocking", () => {
+  const summary = summarizeDraftChangesForReorder({
+    localEditsById: {
+      "42": {
+        class_name: "text",
+        reading_order: 1,
+        orientation: "horizontal",
+        bbox: { x1: 0.1, y1: 0.1, x2: 0.2, y2: 0.2 },
+      },
+    },
+    serverLayoutsById: {},
+  });
+
+  assert.deepEqual(summary.readingOrderOnlyLayoutIds, []);
+  assert.deepEqual(summary.blockingLayoutIds, [42]);
+  assert.equal(summary.readingOrderOnlyDraftCount, 0);
+  assert.equal(summary.blockingDraftCount, 1);
 });
 
 test("reorderReadingOrderIds reorders ids before and after target", () => {
