@@ -124,6 +124,10 @@ class OcrPromptsTests(unittest.TestCase):
         self.assertIn("<thead>", rule)
         self.assertIn("rowspan/colspan", rule)
         self.assertIn("line breaks inside a cell using <br>", rule)
+        self.assertIn("<strong>...</strong>", rule)
+        self.assertIn("<em>...</em>", rule)
+        self.assertIn("<strong><em>...</em></strong>", rule)
+        self.assertIn("Apply emphasis only when clearly visible", rule)
         self.assertIn("outside crop boundaries", rule)
 
     def test_section_header_rule_preserves_multiline_header_inside_single_heading_line(self) -> None:

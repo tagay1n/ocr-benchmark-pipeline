@@ -172,6 +172,9 @@ CLASS_RULE_TABLE: Final[str] = (
     "- If a cell is visibly empty, output it as an empty cell.\n"
     "- If cell text is unreadable, keep the cell and leave its content empty; do not invent text.\n"
     "- Preserve visible line breaks inside a cell using <br> only when clearly visible.\n"
+    "- Preserve visible inline emphasis inside cells using semantic HTML: <strong>...</strong> for bold, <em>...</em> for italic, and <strong><em>...</em></strong> (or equivalent nested order) for bold+italic.\n"
+    "- Apply emphasis only when clearly visible; do not invent emphasis from context.\n"
+    "- Keep emphasis inline inside the same cell; do not split one cell into extra rows/columns because of styling.\n"
     "- Do not infer or reconstruct hidden rows/columns outside crop boundaries.\n"
     "- Do not add CSS, classes, style attributes, wrapper tags, or Markdown table syntax."
 )
