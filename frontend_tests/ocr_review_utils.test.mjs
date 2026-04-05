@@ -345,6 +345,10 @@ test("isAllowedStructuredTableTag keeps native table structure tags and blocks u
   assert.equal(isAllowedStructuredTableTag("td"), true);
   assert.equal(isAllowedStructuredTableTag("colgroup"), true);
   assert.equal(isAllowedStructuredTableTag("col"), true);
+  assert.equal(isAllowedStructuredTableTag("strong"), true);
+  assert.equal(isAllowedStructuredTableTag("em"), true);
+  assert.equal(isAllowedStructuredTableTag("b"), true);
+  assert.equal(isAllowedStructuredTableTag("i"), true);
   assert.equal(isAllowedStructuredTableTag("script"), false);
   assert.equal(isAllowedStructuredTableTag("img"), false);
 });

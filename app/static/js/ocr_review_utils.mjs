@@ -179,6 +179,10 @@ const STRUCTURED_TABLE_ALLOWED_TAGS = new Set([
   "th",
   "td",
   "br",
+  "strong",
+  "em",
+  "b",
+  "i",
 ]);
 
 const STRUCTURED_TABLE_SPAN_ATTRS_BY_TAG = Object.freeze({
