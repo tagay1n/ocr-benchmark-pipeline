@@ -52,6 +52,15 @@ from .ocr_output_rules import (
     output_matches_layout_class,
 )
 
+QA_REVIEW_PHASES = ("bbox", "class", "order", "ocr")
+QA_REVIEW_STATUSES = ("pending", "reviewed")
+_QA_REVIEW_PHASE_TO_COLUMN = {
+    "bbox": "qa_bbox_status",
+    "class": "qa_class_status",
+    "order": "qa_order_status",
+    "ocr": "qa_ocr_status",
+}
+
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
@@ -79,6 +88,27 @@ def _normalize_extraction_status(value: str | None) -> str:
     if normalized in {"ok", "manual", "failed", "skip"}:
         return normalized
     return "ok"
+
+
+def normalize_qa_review_phase(value: str | None) -> str:
+    normalized = _status_key(value)
+    if normalized in QA_REVIEW_PHASES:
+        return normalized
+    raise ValueError("Invalid QA review phase.")
+
+
+def normalize_qa_review_status(value: str | None) -> str:
+    normalized = _status_key(value)
+    if normalized == "reviewed":
+        return "reviewed"
+    return "pending"
+
+
+def qa_statuses_from_page_row(page_row: Page) -> dict[str, str]:
+    return {
+        phase: normalize_qa_review_status(getattr(page_row, column_name, None))
+        for phase, column_name in _QA_REVIEW_PHASE_TO_COLUMN.items()
+    }
 
 
 def _clamp01(value: float) -> float:
@@ -179,6 +209,7 @@ def _page_to_dict(page_row: Page) -> dict[str, Any]:
         "status": page_row.status,
         "is_missing": bool(page_row.is_missing),
         "layout_order_mode": layout_order_mode,
+        "qa_statuses": qa_statuses_from_page_row(page_row),
     }
 
 
@@ -278,6 +309,63 @@ def get_page(page_id: int) -> dict[str, Any] | None:
         if page_row is None:
             return None
         return _page_to_dict(page_row)
+
+
+def update_page_qa_status(page_id: int, *, phase: str, status: str) -> dict[str, Any]:
+    now = _utc_now()
+    normalized_phase = normalize_qa_review_phase(phase)
+    normalized_status = _status_key(status)
+    if normalized_status not in QA_REVIEW_STATUSES:
+        raise ValueError("Invalid QA review status.")
+    column_name = _QA_REVIEW_PHASE_TO_COLUMN[normalized_phase]
+
+    with get_session() as session:
+        page_row = session.get(Page, page_id)
+        if page_row is None:
+            raise ValueError("Page not found.")
+        setattr(page_row, column_name, normalized_status)
+        page_row.updated_at = now
+        return {
+            "page_id": int(page_row.id),
+            "phase": normalized_phase,
+            "status": normalized_status,
+            "qa_statuses": qa_statuses_from_page_row(page_row),
+        }
+
+
+def _next_page_response_from_row(row: tuple[object, ...] | None) -> dict[str, Any]:
+    if row is None:
+        return {
+            "has_next": False,
+            "next_page_id": None,
+            "next_page_rel_path": None,
+        }
+    return {
+        "has_next": True,
+        "next_page_id": int(row[0]),
+        "next_page_rel_path": str(row[1]),
+    }
+
+
+def next_page_for_qa_phase(*, phase: str, current_page_id: int | None = None) -> dict[str, Any]:
+    normalized_phase = normalize_qa_review_phase(phase)
+    column_name = _QA_REVIEW_PHASE_TO_COLUMN[normalized_phase]
+    status_column = getattr(Page, column_name)
+
+    with get_session() as session:
+        base_query = (
+            select(Page.id, Page.rel_path)
+            .where(Page.is_missing.is_(False))
+            .where(status_column == "pending")
+        )
+        if current_page_id is None:
+            row = session.execute(base_query.order_by(Page.id.asc()).limit(1)).first()
+            return {"phase": normalized_phase, **_next_page_response_from_row(row)}
+
+        row = session.execute(
+            base_query.where(Page.id > current_page_id).order_by(Page.id.asc()).limit(1)
+        ).first()
+    return {"phase": normalized_phase, **_next_page_response_from_row(row)}
 
 
 def update_page_layout_order_mode(page_id: int, *, mode: str) -> dict[str, Any]:

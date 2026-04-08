@@ -15,14 +15,14 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
 ## Current Product Surface
 
 - Dashboard (`/`):
-  - Pipeline actions with live counters: `Scan(total) -> Review layouts(done/total) -> Review OCR(done/total) -> Export`.
+  - Pipeline actions with live counters: `Scan(total) -> Review layouts(done/total) -> Review OCR(done/total) -> QA checks -> Export`.
   - `Batch OCR` action to queue/stop global OCR extraction for all eligible pages (`layout_reviewed`/`ocr_failed`) that still have missing layout outputs.
   - `Benchmark` action opens dedicated benchmark page.
   - Live backend activity panel (SSE stream).
   - Duplicate-file warnings.
   - Sortable + paginated indexed-images table (default: `Added time` newest first).
   - Pagination controls with page size `25/50/100`.
-  - Per-row actions: open Layout/OCR review and remove an image (with confirmation).
+  - Per-row actions: open Layout/OCR/QA review and remove an image (with confirmation).
 - Layout benchmark (`/static/layout_benchmark.html`):
   - Start/stop benchmark run.
   - `Recalculate score` action to recompute scores from stored benchmark predictions without rerunning detection.
@@ -47,6 +47,12 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - OCR extraction is retried per bbox and then marked failed if still unsuccessful; failed bboxes stay editable and can be re-detected per-layout.
   - Marking OCR reviewed requires resolving failed/missing required bboxes (re-detect or manual text entry).
   - All pipeline steps are manual by reviewer action.
+- QA review (`/static/qa_review.html?page_id=<id>&phase=<bbox|class|order|ocr>`):
+  - Dedicated 4-phase verification flow: bbox boundaries, class labels, reading order, OCR text.
+  - In-place editing through embedded existing review pages (layout/OCR editors).
+  - Per-phase QA status is stored independently per page (`pending`/`reviewed`).
+  - QA statuses are non-invasive: editing bbox/class/order/OCR does not auto-reset other QA phases.
+  - Quick navigation: previous/next page and next pending page for active phase.
 
 ## Configuration
 
@@ -122,6 +128,9 @@ node --test frontend_tests/*.test.mjs
 - `GET /api/pages/{page_id}/ocr-outputs`
 - `POST /api/pages/{page_id}/ocr/reextract`
 - `POST /api/pages/{page_id}/ocr/review-complete`
+- `GET /api/qa/{phase}/next`
+- `GET /api/pages/{page_id}/qa-next?phase=<bbox|class|order|ocr>`
+- `PATCH /api/pages/{page_id}/qa-status` (`{"phase":"...","status":"pending|reviewed"}`)
 - `GET /api/pipeline/activity`
 - `GET /api/pipeline/activity/stream`
 - `GET /api/layout-benchmark/status`

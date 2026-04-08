@@ -10,8 +10,10 @@ from ..layouts import (
     get_page,
     list_layouts,
     mark_layout_reviewed,
+    next_page_for_qa_phase,
     reorder_page_layouts,
     replace_caption_bindings,
+    update_page_qa_status,
     update_page_layout_order_mode,
     update_layout,
 )
@@ -48,6 +50,7 @@ from .schemas import (
     ReextractOcrRequest,
     ReorderLayoutsRequest,
     ReplaceCaptionBindingsRequest,
+    UpdatePageQaStatusRequest,
     UpdateLayoutOrderModeRequest,
     UpdateLayoutRequest,
     UpdateOcrOutputRequest,
@@ -246,6 +249,23 @@ def next_ocr_review_page(page_id: int) -> dict[str, object]:
     return next_page_for_status(status=OCR_REVIEW_QUEUE_STATUS, current_page_id=page_id)
 
 
+@router.get("/api/qa/{phase}/next")
+def next_qa_review_page_global(phase: str) -> dict[str, object]:
+    try:
+        return next_page_for_qa_phase(phase=phase)
+    except ValueError as error:
+        raise _http_exception_from_value_error(error) from error
+
+
+@router.get("/api/pages/{page_id}/qa-next")
+def next_qa_review_page(page_id: int, phase: str) -> dict[str, object]:
+    ensure_page_exists_or_404(page_id)
+    try:
+        return next_page_for_qa_phase(phase=phase, current_page_id=page_id)
+    except ValueError as error:
+        raise _http_exception_from_value_error(error) from error
+
+
 @router.post("/api/pages/{page_id}/layouts/detect")
 def detect_page_layouts(page_id: int, payload: DetectLayoutsRequest) -> dict[str, object]:
     return _run_manual_layout_detection(page_id, payload)
@@ -328,6 +348,17 @@ def patch_layout(layout_id: int, payload: UpdateLayoutRequest) -> dict[str, obje
             not_found_messages=("Layout not found.",),
         ) from error
     return {"layout": layout}
+
+
+@router.patch("/api/pages/{page_id}/qa-status")
+def patch_page_qa_status(page_id: int, payload: UpdatePageQaStatusRequest) -> dict[str, object]:
+    try:
+        return update_page_qa_status(page_id, phase=payload.phase, status=payload.status)
+    except ValueError as error:
+        raise _http_exception_from_value_error(
+            error,
+            not_found_messages=("Page not found.",),
+        ) from error
 
 
 @router.delete("/api/layouts/{layout_id}")

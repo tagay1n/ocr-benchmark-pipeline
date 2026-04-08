@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QA Review</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <style>
+      :root {
+        --bg: #f3f1eb;
+        --surface: #fffdf7;
+        --ink: #1e1f1c;
+        --muted: #63635f;
+        --accent: #0b7a75;
+        --border: #dfdbcf;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 100% 0, #d6ebe7 0, transparent 30%),
+          radial-gradient(circle at 0 100%, #f7e3cf 0, transparent 32%),
+          var(--bg);
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+        gap: 10px;
+        padding: 14px;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: start;
+      }
+
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 10px;
+      }
+
+      .phase-row,
+      .action-row,
+      .nav-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .phase-row + .action-row,
+      .action-row + .nav-row,
+      .panel-meta {
+        margin-top: 8px;
+      }
+
+      button {
+        border: 1px solid var(--accent);
+        background: #fff;
+        color: var(--accent);
+        border-radius: 9px;
+        padding: 7px 12px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .phase-btn.is-active {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      #qa-mark-reviewed-btn {
+        background: var(--accent);
+        color: #fff;
+      }
+
+      #qa-progress,
+      #qa-page-meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      #qa-phase-status-list {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        gap: 6px;
+      }
+
+      .qa-phase-status-item {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 6px 8px;
+        font-size: 12px;
+        background: #f6f3ea;
+      }
+
+      .qa-phase-status-item.is-reviewed {
+        border-color: #8bc2aa;
+        background: #edf8f2;
+      }
+
+      #qa-review-frame {
+        width: 100%;
+        flex: 1;
+        min-height: 70vh;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      @media (max-width: 900px) {
+        .toolbar {
+          grid-template-columns: 1fr;
+        }
+
+        #qa-phase-status-list {
+          grid-template-columns: repeat(2, minmax(120px, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="toolbar">
+        <section class="panel">
+          <div class="phase-row" role="group" aria-label="QA phase">
+            <button id="phase-bbox-btn" class="phase-btn" type="button">BBox</button>
+            <button id="phase-class-btn" class="phase-btn" type="button">Class</button>
+            <button id="phase-order-btn" class="phase-btn" type="button">Order</button>
+            <button id="phase-ocr-btn" class="phase-btn" type="button">OCR</button>
+          </div>
+          <div class="action-row" role="group" aria-label="QA status actions">
+            <button id="qa-mark-reviewed-btn" type="button">Mark reviewed</button>
+            <button id="qa-mark-pending-btn" type="button">Mark pending</button>
+            <button id="qa-open-source-btn" type="button">Open full page</button>
+          </div>
+          <div class="nav-row" role="group" aria-label="QA page navigation">
+            <button id="qa-prev-page-btn" type="button">Previous page</button>
+            <button id="qa-next-page-btn" type="button">Next page</button>
+            <button id="qa-next-pending-btn" type="button">Next pending</button>
+          </div>
+          <div class="panel-meta" id="qa-progress"></div>
+          <div class="panel-meta" id="qa-page-meta"></div>
+          <ul id="qa-phase-status-list"></ul>
+        </section>
+      </div>
+      <iframe
+        id="qa-review-frame"
+        title="QA review editor"
+        loading="eager"
+        referrerpolicy="same-origin"
+      ></iframe>
+    </main>
+    <script type="module" src="/static/js/qa_review_page.mjs"></script>
+  </body>
+</html>

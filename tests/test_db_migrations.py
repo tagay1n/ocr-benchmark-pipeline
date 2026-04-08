@@ -245,6 +245,57 @@ class DbMigrationsTests(unittest.TestCase):
             self.assertEqual(str(row[0]), "ok")
             self.assertIsNone(row[1])
 
+    def test_init_db_migrates_pages_qa_status_columns(self) -> None:
+        db_path = self.test_settings.db_path
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute("PRAGMA foreign_keys=ON;")
+            connection.execute(
+                """
+                CREATE TABLE pages (
+                  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                  rel_path VARCHAR NOT NULL UNIQUE,
+                  file_hash VARCHAR NOT NULL UNIQUE,
+                  status VARCHAR NOT NULL,
+                  created_at VARCHAR NOT NULL,
+                  updated_at VARCHAR NOT NULL,
+                  last_seen_at VARCHAR NOT NULL,
+                  is_missing BOOLEAN NOT NULL DEFAULT 0
+                )
+                """
+            )
+            now = "2026-03-09T00:00:00+00:00"
+            connection.execute(
+                """
+                INSERT INTO pages (rel_path, file_hash, status, created_at, updated_at, last_seen_at, is_missing)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                ("legacy/qa.png", "hash-qa", "new", now, now, now, 0),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        db.init_db()
+
+        with sqlite3.connect(db_path) as verify:
+            columns = [str(row[1]) for row in verify.execute("PRAGMA table_info('pages')").fetchall()]
+            self.assertIn("qa_bbox_status", columns)
+            self.assertIn("qa_class_status", columns)
+            self.assertIn("qa_order_status", columns)
+            self.assertIn("qa_ocr_status", columns)
+            row = verify.execute(
+                """
+                SELECT qa_bbox_status, qa_class_status, qa_order_status, qa_ocr_status
+                FROM pages
+                WHERE rel_path = ?
+                """,
+                ("legacy/qa.png",),
+            ).fetchone()
+            self.assertEqual(tuple(row), ("pending", "pending", "pending", "pending"))
+
 
 if __name__ == "__main__":
     unittest.main()

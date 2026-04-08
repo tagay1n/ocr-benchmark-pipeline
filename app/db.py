@@ -273,6 +273,45 @@ def _migrate_sqlite_pages_layout_order_mode_column(engine: Engine) -> None:
             connection.commit()
 
 
+def _migrate_sqlite_pages_qa_status_columns(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    with engine.connect() as connection:
+        if not _sqlite_table_exists(connection, "pages"):
+            return
+
+        qa_columns = (
+            "qa_bbox_status",
+            "qa_class_status",
+            "qa_order_status",
+            "qa_ocr_status",
+        )
+        for column_name in qa_columns:
+            if _sqlite_table_has_column(connection, "pages", column_name):
+                continue
+            if connection.in_transaction():
+                connection.commit()
+            connection.exec_driver_sql(
+                f"ALTER TABLE pages ADD COLUMN {column_name} VARCHAR NOT NULL DEFAULT 'pending';"
+            )
+            if connection.in_transaction():
+                connection.commit()
+
+        for column_name in qa_columns:
+            connection.exec_driver_sql(
+                f"""
+                UPDATE pages
+                SET {column_name} = CASE
+                    WHEN lower(trim(coalesce({column_name}, ''))) = 'reviewed' THEN 'reviewed'
+                    ELSE 'pending'
+                END
+                """
+            )
+        if connection.in_transaction():
+            connection.commit()
+
+
 def _migrate_sqlite_layout_orientation_column(engine: Engine) -> None:
     if engine.dialect.name != "sqlite":
         return
@@ -366,6 +405,7 @@ def init_db() -> None:
     _migrate_sqlite_layout_orientation_column(engine)
     _migrate_sqlite_layout_benchmark_predictions_column(engine)
     _migrate_sqlite_pages_layout_order_mode_column(engine)
+    _migrate_sqlite_pages_qa_status_columns(engine)
     _migrate_sqlite_ocr_outputs_status_columns(engine)
     # Ensure metadata-defined indexes/constraints are present after migrations.
     Base.metadata.create_all(bind=engine)

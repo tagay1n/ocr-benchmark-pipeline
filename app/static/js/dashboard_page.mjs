@@ -28,6 +28,7 @@ const STORAGE_KEYS = {
 const scanBtn = document.getElementById("scan-btn");
 const reviewLayoutsBtn = document.getElementById("review-layouts-btn");
 const reviewOcrBtn = document.getElementById("review-ocr-btn");
+const reviewQaBtn = document.getElementById("review-qa-btn");
 const exportFinalBtn = document.getElementById("export-final-btn");
 const batchOcrBtn = document.getElementById("batch-ocr-btn");
 const layoutBenchmarkBtn = document.getElementById("layout-benchmark-btn");
@@ -108,6 +109,13 @@ const REVIEW_ACTIONS = Object.freeze({
     fallbackOpenTitle: "Open next OCR review page",
     noItemsTitle: "No images available for OCR review.",
     hrefBase: "/static/ocr_review.html?page_id=",
+  },
+  qa: {
+    button: reviewQaBtn,
+    pendingStatus: "new",
+    fallbackOpenTitle: "Open next QA checks page",
+    noItemsTitle: "No images available for QA checks.",
+    hrefBase: "/static/qa_review.html?page_id=",
   },
 });
 
@@ -334,6 +342,11 @@ function renderPages(pages) {
           }>
             OCR
           </button>
+          <button class="secondary row-open-btn" type="button" data-target="qa"${
+            page.is_missing ? " disabled" : ""
+          }>
+            QA
+          </button>
           <button class="danger-btn row-open-btn" type="button" data-target="remove">
             Remove
           </button>
@@ -484,12 +497,14 @@ function openLayoutBenchmarkPage() {
 }
 
 async function refreshReviewActionState() {
-  const [nextReviewPayload, nextOcrPayload] = await Promise.all([
+  const [nextReviewPayload, nextOcrPayload, nextQaPayload] = await Promise.all([
     fetchJson("/api/layout-review/next"),
     fetchJson("/api/ocr-review/next"),
+    fetchJson("/api/qa/bbox/next"),
   ]);
   applyNextReviewStatePayload("layout", nextReviewPayload);
   applyNextReviewStatePayload("ocr", nextOcrPayload);
+  applyNextReviewStatePayload("qa", nextQaPayload);
 }
 
 async function refreshPagesSummary() {
@@ -771,6 +786,7 @@ async function runScan() {
   scanBtn.disabled = true;
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
+  reviewQaBtn.disabled = true;
   exportFinalBtn.disabled = true;
   batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
@@ -824,6 +840,7 @@ async function runRemovePage() {
   scanBtn.disabled = true;
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
+  reviewQaBtn.disabled = true;
   exportFinalBtn.disabled = true;
   batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
@@ -844,6 +861,7 @@ async function runWipe() {
   scanBtn.disabled = true;
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
+  reviewQaBtn.disabled = true;
   exportFinalBtn.disabled = true;
   batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
@@ -868,6 +886,7 @@ async function runFinalExport() {
   scanBtn.disabled = true;
   reviewLayoutsBtn.disabled = true;
   reviewOcrBtn.disabled = true;
+  reviewQaBtn.disabled = true;
   exportFinalBtn.disabled = true;
   batchOcrBtn.disabled = true;
   wipeBtn.disabled = true;
@@ -933,6 +952,9 @@ reviewLayoutsBtn.addEventListener("click", () => {
 });
 reviewOcrBtn.addEventListener("click", () => {
   openNextReviewActionPage("ocr");
+});
+reviewQaBtn.addEventListener("click", () => {
+  openNextReviewActionPage("qa");
 });
 for (const sortBtn of pagesSortButtons) {
   sortBtn.addEventListener("click", () => {
@@ -1014,6 +1036,10 @@ pagesBody.addEventListener("click", (event) => {
   }
   if (reviewTarget === "ocr") {
     window.location.href = `/static/ocr_review.html?page_id=${pageId}`;
+    return;
+  }
+  if (reviewTarget === "qa") {
+    window.location.href = `/static/qa_review.html?page_id=${pageId}`;
     return;
   }
   if (reviewTarget === "remove") {

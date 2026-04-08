@@ -18,6 +18,7 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
     'id="scan-btn"',
     'id="review-layouts-btn"',
     'id="review-ocr-btn"',
+    'id="review-qa-btn"',
     'id="export-final-btn"',
     'id="batch-ocr-btn"',
     'id="layout-benchmark-btn"',
@@ -42,11 +43,43 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(pageModule.includes('"/api/ocr-batch/run"'), true);
   assert.equal(pageModule.includes('"/api/ocr-batch/stop"'), true);
   assert.equal(pageModule.includes('"/static/layout_benchmark.html"'), true);
+  assert.equal(pageModule.includes('"/static/qa_review.html?page_id="'), true);
   assert.equal(pageModule.includes('"/api/pages/summary"'), true);
   assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);
   assert.equal(pageModule.includes('"./pipeline_event_constants.mjs"'), true);
   assert.equal(pageModule.includes('"./api_client.mjs"'), true);
   assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
+});
+
+test("qa review HTML keeps dedicated phase and in-place review hooks", () => {
+  const html = readHtml("app/static/qa_review.html");
+  const pageModule = readModule("app/static/js/qa_review_page.mjs");
+  const apiModule = readModule("app/static/js/qa_review_api.mjs");
+  const requiredIds = [
+    'id="phase-bbox-btn"',
+    'id="phase-class-btn"',
+    'id="phase-order-btn"',
+    'id="phase-ocr-btn"',
+    'id="qa-mark-reviewed-btn"',
+    'id="qa-mark-pending-btn"',
+    'id="qa-prev-page-btn"',
+    'id="qa-next-page-btn"',
+    'id="qa-next-pending-btn"',
+    'id="qa-open-source-btn"',
+    'id="qa-review-frame"',
+    'id="qa-progress"',
+    'id="qa-page-meta"',
+    'id="qa-phase-status-list"',
+  ];
+  for (const marker of requiredIds) {
+    assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
+  }
+  assert.equal(html.includes('src="/static/js/qa_review_page.mjs"'), true);
+  assert.equal(pageModule.includes('"/static/layouts.html?page_id="'), true);
+  assert.equal(pageModule.includes('"/static/ocr_review.html?page_id="'), true);
+  assert.equal(apiModule.includes('"/api/pages?sort=id&direction=asc&limit=200"'), true);
+  assert.equal(apiModule.includes("`/api/pages/${pageId}/qa-status`"), true);
+  assert.equal(apiModule.includes("`/api/qa/${phase}/next`"), true);
 });
 
 test("layout benchmark page keeps run/stop/grid integration hooks", () => {

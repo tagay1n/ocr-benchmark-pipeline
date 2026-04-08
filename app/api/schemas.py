@@ -42,6 +42,11 @@ class ReorderLayoutsRequest(BaseModel):
     mode: str | None = Field(default=None, min_length=1, max_length=32)
 
 
+class UpdatePageQaStatusRequest(BaseModel):
+    phase: str = Field(min_length=1, max_length=32)
+    status: str = Field(min_length=1, max_length=32)
+
+
 class WipeStateRequest(BaseModel):
     confirm: bool = False
     rescan: bool = True
