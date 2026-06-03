@@ -45,8 +45,6 @@ DOUBLE_QUOTE_TRANSLATIONS = {
     "‟": '"',
     "″": '"',
     "＂": '"',
-    "«": '"',
-    "»": '"',
 }
 QUOTE_TRANSLATION_TABLE = str.maketrans({
     **SINGLE_QUOTE_TRANSLATIONS,

@@ -602,7 +602,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
 
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         by_layout = {int(output["layout_id"]): output for output in outputs}
-        self.assertEqual(str(by_layout[int(layout["id"])]["content"]), '"Әни" һәм "әти", $f′(x)$')
+        self.assertEqual(str(by_layout[int(layout["id"])]["content"]), '«Әни» һәм "әти", $f′(x)$')
 
     def test_extract_ocr_for_page_normalizes_formula_content(self) -> None:
         self._write_image("ocr/formula-normalize.png")

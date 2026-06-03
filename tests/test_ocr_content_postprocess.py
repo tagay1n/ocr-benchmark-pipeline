@@ -35,12 +35,12 @@ class OcrContentPostprocessModuleTests(unittest.TestCase):
     def test_normalize_ocr_content_maps_quote_glyph_variants(self) -> None:
         raw = "«Китап» “сүз” „исем“ ‘апостроф’ ʼтамгаʼ"
         normalized = ocr_content_postprocess.normalize_ocr_content(raw, output_format="markdown")
-        self.assertEqual(normalized, '"Китап" "сүз" "исем" \'апостроф\' \'тамга\'')
+        self.assertEqual(normalized, '«Китап» "сүз" "исем" \'апостроф\' \'тамга\'')
 
     def test_normalize_ocr_content_preserves_markdown_math_primes(self) -> None:
         raw = "Текстта ′ билгесе, формулада $f′(x)$ һәм «сүз»."
         normalized = ocr_content_postprocess.normalize_ocr_content(raw, output_format="markdown")
-        self.assertEqual(normalized, "Текстта ' билгесе, формулада $f′(x)$ һәм \"сүз\".")
+        self.assertEqual(normalized, "Текстта ' билгесе, формулада $f′(x)$ һәм «сүз».")
 
     def test_normalize_ocr_content_preserves_latex_formula_quotes_and_primes(self) -> None:
         raw = "f′(x)+\\text{“a”}"
