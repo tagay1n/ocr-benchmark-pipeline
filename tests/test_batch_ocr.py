@@ -427,24 +427,30 @@ class BatchOcrApiTests(unittest.TestCase):
                 raise RuntimeError("The read operation timed out")
             return "second-ok"
 
-        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
-            ocr_extract,
-            "_gemini_generate_content",
-            side_effect=fake_gemini,
-        ):
-            result = pipeline_runtime._ocr_extract_handler(
-                {
-                    "page_id": page_id,
-                    "payload": {"trigger": "batch_ocr", "layout_ids": [layout1, layout2]},
-                    "id": 100,
-                    "stage": "ocr_extract",
-                }
-            )
+        with self.assertLogs("app.ocr_extract", level="WARNING") as log_context:
+            with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+                ocr_extract,
+                "_gemini_generate_content",
+                side_effect=fake_gemini,
+            ):
+                result = pipeline_runtime._ocr_extract_handler(
+                    {
+                        "page_id": page_id,
+                        "payload": {"trigger": "batch_ocr", "layout_ids": [layout1, layout2]},
+                        "id": 100,
+                        "stage": "ocr_extract",
+                    }
+                )
 
         self.assertEqual(result["status"], "ocr_done")
         self.assertEqual(result["extracted_count"], 1)
         self.assertEqual(result["failed_count"], 1)
         self.assertEqual(result["failed_layout_ids"], [layout1])
+        log_output = "\n".join(log_context.output)
+        self.assertIn(f"layout_id={layout1}", log_output)
+        self.assertIn("page_id=", log_output)
+        self.assertIn("model=gemini-3-flash-preview", log_output)
+        self.assertIn("The read operation timed out", log_output)
 
         page_payload = main.page_details(page_id)
         self.assertEqual(str(page_payload["page"]["status"]), "ocr_done")

@@ -210,6 +210,13 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Punctuation or casing anomalies are retained when they are part of the source.
   - Corrections are limited to clear OCR character misreads, without changing wording/style.
 
+- Quote mark normalization policy:
+  - Normalize quotation-mark typography to reduce benchmark noise from visually similar quote glyphs.
+  - Single quote/apostrophe variants are stored as ASCII apostrophe (`'`, `U+0027`).
+  - Double quote variants are stored as ASCII quotation mark (`"`, `U+0022`).
+  - Examples: `‘text’`, `ʼtextʼ`, and `′text′` become `'text'`; `“text”`, `„text“`, and `«text»` become `"text"`.
+  - Preserve formula/LaTeX prime notation, for example `f′(x)` remains `f′(x)` inside formula output and Markdown math spans.
+
 ## Documentation Policy
 
 This repository keeps active project documentation in only two files:

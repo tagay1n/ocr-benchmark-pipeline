@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import statistics
 from typing import Any
+import unicodedata
 
 from .layout_classes import MARKDOWN_LAYOUT_CLASSES as MARKDOWN_CLASSES
 from .layout_classes import normalize_class_name
@@ -22,6 +23,35 @@ FULL_EMPHASIS_WRAPPERS: tuple[tuple[str, str], ...] = (
     ("*", "*"),
     ("_", "_"),
 )
+SINGLE_QUOTE_TRANSLATIONS = {
+    "`": "'",
+    "´": "'",
+    "‘": "'",
+    "’": "'",
+    "‚": "'",
+    "‛": "'",
+    "ʼ": "'",
+    "ʹ": "'",
+    "ʻ": "'",
+    "′": "'",
+    "＇": "'",
+    "‹": "'",
+    "›": "'",
+}
+DOUBLE_QUOTE_TRANSLATIONS = {
+    "“": '"',
+    "”": '"',
+    "„": '"',
+    "‟": '"',
+    "″": '"',
+    "＂": '"',
+    "«": '"',
+    "»": '"',
+}
+QUOTE_TRANSLATION_TABLE = str.maketrans({
+    **SINGLE_QUOTE_TRANSLATIONS,
+    **DOUBLE_QUOTE_TRANSLATIONS,
+})
 
 
 def _layout_height_ratio(layout: dict[str, Any]) -> float:
@@ -41,6 +71,66 @@ def _median(values: list[float]) -> float:
     if not cleaned:
         return 0.0
     return float(statistics.median(cleaned))
+
+
+def _is_escaped(text: str, index: int) -> bool:
+    slash_count = 0
+    cursor = int(index) - 1
+    while cursor >= 0 and text[cursor] == "\\":
+        slash_count += 1
+        cursor -= 1
+    return slash_count % 2 == 1
+
+
+def normalize_quote_glyphs(content: str, *, preserve_markdown_math: bool = False) -> str:
+    text = str(content)
+    if not text:
+        return text
+    if not preserve_markdown_math:
+        return text.translate(QUOTE_TRANSLATION_TABLE)
+
+    output: list[str] = []
+    plain_segment: list[str] = []
+    math_delimiter = ""
+    index = 0
+    while index < len(text):
+        if text[index] != "$" or _is_escaped(text, index):
+            if math_delimiter:
+                output.append(text[index])
+            else:
+                plain_segment.append(text[index])
+            index += 1
+            continue
+
+        delimiter = "$$" if text.startswith("$$", index) else "$"
+        if math_delimiter:
+            output.append(delimiter)
+            index += len(delimiter)
+            if delimiter == math_delimiter:
+                math_delimiter = ""
+            continue
+
+        if plain_segment:
+            output.append("".join(plain_segment).translate(QUOTE_TRANSLATION_TABLE))
+            plain_segment = []
+        output.append(delimiter)
+        math_delimiter = delimiter
+        index += len(delimiter)
+
+    if plain_segment:
+        output.append("".join(plain_segment).translate(QUOTE_TRANSLATION_TABLE))
+    return "".join(output)
+
+
+def normalize_ocr_content(content: str, *, output_format: str | None) -> str:
+    normalized = unicodedata.normalize("NFC", str(content))
+    normalized_output_format = str(output_format or "").strip().lower()
+    if normalized_output_format == "latex":
+        return normalized
+    return normalize_quote_glyphs(
+        normalized,
+        preserve_markdown_math=normalized_output_format == "markdown",
+    )
 
 
 def section_header_baseline_text_height(layouts: list[dict[str, Any]]) -> float:

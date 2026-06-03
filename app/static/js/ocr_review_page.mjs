@@ -3726,7 +3726,7 @@
           lineActionDisabled || (!currentBboxHasPending && !canAdvanceToNextOutput);
         lineReviewResetBboxBtn.disabled = lineActionDisabled;
         lineReviewApproveBtn.classList.toggle("approved", isApproved);
-        lineReviewApproveBtn.textContent = "Approve (A)";
+        lineReviewApproveBtn.textContent = "Approve (C)";
         applyLineStatusHighlights();
       }
 
@@ -6046,7 +6046,7 @@
           return;
         }
         if (
-          (event.key === "a" || event.key === "A") &&
+          (event.key === "c" || event.key === "C") &&
           !event.repeat &&
           !event.ctrlKey &&
           !event.metaKey &&

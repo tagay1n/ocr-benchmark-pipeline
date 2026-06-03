@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from io import BytesIO
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,6 +20,7 @@ from .ocr_content_postprocess import (
     apply_section_header_heading_level,
     list_item_indent_level_from_x1,
     list_item_indent_levels_by_layout_id,
+    normalize_ocr_content,
     normalize_formula_latex_content,
     normalize_list_item_line,
     section_header_levels_by_layout_id,
@@ -44,6 +46,8 @@ from .ocr_prompts import (
 )
 
 MAX_RETRIES_PER_LAYOUT = 2
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_now() -> str:
@@ -112,6 +116,7 @@ _list_item_indent_level_from_x1 = list_item_indent_level_from_x1
 _list_item_indent_levels_by_layout_id = list_item_indent_levels_by_layout_id
 _normalize_list_item_line = normalize_list_item_line
 _normalize_formula_latex_content = normalize_formula_latex_content
+_normalize_ocr_content = normalize_ocr_content
 _extract_text_from_response = extract_text_from_response
 _extract_content_from_json_response = extract_content_from_json_response
 _gemini_generate_content = gemini_generate_content
@@ -377,6 +382,7 @@ def extract_ocr_for_page(
             rotate_for_vertical=rotate_for_vertical,
         )
         last_error: str | None = None
+        last_exception: Exception | None = None
         response_text = ""
         used_key = ""
         retry_excluded_keys: set[str] = set()
@@ -385,6 +391,7 @@ def extract_ocr_for_page(
             try:
                 key = _next_available_key(exhausted_keys, exclude_keys=retry_excluded_keys)
             except GeminiQuotaExhaustedError as error:
+                last_exception = error
                 if not revalidated_exhausted_pool and exhausted_keys:
                     exhausted_keys = []
                     _save_usage_state(exhausted_keys)
@@ -414,6 +421,7 @@ def extract_ocr_for_page(
                 last_error = None
                 break
             except Exception as error:
+                last_exception = error
                 error_text = str(error)
                 if _is_quota_error(error_text):
                     retry_excluded_keys.add(key)
@@ -427,6 +435,28 @@ def extract_ocr_for_page(
                     break
         if last_error is not None:
             layout_id = int(layout["id"])
+            if continue_on_server_error and callable(progress_callback):
+                logger.warning(
+                    "OCR extraction failed for layout_id=%s page_id=%s rel_path=%s class=%s "
+                    "reading_order=%s model=%s temperature=%s attempts=%s max_retries=%s "
+                    "continue_on_server_error=%s error=%s",
+                    layout_id,
+                    int(page_id),
+                    str(page.rel_path),
+                    str(layout["class_name"]),
+                    int(layout["reading_order"]),
+                    resolved_model_name,
+                    resolved_temperature,
+                    int(non_quota_attempts),
+                    int(resolved_max_retries),
+                    bool(continue_on_server_error),
+                    str(last_error),
+                    exc_info=(
+                        (type(last_exception), last_exception, last_exception.__traceback__)
+                        if last_exception is not None
+                        else None
+                    ),
+                )
             failed_count += 1
             failed_layout_ids.append(layout_id)
             pending_outputs.append(
@@ -462,6 +492,7 @@ def extract_ocr_for_page(
             response_text = _normalize_list_item_line(response_text, indent_level=indent_level, fallback_marker="-")
         elif class_name == "formula":
             response_text = _normalize_formula_latex_content(response_text)
+        response_text = _normalize_ocr_content(response_text, output_format=output_format)
         lookalike_warnings = (
             detect_suspicious_lookalikes(response_text, markdown_code_aware=True)
             if output_format == "markdown"

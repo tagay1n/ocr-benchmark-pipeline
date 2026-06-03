@@ -19,6 +19,7 @@ from sqlalchemy import select
 from .config import settings
 from .db import get_session
 from .models import CaptionBinding, Layout, OcrOutput, Page
+from .ocr_content_postprocess import normalize_ocr_content
 from .statuses import STATUS_OCR_REVIEWED, to_api_status
 
 _CLASS_COLORS: dict[str, tuple[int, int, int]] = {
@@ -1211,7 +1212,10 @@ def _load_export_rows() -> list[dict[str, Any]]:
         )
         class_name = str(class_name_raw)
         output_format = None if output_format_raw is None else str(output_format_raw)
-        content = None if content_raw is None else str(content_raw)
+        content = None if content_raw is None else normalize_ocr_content(
+            str(content_raw),
+            output_format=None if output_format_raw is None else str(output_format_raw),
+        )
 
         item: dict[str, Any] = {
             "order": int(reading_order_raw),

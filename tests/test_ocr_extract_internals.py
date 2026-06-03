@@ -582,6 +582,28 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertRegex(str(by_layout[int(nested_item["id"])]["content"]), r"^\s+-\s+Nested$")
         self.assertEqual(str(by_layout[int(ordered_item["id"])]["content"]), "3) Ordered")
 
+    def test_extract_ocr_for_page_normalizes_quote_glyphs_for_markdown_content(self) -> None:
+        self._write_image("ocr/quote-normalize.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.10, y1=0.10, x2=0.90, y2=0.30),
+            ),
+        )["layout"]
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content", return_value="«Әни» һәм “әти”, $f′(x)$"
+        ):
+            ocr_extract.extract_ocr_for_page(page_id)
+
+        outputs = main.page_ocr_outputs(page_id)["outputs"]
+        by_layout = {int(output["layout_id"]): output for output in outputs}
+        self.assertEqual(str(by_layout[int(layout["id"])]["content"]), '"Әни" һәм "әти", $f′(x)$')
+
     def test_extract_ocr_for_page_normalizes_formula_content(self) -> None:
         self._write_image("ocr/formula-normalize.png")
         main.scan_images()

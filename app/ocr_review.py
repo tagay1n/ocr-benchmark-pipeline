@@ -8,8 +8,9 @@ from sqlalchemy import select
 from .db import get_session
 from .layouts import get_page
 from .layout_orientation import is_effective_vertical, normalize_layout_orientation
-from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
+from .lookalikes import detect_suspicious_lookalikes
 from .models import CaptionBinding, OcrOutput, Page, Layout
+from .ocr_content_postprocess import normalize_ocr_content
 from .ocr_output_rules import layout_class_requires_ocr, output_matches_layout_class
 
 
@@ -30,7 +31,7 @@ def _normalize_extraction_status(value: str | None) -> str:
 def _output_row_to_dict(output: OcrOutput, layout: Layout, *, bound_target_ids: list[int] | None = None) -> dict[str, Any]:
     output_format = str(output.output_format)
     extraction_status = _normalize_extraction_status(getattr(output, "extraction_status", None))
-    normalized_content = normalize_text_nfc(str(output.content))
+    normalized_content = normalize_ocr_content(str(output.content), output_format=output_format)
     lookalike_warnings = (
         detect_suspicious_lookalikes(normalized_content, markdown_code_aware=True)
         if output_format.lower() == "markdown" and extraction_status in _RESOLVED_EXTRACTION_STATUSES
@@ -112,7 +113,6 @@ def list_ocr_outputs(page_id: int) -> list[dict[str, Any]]:
 
 def update_ocr_output(layout_id: int, *, content: str) -> dict[str, Any]:
     now = _utc_now()
-    normalized_content = normalize_text_nfc(content)
     with get_session() as session:
         row = session.execute(
             select(OcrOutput, Layout)
@@ -123,6 +123,7 @@ def update_ocr_output(layout_id: int, *, content: str) -> dict[str, Any]:
             raise ValueError("OCR output not found.")
 
         output, layout = row
+        normalized_content = normalize_ocr_content(content, output_format=str(output.output_format))
         output.content = normalized_content
         output.extraction_status = "manual"
         output.error_message = None
