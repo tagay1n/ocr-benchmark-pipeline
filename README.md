@@ -77,6 +77,8 @@ supported_ocr_models:
 gemini_keys: []
 ```
 
+Gemini key selection skips keys recorded as exhausted for the day, shuffles the remaining available keys, then uses the first shuffled key for the request.
+
 Environment overrides:
 
 - `SOURCE_DIR`

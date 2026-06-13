@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import random
 
 from .config import settings
 
@@ -52,6 +53,7 @@ def next_available_key(exhausted_keys: list[str]) -> str:
     candidates = [key for key in configured if key not in exhausted_set]
     if not candidates:
         raise GeminiQuotaExhaustedError("All configured Gemini keys are exhausted for today.")
+    random.shuffle(candidates)
     return candidates[0]
 
 
@@ -60,4 +62,3 @@ def mark_key_exhausted(exhausted_keys: list[str], key: str) -> None:
         return
     exhausted_keys.append(key)
     save_usage_state(exhausted_keys)
-

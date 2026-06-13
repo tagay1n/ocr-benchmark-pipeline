@@ -207,7 +207,10 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2"])
 
     def test_next_available_key_skips_exhausted_and_raises_when_empty(self) -> None:
-        self.assertEqual(ocr_extract._next_available_key([]), "k1")
+        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: keys.reverse()) as shuffle_mock:
+            self.assertEqual(ocr_extract._next_available_key([]), "k2")
+        shuffle_mock.assert_called_once_with(["k2", "k1"])
+
         self.assertEqual(ocr_extract._next_available_key(["k1"]), "k2")
         self.assertEqual(ocr_extract._next_available_key([], exclude_keys={"k1"}), "k2")
         with self.assertRaises(ocr_extract.GeminiQuotaExhaustedError):
@@ -694,9 +697,9 @@ class OcrExtractInternalsTests(unittest.TestCase):
                 raise RuntimeError("HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier")
             return "from-k2"
 
-        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
-            ocr_extract, "_gemini_generate_content", side_effect=fake_call
-        ):
+        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: None), patch.object(
+            ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"
+        ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_call):
             result = ocr_extract.extract_ocr_for_page(page_id, layout_ids=[int(layout["id"])], max_retries_per_layout=2)
 
         self.assertEqual(result["requests_count"], 1)
@@ -725,9 +728,9 @@ class OcrExtractInternalsTests(unittest.TestCase):
                 raise RuntimeError("HTTP 429 rate limit reached")
             return "from-k2"
 
-        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
-            ocr_extract, "_gemini_generate_content", side_effect=fake_call
-        ):
+        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: None), patch.object(
+            ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"
+        ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_call):
             result = ocr_extract.extract_ocr_for_page(page_id, layout_ids=[int(layout["id"])], max_retries_per_layout=2)
 
         self.assertEqual(result["requests_count"], 1)
@@ -782,9 +785,9 @@ class OcrExtractInternalsTests(unittest.TestCase):
                 )
             return "from-k4"
 
-        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
-            ocr_extract, "_gemini_generate_content", side_effect=fake_call
-        ):
+        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: None), patch.object(
+            ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"
+        ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_call):
             result = ocr_extract.extract_ocr_for_page(
                 page_id,
                 layout_ids=[int(layout["id"])],

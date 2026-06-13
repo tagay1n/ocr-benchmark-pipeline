@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 import logging
 from pathlib import Path
+import random
 from typing import Any, Callable
 
 from sqlalchemy import delete, select
@@ -98,6 +99,7 @@ def _next_available_key(exhausted_keys: list[str], *, exclude_keys: set[str] | N
     candidates = [key for key in configured if key not in exhausted_set and key not in excluded]
     if not candidates:
         raise GeminiQuotaExhaustedError("All configured Gemini keys are exhausted for today.")
+    random.shuffle(candidates)
     return candidates[0]
 
 
