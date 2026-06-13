@@ -175,7 +175,7 @@
       const SOURCE_INK_MEAN_OFFSET = 30;
       const SOURCE_INK_DARK_PIXEL_RATIO = 0.18;
       const SOURCE_INK_MIN_RATIO = 0.2;
-      const DEFAULT_OCR_MODEL = "gemini-3-flash-preview";
+      const DEFAULT_OCR_MODEL = "gemini-3.5-flash";
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");

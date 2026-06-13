@@ -8,7 +8,7 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
-GEMINI_MODEL = "gemini-3-flash-preview"
+GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_TEMPERATURE = 0.0
 
 

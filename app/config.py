@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 
 DEFAULT_EXTENSIONS = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp")
-DEFAULT_SUPPORTED_OCR_MODELS = ("gemini-3-flash-preview", "gemini-2.5-flash")
+DEFAULT_SUPPORTED_OCR_MODELS = ("gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash")
 
 
 @dataclass(frozen=True)

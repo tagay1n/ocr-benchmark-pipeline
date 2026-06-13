@@ -254,6 +254,7 @@ class PipelineStagesTests(unittest.TestCase):
                     "db_path: data/test.db",
                     "enable_background_jobs: false",
                     "supported_ocr_models:",
+                    "  - gemini-3.5-flash",
                     "  - gemini-3-flash-preview",
                     "  - gemini-2.5-flash",
                 ]
@@ -272,7 +273,10 @@ class PipelineStagesTests(unittest.TestCase):
         ):
             loaded = config.load_settings()
 
-        self.assertEqual(loaded.supported_ocr_models, ("gemini-3-flash-preview", "gemini-2.5-flash"))
+        self.assertEqual(
+            loaded.supported_ocr_models,
+            ("gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"),
+        )
 
     def test_layout_detection_stage_creates_layouts(self) -> None:
         self._write_image("page.png", b"fake-image")
@@ -844,7 +848,7 @@ class PipelineStagesTests(unittest.TestCase):
         fake_result = {
             "page_id": page_id,
             "status": "ocr_done",
-            "model": "gemini-3-flash-preview",
+            "model": "gemini-3.5-flash",
             "layouts_total": 1,
             "extracted_count": 1,
             "skipped_count": 0,
@@ -892,7 +896,7 @@ class PipelineStagesTests(unittest.TestCase):
         fake_result = {
             "page_id": page_id,
             "status": "ocr_done",
-            "model": "gemini-3-flash-preview",
+            "model": "gemini-3.5-flash",
             "layouts_total": 1,
             "extracted_count": 1,
             "skipped_count": 0,
@@ -938,7 +942,7 @@ class PipelineStagesTests(unittest.TestCase):
         fake_result = {
             "page_id": page_id,
             "status": "ocr_done",
-            "model": "gemini-3-flash-preview",
+            "model": "gemini-3.5-flash",
             "layouts_total": 1,
             "extracted_count": 1,
             "skipped_count": 0,

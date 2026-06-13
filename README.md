@@ -71,6 +71,7 @@ allowed_image_extensions:
   - .webp
 enable_background_jobs: true
 supported_ocr_models:
+  - gemini-3.5-flash
   - gemini-3-flash-preview
   - gemini-2.5-flash
 gemini_keys: []

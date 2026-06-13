@@ -449,7 +449,7 @@ class BatchOcrApiTests(unittest.TestCase):
         log_output = "\n".join(log_context.output)
         self.assertIn(f"layout_id={layout1}", log_output)
         self.assertIn("page_id=", log_output)
-        self.assertIn("model=gemini-3-flash-preview", log_output)
+        self.assertIn("model=gemini-3.5-flash", log_output)
         self.assertIn("The read operation timed out", log_output)
 
         page_payload = main.page_details(page_id)
