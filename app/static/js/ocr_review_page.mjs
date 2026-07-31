@@ -175,7 +175,6 @@
       const SOURCE_INK_MEAN_OFFSET = 30;
       const SOURCE_INK_DARK_PIXEL_RATIO = 0.18;
       const SOURCE_INK_MIN_RATIO = 0.2;
-      const DEFAULT_OCR_MODEL = "gemini-3.5-flash";
 
       const reviewBtn = document.getElementById("review-btn");
       const reextractBtn = document.getElementById("reextract-btn");
@@ -274,8 +273,8 @@
         reextractInProgress: false,
         reextractProgressCurrent: 0,
         reextractProgressTotal: 0,
-        supportedOcrModels: [DEFAULT_OCR_MODEL],
-        defaultOcrModel: DEFAULT_OCR_MODEL,
+        supportedOcrModels: [],
+        defaultOcrModel: "",
         reconstructedRenderMode: "markdown",
         zoomMode: "automatic",
         zoomPercent: 100,
@@ -1814,11 +1813,8 @@
           seen.add(model);
           deduplicated.push(model);
         }
-        if (deduplicated.length === 0) {
-          deduplicated.push(DEFAULT_OCR_MODEL);
-        }
         const rawDefault = normalizeOcrModelName(modelsPayload?.default_model);
-        const defaultModel = deduplicated.includes(rawDefault) ? rawDefault : deduplicated[0];
+        const defaultModel = deduplicated.includes(rawDefault) ? rawDefault : (deduplicated[0] || "");
         return {
           supportedModels: deduplicated,
           defaultModel,
@@ -1921,7 +1917,12 @@
           reextractModalLayoutsContainer.querySelectorAll('input[name="reextract-layout-id"]'),
         );
         const checkedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
-        reextractModalRunBtn.disabled = state.reextractInProgress || checkboxes.length === 0 || checkedCount === 0;
+        reextractModalRunBtn.disabled = (
+          state.reextractInProgress
+          || state.supportedOcrModels.length === 0
+          || checkboxes.length === 0
+          || checkedCount === 0
+        );
         updateReextractModalSelectAllState();
         updateReextractModalRunButtonLabel();
       }
@@ -2003,12 +2004,12 @@
         if (!(reextractModalModelInput instanceof HTMLSelectElement)) {
           return;
         }
-        const supportedModels = Array.isArray(state.supportedOcrModels) && state.supportedOcrModels.length > 0
+        const supportedModels = Array.isArray(state.supportedOcrModels)
           ? state.supportedOcrModels
-          : [DEFAULT_OCR_MODEL];
+          : [];
         const defaultModel = supportedModels.includes(state.defaultOcrModel)
           ? state.defaultOcrModel
-          : supportedModels[0];
+          : (supportedModels[0] || "");
         reextractModalModelInput.innerHTML = "";
         for (const modelName of supportedModels) {
           const option = document.createElement("option");

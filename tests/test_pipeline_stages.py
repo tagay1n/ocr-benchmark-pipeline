@@ -68,7 +68,7 @@ class PipelineStagesTests(unittest.TestCase):
                         class_name=str(class_name),
                         output_format=str(output_format),
                         content=str(content),
-                        model_name="gemini-3-flash-preview",
+                        model_name="test-model",
                         key_alias="test-key",
                         created_at=now,
                         updated_at=now,
@@ -254,9 +254,9 @@ class PipelineStagesTests(unittest.TestCase):
                     "db_path: data/test.db",
                     "enable_background_jobs: false",
                     "supported_ocr_models:",
-                    "  - gemini-3.5-flash",
-                    "  - gemini-3-flash-preview",
-                    "  - gemini-2.5-flash",
+                    "  - model-a",
+                    "  - model-b",
+                    "  - model-a",
                 ]
             )
             + "\n",
@@ -275,7 +275,7 @@ class PipelineStagesTests(unittest.TestCase):
 
         self.assertEqual(
             loaded.supported_ocr_models,
-            ("gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"),
+            ("model-a", "model-b"),
         )
 
     def test_layout_detection_stage_creates_layouts(self) -> None:
@@ -655,7 +655,7 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertIn("Keep text as normal Markdown paragraphs.", first["prompt"])
         self.assertNotIn("clip", first["prompt"].lower())
 
-    def test_ocr_extract_stores_exhausted_keys_as_json_array(self) -> None:
+    def test_ocr_extract_stores_exhausted_keys_in_model_quota_state(self) -> None:
         self.test_settings = Settings(
             project_root=self.project_root,
             source_dir=self.project_root / "input",
@@ -692,22 +692,30 @@ class PipelineStagesTests(unittest.TestCase):
         main.complete_layout_review(page_id)
 
         def fake_gemini_call(
-            api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0
+            api_key: str,
+            prompt: str,
+            image_bytes: bytes,
+            *,
+            model_name: str,
+            temperature: float = 0.0,
         ) -> str:
-            del prompt, image_bytes
+            del prompt, image_bytes, model_name
             if api_key == "k1":
                 raise RuntimeError("HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier")
             self.assertEqual(temperature, 0.0)
             return "Extracted text"
 
         with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
-            ocr_extract, "_gemini_generate_content", side_effect=fake_gemini_call
-        ):
+            ocr_extract, "_next_available_key", side_effect=["k1", "k2"]
+        ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_gemini_call):
             result = pipeline_runtime._ocr_extract_handler({"page_id": page_id, "payload": {}, "id": 1, "stage": "ocr_extract"})
 
         self.assertEqual(result["status"], "ocr_done")
         usage_payload = json.loads(self.test_settings.gemini_usage_path.read_text(encoding="utf-8"))
-        self.assertEqual(usage_payload, ["k1"])
+        self.assertEqual(
+            usage_payload["models"][ocr_extract.default_ocr_model()],
+            ["k1"],
+        )
 
     def test_ocr_review_flow_updates_output_and_marks_reviewed(self) -> None:
         self.test_settings = Settings(
@@ -848,7 +856,7 @@ class PipelineStagesTests(unittest.TestCase):
         fake_result = {
             "page_id": page_id,
             "status": "ocr_done",
-            "model": "gemini-3.5-flash",
+            "model": ocr_extract.default_ocr_model(),
             "layouts_total": 1,
             "extracted_count": 1,
             "skipped_count": 0,
@@ -861,7 +869,7 @@ class PipelineStagesTests(unittest.TestCase):
         }
         request_payload = main.ReextractOcrRequest(
             layout_ids=[layout_id],
-            model_name="gemini-2.5-flash",
+            model_name="requested-model",
             prompt_template="Rules: {class_rule}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
@@ -873,7 +881,7 @@ class PipelineStagesTests(unittest.TestCase):
         extract_mock.assert_called_once_with(
             page_id,
             layout_ids=[layout_id],
-            model_name="gemini-2.5-flash",
+            model_name="requested-model",
             prompt_template="Rules: {class_rule}. {format_rule}",
             temperature=0.2,
             max_retries_per_layout=5,
@@ -896,7 +904,7 @@ class PipelineStagesTests(unittest.TestCase):
         fake_result = {
             "page_id": page_id,
             "status": "ocr_done",
-            "model": "gemini-3.5-flash",
+            "model": ocr_extract.default_ocr_model(),
             "layouts_total": 1,
             "extracted_count": 1,
             "skipped_count": 0,
@@ -942,7 +950,7 @@ class PipelineStagesTests(unittest.TestCase):
         fake_result = {
             "page_id": page_id,
             "status": "ocr_done",
-            "model": "gemini-3.5-flash",
+            "model": ocr_extract.default_ocr_model(),
             "layouts_total": 1,
             "extracted_count": 1,
             "skipped_count": 0,

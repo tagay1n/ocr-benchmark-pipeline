@@ -99,7 +99,7 @@ class BatchOcrApiTests(unittest.TestCase):
                     class_name="text",
                     output_format="markdown",
                     content="already extracted",
-                    model_name="gemini-3-flash-preview",
+                    model_name="test-model",
                     key_alias="k1",
                     created_at=now,
                     updated_at=now,
@@ -381,7 +381,7 @@ class BatchOcrApiTests(unittest.TestCase):
                     class_name="text",
                     output_format="markdown",
                     content="existing content",
-                    model_name="gemini-3-flash-preview",
+                    model_name="test-model",
                     key_alias="k1",
                     created_at=now,
                     updated_at=now,
@@ -449,7 +449,7 @@ class BatchOcrApiTests(unittest.TestCase):
         log_output = "\n".join(log_context.output)
         self.assertIn(f"layout_id={layout1}", log_output)
         self.assertIn("page_id=", log_output)
-        self.assertIn("model=gemini-3.5-flash", log_output)
+        self.assertIn(f"model={ocr_extract.default_ocr_model()}", log_output)
         self.assertIn("The read operation timed out", log_output)
 
         page_payload = main.page_details(page_id)
@@ -663,7 +663,7 @@ class BatchOcrApiTests(unittest.TestCase):
                     class_name="text",
                     output_format="markdown",
                     content="already extracted",
-                    model_name="gemini-3-flash-preview",
+                    model_name="test-model",
                     key_alias="k1",
                     created_at=now,
                     updated_at=now,

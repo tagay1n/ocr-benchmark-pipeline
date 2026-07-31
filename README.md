@@ -70,14 +70,12 @@ allowed_image_extensions:
   - .tiff
   - .webp
 enable_background_jobs: true
-supported_ocr_models:
-  - gemini-3.5-flash
-  - gemini-3-flash-preview
-  - gemini-2.5-flash
 gemini_keys: []
 ```
 
-Gemini key selection skips keys recorded as exhausted for the day, shuffles the remaining available keys, then uses the first shuffled key for the request.
+The ordered `supported_ocr_models` list in `config.yaml` is the source of truth for OCR models. Its first entry is used as the default for batch and manual OCR; `SUPPORTED_OCR_MODELS` can override the complete list.
+
+Gemini key selection skips keys recorded as daily-quota exhausted for the selected model, shuffles the remaining available keys, then uses the first shuffled key. Daily exhaustion is merged and atomically persisted to `_artifacts/gemini_usage.json` immediately after each response, grouped by model and Pacific-time quota day. Per-minute rate limits are request-local and are not recorded as daily exhaustion.
 
 Environment overrides:
 

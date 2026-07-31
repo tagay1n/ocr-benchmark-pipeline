@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import replace
+import inspect
 from io import BytesIO
 import json
 from pathlib import Path
@@ -8,7 +10,18 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from app import config, db, discovery, final_export, layouts, main, ocr_extract, runtime_options
+from app import (
+    config,
+    db,
+    discovery,
+    final_export,
+    layouts,
+    main,
+    ocr_extract,
+    ocr_gemini_client,
+    ocr_key_store,
+    runtime_options,
+)
 from app.config import DEFAULT_EXTENSIONS, Settings
 from app.lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 
@@ -55,6 +68,26 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(len(pages), 1)
         return int(pages[0]["id"])
 
+    def test_default_ocr_model_is_first_configured_supported_model(self) -> None:
+        configured_settings = replace(
+            self.test_settings,
+            supported_ocr_models=("configured-default", "configured-alternate"),
+        )
+        with patch.object(ocr_extract, "settings", configured_settings):
+            self.assertEqual(
+                ocr_extract.supported_ocr_models(),
+                ("configured-default", "configured-alternate"),
+            )
+            self.assertEqual(ocr_extract.default_ocr_model(), "configured-default")
+
+    def test_gemini_client_requires_explicit_model_name(self) -> None:
+        model_parameter = inspect.signature(
+            ocr_gemini_client.gemini_generate_content
+        ).parameters["model_name"]
+
+        self.assertEqual(model_parameter.kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertEqual(model_parameter.default, inspect.Parameter.empty)
+
     def test_prompt_for_layout_maps_output_formats(self) -> None:
         prompt_template = (
             "{class_rule}\n"
@@ -74,7 +107,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         )
         self.assertEqual(section_fmt, "markdown")
         self.assertIn("Treat this crop as heading-like text.", section_prompt)
-        self.assertIn("Keep text as normal Markdown paragraphs.", section_prompt)
+        self.assertIn("Keep one semantic header in one Markdown heading line.", section_prompt)
         picture_text_prompt, picture_text_fmt = ocr_extract._prompt_for_layout(
             {"class_name": "picture_text"},
             prompt_template=prompt_template,
@@ -180,6 +213,16 @@ class OcrExtractInternalsTests(unittest.TestCase):
             )
         )
         self.assertFalse(ocr_extract._is_daily_quota_exhausted_error("HTTP 429 rate limit reached"))
+        self.assertFalse(
+            ocr_extract._is_daily_quota_exhausted_error(
+                "HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+            )
+        )
+        self.assertFalse(
+            ocr_extract._is_daily_quota_exhausted_error(
+                "HTTP 429 quota metric generate_content_free_tier_requests"
+            )
+        )
 
     def test_is_gemini_server_error_matches_timeout_and_http_5xx(self) -> None:
         self.assertTrue(ocr_extract._is_gemini_server_error("The read operation timed out"))
@@ -201,13 +244,55 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(ocr_extract._load_usage_state(), [])
 
         ocr_extract._save_usage_state(["k1", "k2"])
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), ["k1", "k2"])
+        saved_payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertIsInstance(saved_payload, dict)
+        self.assertEqual(
+            saved_payload["models"][ocr_extract.default_ocr_model()],
+            ["k1", "k2"],
+        )
+        self.assertRegex(str(saved_payload["quota_day"]), r"^\d{4}-\d{2}-\d{2}$")
 
         path.write_text(json.dumps(["k1", "k1", " ", "k2"]), encoding="utf-8")
         self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2"])
 
+    def test_mark_key_exhausted_merges_with_latest_persisted_state(self) -> None:
+        first_snapshot: list[str] = []
+        stale_second_snapshot: list[str] = []
+
+        ocr_extract._mark_key_exhausted(first_snapshot, "k1")
+        ocr_extract._mark_key_exhausted(stale_second_snapshot, "k2")
+
+        self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2"])
+        self.assertEqual(stale_second_snapshot, ["k1", "k2"])
+
+    def test_exhausted_keys_are_isolated_by_model(self) -> None:
+        first_model, second_model = ocr_extract.supported_ocr_models()[:2]
+
+        ocr_extract._mark_key_exhausted([], "k1", model_name=first_model)
+
+        self.assertEqual(ocr_extract._load_usage_state(model_name=first_model), ["k1"])
+        self.assertEqual(ocr_extract._load_usage_state(model_name=second_model), [])
+
+    def test_usage_state_resets_on_new_pacific_quota_day(self) -> None:
+        path = Path(self.test_settings.gemini_usage_path or "")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "quota_day": "2000-01-01",
+                    "models": {ocr_extract.default_ocr_model(): ["k1"]},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        self.assertEqual(ocr_extract._load_usage_state(), [])
+        reset_payload = json.loads(path.read_text(encoding="utf-8"))
+        self.assertNotEqual(reset_payload["quota_day"], "2000-01-01")
+        self.assertEqual(reset_payload["models"], {})
+
     def test_next_available_key_skips_exhausted_and_raises_when_empty(self) -> None:
-        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: keys.reverse()) as shuffle_mock:
+        with patch.object(ocr_key_store.random, "shuffle", side_effect=lambda keys: keys.reverse()) as shuffle_mock:
             self.assertEqual(ocr_extract._next_available_key([]), "k2")
         shuffle_mock.assert_called_once_with(["k2", "k1"])
 
@@ -215,6 +300,49 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertEqual(ocr_extract._next_available_key([], exclude_keys={"k1"}), "k2")
         with self.assertRaises(ocr_extract.GeminiQuotaExhaustedError):
             ocr_extract._next_available_key(["k1", "k2"])
+        with self.assertRaisesRegex(
+            ocr_extract.GeminiQuotaExhaustedError,
+            "already been tried for this layout",
+        ):
+            ocr_extract._next_available_key([], exclude_keys={"k1", "k2"})
+
+    def test_next_available_key_refreshes_persisted_exhaustion(self) -> None:
+        ocr_extract._save_usage_state(["k1"])
+        stale_snapshot: list[str] = []
+
+        with patch.object(ocr_key_store.random, "shuffle", side_effect=lambda keys: None):
+            selected = ocr_extract._next_available_key(stale_snapshot)
+
+        self.assertEqual(selected, "k2")
+        self.assertEqual(stale_snapshot, ["k1"])
+
+    def test_extract_ocr_does_not_clear_fully_exhausted_model_state(self) -> None:
+        self._write_image("ocr/all-daily-keys-exhausted.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+        ocr_extract._save_usage_state(["k1", "k2"])
+
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
+            ocr_extract, "_gemini_generate_content"
+        ) as gemini_mock:
+            result = ocr_extract.extract_ocr_for_page(
+                page_id,
+                layout_ids=[int(layout["id"])],
+            )
+
+        gemini_mock.assert_not_called()
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2"])
+        output = main.page_ocr_outputs(page_id)["outputs"][0]
+        self.assertIn("exhausted for today", str(output["error_message"]))
 
     def test_extract_text_from_response_collects_nonempty_parts(self) -> None:
         payload = {
@@ -691,13 +819,20 @@ class OcrExtractInternalsTests(unittest.TestCase):
             ),
         )["layout"]
 
-        def fake_call(api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0) -> str:
-            del prompt, image_bytes, temperature
+        def fake_call(
+            api_key: str,
+            prompt: str,
+            image_bytes: bytes,
+            *,
+            model_name: str,
+            temperature: float = 0.0,
+        ) -> str:
+            del prompt, image_bytes, model_name, temperature
             if api_key == "k1":
                 raise RuntimeError("HTTP 429 RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier")
             return "from-k2"
 
-        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: None), patch.object(
+        with patch.object(ocr_key_store.random, "shuffle", side_effect=lambda keys: None), patch.object(
             ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"
         ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_call):
             result = ocr_extract.extract_ocr_for_page(page_id, layout_ids=[int(layout["id"])], max_retries_per_layout=2)
@@ -706,8 +841,47 @@ class OcrExtractInternalsTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(outputs[0]["content"], "from-k2")
         self.assertEqual(outputs[0]["key_alias"], "k2")
-        usage_path = Path(self.test_settings.gemini_usage_path or "")
-        self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), ["k1"])
+        self.assertEqual(ocr_extract._load_usage_state(), ["k1"])
+
+    def test_daily_exhaustion_is_persisted_before_keyboard_interrupt(self) -> None:
+        self._write_image("ocr/interrupted-key-rotation.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(
+            page_id,
+            main.CreateLayoutRequest(
+                class_name="text",
+                reading_order=1,
+                bbox=main.BBoxPayload(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            ),
+        )["layout"]
+
+        def fake_call(
+            api_key: str,
+            _prompt: str,
+            _image_bytes: bytes,
+            *,
+            model_name: str,
+            temperature: float = 0.0,
+        ) -> str:
+            del model_name, temperature
+            if api_key == "k1":
+                raise RuntimeError(
+                    "HTTP 429 RESOURCE_EXHAUSTED "
+                    "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+                )
+            raise KeyboardInterrupt()
+
+        with patch.object(ocr_key_store.random, "shuffle", side_effect=lambda keys: None), patch.object(
+            ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"
+        ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_call):
+            with self.assertRaises(KeyboardInterrupt):
+                ocr_extract.extract_ocr_for_page(
+                    page_id,
+                    layout_ids=[int(layout["id"])],
+                )
+
+        self.assertEqual(ocr_extract._load_usage_state(), ["k1"])
 
     def test_extract_ocr_rate_limit_rotates_without_persisting_exhausted_key(self) -> None:
         self._write_image("ocr/rate-limit.png")
@@ -722,13 +896,20 @@ class OcrExtractInternalsTests(unittest.TestCase):
             ),
         )["layout"]
 
-        def fake_call(api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0) -> str:
-            del prompt, image_bytes, temperature
+        def fake_call(
+            api_key: str,
+            prompt: str,
+            image_bytes: bytes,
+            *,
+            model_name: str,
+            temperature: float = 0.0,
+        ) -> str:
+            del prompt, image_bytes, model_name, temperature
             if api_key == "k1":
                 raise RuntimeError("HTTP 429 rate limit reached")
             return "from-k2"
 
-        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: None), patch.object(
+        with patch.object(ocr_key_store.random, "shuffle", side_effect=lambda keys: None), patch.object(
             ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"
         ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_call):
             result = ocr_extract.extract_ocr_for_page(page_id, layout_ids=[int(layout["id"])], max_retries_per_layout=2)
@@ -737,9 +918,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(outputs[0]["content"], "from-k2")
         self.assertEqual(outputs[0]["key_alias"], "k2")
-        usage_path = Path(self.test_settings.gemini_usage_path or "")
-        if usage_path.exists():
-            self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), [])
+        self.assertEqual(ocr_extract._load_usage_state(), [])
 
     def test_extract_ocr_quota_rotation_is_not_limited_by_non_quota_retries(self) -> None:
         self.test_settings = Settings(
@@ -776,8 +955,15 @@ class OcrExtractInternalsTests(unittest.TestCase):
             ),
         )["layout"]
 
-        def fake_call(api_key: str, prompt: str, image_bytes: bytes, *, temperature: float = 0.0) -> str:
-            del prompt, image_bytes, temperature
+        def fake_call(
+            api_key: str,
+            prompt: str,
+            image_bytes: bytes,
+            *,
+            model_name: str,
+            temperature: float = 0.0,
+        ) -> str:
+            del prompt, image_bytes, model_name, temperature
             if api_key in {"k1", "k2", "k3"}:
                 raise RuntimeError(
                     "HTTP 429 RESOURCE_EXHAUSTED "
@@ -785,7 +971,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
                 )
             return "from-k4"
 
-        with patch.object(ocr_extract.random, "shuffle", side_effect=lambda keys: None), patch.object(
+        with patch.object(ocr_key_store.random, "shuffle", side_effect=lambda keys: None), patch.object(
             ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"
         ), patch.object(ocr_extract, "_gemini_generate_content", side_effect=fake_call):
             result = ocr_extract.extract_ocr_for_page(
@@ -798,8 +984,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(outputs[0]["content"], "from-k4")
         self.assertEqual(outputs[0]["key_alias"], "k4")
-        usage_path = Path(self.test_settings.gemini_usage_path or "")
-        self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), ["k1", "k2", "k3"])
+        self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2", "k3"])
 
     def test_extract_ocr_non_quota_error_does_not_mark_key_exhausted(self) -> None:
         self._write_image("ocr/non-quota.png")
@@ -833,9 +1018,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertIn("HTTP 500 transient", str(outputs[0]["error_message"]))
         self.assertEqual(main.page_details(page_id)["page"]["status"], "ocr_done")
 
-        usage_path = Path(self.test_settings.gemini_usage_path or "")
-        if usage_path.exists():
-            self.assertEqual(json.loads(usage_path.read_text(encoding="utf-8")), [])
+        self.assertEqual(ocr_extract._load_usage_state(), [])
 
     def test_extract_ocr_continues_on_server_error_when_enabled(self) -> None:
         self._write_image("ocr/continue-on-timeout.png")
@@ -887,6 +1070,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertIn("timed out", str(by_layout[int(first["id"])]["error_message"]).lower())
 
     def test_extract_ocr_uses_selected_supported_model_for_manual_reextract(self) -> None:
+        selected_model = ocr_extract.supported_ocr_models()[-1]
         self._write_image("ocr/model-override.png")
         main.scan_images()
         page_id = self._single_page_id()
@@ -902,24 +1086,20 @@ class OcrExtractInternalsTests(unittest.TestCase):
         with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png-bytes"), patch.object(
             ocr_extract,
             "_gemini_generate_content",
-            side_effect=RuntimeError("default model helper should not be called"),
-        ) as default_model_mock, patch.object(
-            ocr_extract,
-            "_gemini_generate_content_with_model",
             return_value="Model override text",
-        ) as override_model_mock:
+        ) as gemini_mock:
             result = ocr_extract.extract_ocr_for_page(
                 page_id,
                 layout_ids=[int(layout["id"])],
-                model_name="gemini-2.5-flash",
+                model_name=selected_model,
             )
 
-        self.assertEqual(result["model"], "gemini-2.5-flash")
-        default_model_mock.assert_not_called()
-        override_model_mock.assert_called_once()
+        self.assertEqual(result["model"], selected_model)
+        gemini_mock.assert_called_once()
+        self.assertEqual(gemini_mock.call_args.kwargs["model_name"], selected_model)
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(len(outputs), 1)
-        self.assertEqual(str(outputs[0]["model_name"]), "gemini-2.5-flash")
+        self.assertEqual(str(outputs[0]["model_name"]), selected_model)
 
     def test_extract_ocr_rejects_unsupported_model_name(self) -> None:
         self._write_image("ocr/unsupported-model.png")

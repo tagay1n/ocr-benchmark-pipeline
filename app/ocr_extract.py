@@ -5,7 +5,6 @@ from io import BytesIO
 import json
 import logging
 from pathlib import Path
-import random
 from typing import Any, Callable
 
 from sqlalchemy import delete, select
@@ -28,11 +27,9 @@ from .ocr_content_postprocess import (
 )
 from .ocr_gemini_client import (
     DEFAULT_GEMINI_TEMPERATURE,
-    GEMINI_MODEL,
     extract_content_from_json_response,
     extract_text_from_response,
     gemini_generate_content,
-    gemini_generate_content_with_model,
     is_daily_quota_exhausted_error,
     is_gemini_server_error,
     is_quota_error,
@@ -40,6 +37,10 @@ from .ocr_gemini_client import (
 )
 from .ocr_key_store import (
     GeminiQuotaExhaustedError,
+    load_usage_state,
+    mark_key_exhausted,
+    next_available_key,
+    save_usage_state,
 )
 from .ocr_prompts import (
     DEFAULT_PROMPT_TEMPLATE,
@@ -62,52 +63,45 @@ def _usage_path() -> Path:
     return configured
 
 
-def _load_usage_state() -> list[str]:
-    path = _usage_path()
-    if not path.exists():
-        return []
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return []
-    if not isinstance(payload, list):
-        return []
-
-    exhausted_keys: list[str] = []
-    seen: set[str] = set()
-    for value in payload:
-        key = str(value).strip()
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        exhausted_keys.append(key)
-    return exhausted_keys
+def _load_usage_state(*, model_name: str | None = None) -> list[str]:
+    resolved_model_name = default_ocr_model() if model_name is None else str(model_name).strip()
+    return load_usage_state(_usage_path(), model_name=resolved_model_name)
 
 
-def _save_usage_state(exhausted_keys: list[str]) -> None:
-    path = _usage_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(exhausted_keys, ensure_ascii=True, indent=2), encoding="utf-8")
+def _save_usage_state(exhausted_keys: list[str], *, model_name: str | None = None) -> None:
+    resolved_model_name = default_ocr_model() if model_name is None else str(model_name).strip()
+    save_usage_state(_usage_path(), exhausted_keys, model_name=resolved_model_name)
 
 
-def _next_available_key(exhausted_keys: list[str], *, exclude_keys: set[str] | None = None) -> str:
-    configured = list(settings.gemini_keys)
-    if not configured:
-        raise GeminiQuotaExhaustedError("No Gemini API keys configured.")
-    excluded = exclude_keys or set()
-    exhausted_set = set(exhausted_keys)
-    candidates = [key for key in configured if key not in exhausted_set and key not in excluded]
-    if not candidates:
-        raise GeminiQuotaExhaustedError("All configured Gemini keys are exhausted for today.")
-    random.shuffle(candidates)
-    return candidates[0]
+def _next_available_key(
+    exhausted_keys: list[str],
+    *,
+    exclude_keys: set[str] | None = None,
+    model_name: str | None = None,
+) -> str:
+    resolved_model_name = default_ocr_model() if model_name is None else str(model_name).strip()
+    return next_available_key(
+        _usage_path(),
+        settings.gemini_keys,
+        exhausted_keys,
+        model_name=resolved_model_name,
+        exclude_keys=exclude_keys,
+    )
 
 
-def _mark_key_exhausted(exhausted_keys: list[str], key: str) -> None:
-    if key in exhausted_keys:
-        return
-    exhausted_keys.append(key)
-    _save_usage_state(exhausted_keys)
+def _mark_key_exhausted(
+    exhausted_keys: list[str],
+    key: str,
+    *,
+    model_name: str | None = None,
+) -> None:
+    resolved_model_name = default_ocr_model() if model_name is None else str(model_name).strip()
+    mark_key_exhausted(
+        _usage_path(),
+        exhausted_keys,
+        key,
+        model_name=resolved_model_name,
+    )
 
 
 # Backward-compatible aliases for tests and existing call sites.
@@ -122,7 +116,6 @@ _normalize_ocr_content = normalize_ocr_content
 _extract_text_from_response = extract_text_from_response
 _extract_content_from_json_response = extract_content_from_json_response
 _gemini_generate_content = gemini_generate_content
-_gemini_generate_content_with_model = gemini_generate_content_with_model
 _is_quota_error = is_quota_error
 _is_daily_quota_exhausted_error = is_daily_quota_exhausted_error
 _is_gemini_server_error = is_gemini_server_error
@@ -132,19 +125,12 @@ _key_alias = key_alias
 def supported_ocr_models() -> tuple[str, ...]:
     configured = tuple(str(value).strip() for value in settings.supported_ocr_models if str(value).strip())
     if not configured:
-        return (GEMINI_MODEL,)
-    deduplicated: list[str] = []
-    seen: set[str] = set()
-    for model_name in configured:
-        if model_name in seen:
-            continue
-        seen.add(model_name)
-        deduplicated.append(model_name)
-    return tuple(deduplicated) if deduplicated else (GEMINI_MODEL,)
+        raise RuntimeError("At least one supported OCR model must be configured.")
+    return configured
 
 
 def default_ocr_model() -> str:
-    return GEMINI_MODEL
+    return supported_ocr_models()[0]
 
 
 def _prompt_for_layout(layout: dict[str, Any], *, prompt_template: str) -> tuple[str, str]:
@@ -322,11 +308,9 @@ def extract_ocr_for_page(
     if resolved_max_retries < 1:
         raise ValueError("max_retries_per_layout must be >= 1.")
 
-    exhausted_keys = _load_usage_state()
+    exhausted_keys = _load_usage_state(model_name=resolved_model_name)
     section_header_levels = _section_header_levels_by_layout_id(layouts)
     list_item_indent_levels = _list_item_indent_levels_by_layout_id(layouts)
-    revalidated_exhausted_pool = False
-
     pending_outputs: list[dict[str, Any]] = []
     prompt_debug_rows: list[dict[str, Any]] = []
     extracted_count = 0
@@ -391,33 +375,23 @@ def extract_ocr_for_page(
         non_quota_attempts = 0
         while True:
             try:
-                key = _next_available_key(exhausted_keys, exclude_keys=retry_excluded_keys)
+                key = _next_available_key(
+                    exhausted_keys,
+                    exclude_keys=retry_excluded_keys,
+                    model_name=resolved_model_name,
+                )
             except GeminiQuotaExhaustedError as error:
                 last_exception = error
-                if not revalidated_exhausted_pool and exhausted_keys:
-                    exhausted_keys = []
-                    _save_usage_state(exhausted_keys)
-                    retry_excluded_keys.clear()
-                    revalidated_exhausted_pool = True
-                    continue
                 last_error = str(error)
                 break
             try:
-                if resolved_model_name == default_ocr_model():
-                    response_text = _gemini_generate_content(
-                        key,
-                        prompt,
-                        image_bytes,
-                        temperature=resolved_temperature,
-                    )
-                else:
-                    response_text = _gemini_generate_content_with_model(
-                        key,
-                        prompt,
-                        image_bytes,
-                        model_name=resolved_model_name,
-                        temperature=resolved_temperature,
-                    )
+                response_text = _gemini_generate_content(
+                    key,
+                    prompt,
+                    image_bytes,
+                    model_name=resolved_model_name,
+                    temperature=resolved_temperature,
+                )
                 request_count += 1
                 used_key = key
                 last_error = None
@@ -428,7 +402,11 @@ def extract_ocr_for_page(
                 if _is_quota_error(error_text):
                     retry_excluded_keys.add(key)
                     if _is_daily_quota_exhausted_error(error_text):
-                        _mark_key_exhausted(exhausted_keys, key)
+                        _mark_key_exhausted(
+                            exhausted_keys,
+                            key,
+                            model_name=resolved_model_name,
+                        )
                     last_error = error_text
                     continue
                 last_error = error_text

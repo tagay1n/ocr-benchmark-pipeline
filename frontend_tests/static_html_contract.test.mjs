@@ -51,6 +51,13 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
 });
 
+test("OCR review gets model names from backend configuration", () => {
+  const pageModule = readModule("app/static/js/ocr_review_page.mjs");
+
+  assert.doesNotMatch(pageModule, /gemini-\d/i);
+  assert.equal(pageModule.includes("DEFAULT_OCR_MODEL"), false);
+});
+
 test("qa review HTML keeps dedicated phase and in-place review hooks", () => {
   const html = readHtml("app/static/qa_review.html");
   const pageModule = readModule("app/static/js/qa_review_page.mjs");

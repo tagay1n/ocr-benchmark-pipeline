@@ -8,7 +8,6 @@ from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
-GEMINI_MODEL = "gemini-3.5-flash"
 DEFAULT_GEMINI_TEMPERATURE = 0.0
 
 
@@ -63,22 +62,6 @@ def extract_content_from_json_response(raw_text: str) -> str:
 
 
 def gemini_generate_content(
-    api_key: str,
-    prompt: str,
-    image_bytes: bytes,
-    *,
-    temperature: float = DEFAULT_GEMINI_TEMPERATURE,
-) -> str:
-    return gemini_generate_content_with_model(
-        api_key,
-        prompt,
-        image_bytes,
-        model_name=GEMINI_MODEL,
-        temperature=temperature,
-    )
-
-
-def gemini_generate_content_with_model(
     api_key: str,
     prompt: str,
     image_bytes: bytes,
@@ -157,7 +140,6 @@ def is_daily_quota_exhausted_error(message: str) -> bool:
         "requestsperday",
         "generaterequestsperday",
         "requests per day",
-        "free_tier_requests",
     )
     return any(marker in normalized for marker in daily_markers)
 
