@@ -70,6 +70,11 @@ allowed_image_extensions:
   - .tiff
   - .webp
 enable_background_jobs: true
+supported_ocr_models:
+  - gemini-3.7-flash
+  - gemini-3.6-flash
+  - gemini-3.5-flash
+  - gemini-3-flash-preview
 gemini_keys: []
 ```
 

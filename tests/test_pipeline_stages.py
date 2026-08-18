@@ -278,6 +278,10 @@ class PipelineStagesTests(unittest.TestCase):
             ("model-a", "model-b"),
         )
 
+    def test_builtin_ocr_models_default_to_gemini_3_7_flash(self) -> None:
+        self.assertEqual(config.DEFAULT_SUPPORTED_OCR_MODELS[0], "gemini-3.7-flash")
+        self.assertIn("gemini-3.7-flash", config.DEFAULT_SUPPORTED_OCR_MODELS)
+
     def test_layout_detection_stage_creates_layouts(self) -> None:
         self._write_image("page.png", b"fake-image")
         main.scan_images()
