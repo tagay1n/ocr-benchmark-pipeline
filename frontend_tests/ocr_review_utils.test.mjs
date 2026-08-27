@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyInlineMarkdownWrapper,
   applyLinePrefixMarkdown,
+  applyManualContentDraft,
   containsCombiningMarks,
   computeLineReviewDisplayGeometry,
   computeLineReviewSourceRenderPlan,
@@ -44,6 +45,25 @@ import {
   tokenBoundsAtOffset,
   textOffsetForLineIndex,
 } from "../app/static/js/ocr_review_utils.mjs";
+
+test("applyManualContentDraft resolves a failed OCR output for local reconstruction", () => {
+  const failedOutput = {
+    layout_id: 17,
+    content: "",
+    extraction_status: "failed",
+    error_message: "Model returned no content.",
+  };
+
+  const draftedOutput = applyManualContentDraft(failedOutput, "Manually transcribed text");
+
+  assert.deepEqual(draftedOutput, {
+    layout_id: 17,
+    content: "Manually transcribed text",
+    extraction_status: "manual",
+    error_message: null,
+  });
+  assert.equal(failedOutput.extraction_status, "failed");
+});
 
 test("computeReconstructedImageCropStyle converts bbox to scalable crop percentages", () => {
   assert.deepEqual(

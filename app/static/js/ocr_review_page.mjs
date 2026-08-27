@@ -30,6 +30,7 @@
       import {
         applyInlineMarkdownWrapper,
         applyLinePrefixMarkdown,
+        applyManualContentDraft,
         containsCombiningMarks,
         computeViewportAutoCenterTarget,
         computeEditorToolbarState,
@@ -2166,7 +2167,7 @@
         state.outputs = state.outputs.map((output) => {
           const draft = state.localEditsByLayoutId[String(output.layout_id)];
           if (!draft) return output;
-          return { ...output, content: String(draft.content ?? "") };
+          return applyManualContentDraft(output, draft.content);
         });
       }
 
@@ -5381,6 +5382,8 @@
           : toDraftShape(output);
         if (sameDraft(nextDraft, baseline)) {
           delete state.localEditsByLayoutId[String(layoutId)];
+          output.extraction_status = String(baselineOutput?.extraction_status || output.extraction_status || "ok");
+          output.error_message = baselineOutput?.error_message == null ? null : String(baselineOutput.error_message);
           output.lookalike_warning_count = Number(baselineOutput?.lookalike_warning_count || 0);
           output.lookalike_warning_line_indexes = Array.isArray(baselineOutput?.lookalike_warning_line_indexes)
             ? [...baselineOutput.lookalike_warning_line_indexes]
@@ -5390,6 +5393,7 @@
             : [];
           setStatus("Draft cleared (matches extracted value).");
         } else {
+          Object.assign(output, applyManualContentDraft(output, nextDraft.content));
           state.localEditsByLayoutId[String(layoutId)] = nextDraft;
           output.lookalike_warning_count = 0;
           output.lookalike_warning_line_indexes = [];

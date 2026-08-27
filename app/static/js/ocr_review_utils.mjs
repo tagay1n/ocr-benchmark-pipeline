@@ -78,6 +78,15 @@ function normalizedOutputRow(output) {
   };
 }
 
+export function applyManualContentDraft(output, content) {
+  return {
+    ...(output && typeof output === "object" ? output : {}),
+    content: String(content ?? ""),
+    extraction_status: "manual",
+    error_message: null,
+  };
+}
+
 function buildMissingOutputRow(layout, pageId) {
   const layoutId = Number(layout?.id);
   const className = String(layout?.class_name || "");
