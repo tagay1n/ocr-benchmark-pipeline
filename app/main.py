@@ -8,7 +8,17 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings as settings
 from .db import init_db
-from .models import Layout, OcrOutput, Page, PipelineEvent, PipelineJob
+from .models import (
+    Layout,
+    OcrOutput,
+    OcrVerificationFinding,
+    OcrVerificationResolution,
+    OcrVerificationRun,
+    OcrVerificationTask,
+    Page,
+    PipelineEvent,
+    PipelineJob,
+)
 from .ocr_extract import extract_ocr_for_page as extract_ocr_for_page
 from .layout_benchmark import recover_layout_benchmark_after_restart
 from .pipeline_runtime import (
@@ -19,7 +29,15 @@ from .pipeline_runtime import (
     register_default_handlers,
 )
 from .runtime_options import reset_runtime_options_from_settings
-from .api import batch_ocr_router, benchmark_router, discovery_router, pipeline_router, review_router
+from .ocr_verification import recover_verification_after_restart
+from .api import (
+    batch_ocr_router,
+    benchmark_router,
+    discovery_router,
+    pipeline_router,
+    review_router,
+    verification_router,
+)
 from .api.batch_ocr import batch_ocr_status, run_batch_ocr_job, stop_batch_ocr_job
 from .api.benchmark import (
     layout_benchmark_grid,
@@ -74,6 +92,7 @@ from .api.schemas import (
     ReextractOcrRequest,
     ReorderLayoutsRequest,
     ReplaceCaptionBindingsRequest,
+    ResolveOcrVerificationRequest,
     RunLayoutBenchmarkRequest,
     UpdatePageQaStatusRequest,
     UpdateLayoutOrderModeRequest,
@@ -83,6 +102,17 @@ from .api.schemas import (
 )
 from .api.shared import _utc_now
 from .api.shared import run_startup_scan
+from .api.verification import (
+    get_ocr_verification_crop,
+    get_ocr_verification_finding,
+    get_ocr_verification_findings,
+    get_ocr_verification_status,
+    recalculate_ocr_verification,
+    recheck_ocr_verification,
+    resolve_ocr_verification,
+    run_ocr_verification,
+    stop_ocr_verification,
+)
 
 
 @asynccontextmanager
@@ -91,6 +121,7 @@ async def lifespan(_: FastAPI):
     register_default_handlers()
     recover_pipeline_jobs_after_restart(exclude_stages={"layout_benchmark"})
     recover_layout_benchmark_after_restart()
+    recover_verification_after_restart()
     reset_runtime_options_from_settings()
     run_startup_scan()
     yield
@@ -103,3 +134,4 @@ app.include_router(review_router)
 app.include_router(pipeline_router)
 app.include_router(batch_ocr_router)
 app.include_router(benchmark_router)
+app.include_router(verification_router)

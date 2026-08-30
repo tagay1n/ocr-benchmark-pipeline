@@ -20,6 +20,7 @@ from ..layouts import (
 from ..models import Page
 from ..ocr_extract import extract_ocr_for_page as _extract_ocr_for_page
 from ..ocr_review import list_ocr_outputs, mark_ocr_reviewed, update_ocr_output
+from ..ocr_verification import request_verification_stop
 from ..pipeline_constants import (
     EVENT_EXPORT_COMPLETED,
     EVENT_EXPORT_FAILED,
@@ -120,6 +121,7 @@ def _run_manual_layout_detection(page_id: int, payload: DetectLayoutsRequest) ->
 
 
 def _run_manual_ocr_reextract(page_id: int, params: ReextractOcrRequest) -> dict[str, object]:
+    request_verification_stop(reason="Stopped because manual OCR extraction started.")
     page = get_page(page_id)
     if page is None:
         raise HTTPException(status_code=404, detail="Page not found.")

@@ -100,6 +100,8 @@ class ApiContractAndStreamTests(unittest.TestCase):
         self.assertIn("/api/ocr-batch/status", paths)
         self.assertIn("/api/ocr-batch/run", paths)
         self.assertIn("/api/ocr-batch/stop", paths)
+        self.assertIn("/api/ocr-verification/findings/{layout_id}", paths)
+        self.assertIn("/api/ocr-verification/layouts/{layout_id}/crop", paths)
         self.assertIn("/api/pages/{page_id}/layout-order-mode", paths)
         self.assertIn("/api/pages/{page_id}/layouts/reorder", paths)
         self.assertIn("/api/qa/{phase}/next", paths)

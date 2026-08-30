@@ -20,6 +20,7 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
     'id="review-ocr-btn"',
     'id="review-qa-btn"',
     'id="export-final-btn"',
+    'id="verify-ocr-btn"',
     'id="batch-ocr-btn"',
     'id="layout-benchmark-btn"',
     'id="wipe-btn"',
@@ -44,11 +45,68 @@ test("dashboard HTML exposes required pipeline controls and backend routes", () 
   assert.equal(pageModule.includes('"/api/ocr-batch/stop"'), true);
   assert.equal(pageModule.includes('"/static/layout_benchmark.html"'), true);
   assert.equal(pageModule.includes('"/static/qa_review.html?page_id="'), true);
+  assert.equal(html.includes('href="/static/ocr_verification.html"'), true);
+  const utilityActions = html.slice(
+    html.indexOf('<div class="header-top-actions">'),
+    html.indexOf('</section>', html.indexOf('<div class="header-top-actions">')),
+  );
+  assert.equal(utilityActions.includes('id="verify-ocr-btn"'), true);
+  assert.ok(
+    utilityActions.indexOf('id="verify-ocr-btn"') < utilityActions.indexOf('id="batch-ocr-btn"'),
+    "Verify OCR should be grouped with the upper-right utility actions",
+  );
+  for (const id of ["verify-ocr-btn", "batch-ocr-btn", "layout-benchmark-btn", "wipe-btn"]) {
+    assert.match(
+      utilityActions,
+      new RegExp(`id="${id}"[^>]*class="[^"]*utility-action[^"]*"|class="[^"]*utility-action[^"]*"[^>]*id="${id}"`),
+      `${id} should use the shared utility-action sizing and typography`,
+    );
+  }
+  assert.equal(html.includes(".utility-action {"), true);
   assert.equal(pageModule.includes('"/api/pages/summary"'), true);
   assert.equal(pageModule.includes('"./dashboard_sorting_utils.mjs"'), true);
   assert.equal(pageModule.includes('"./pipeline_event_constants.mjs"'), true);
   assert.equal(pageModule.includes('"./api_client.mjs"'), true);
   assert.equal(pageModule.includes('"./state_event_utils.mjs"'), true);
+});
+
+test("OCR verification page exposes run, comparison, and resolution hooks", () => {
+  const html = readHtml("app/static/ocr_verification.html");
+  const pageModule = readModule("app/static/js/ocr_verification_page.mjs");
+  for (const marker of [
+    'class="nav-strip"',
+    'class="back-nav"',
+    'class="header"',
+    'class="header-actions"',
+    'class="content-scroll"',
+    'class="panel verification-toolbar"',
+    'id="run-btn"',
+    'id="recalculate-btn"',
+    'id="filter"',
+    'id="progress"',
+    'id="counters"',
+    'id="findings"',
+    'id="page-prev"',
+    'id="page-next"',
+    'id="page-label"',
+  ]) {
+    assert.equal(html.includes(marker), true, `missing marker: ${marker}`);
+  }
+  assert.equal(html.includes('src="/static/js/ocr_verification_page.mjs"'), true);
+  assert.equal(html.includes('id="back-btn"'), false);
+  assert.equal(pageModule.includes('"/api/ocr-verification/status"'), true);
+  assert.equal(pageModule.includes('"/api/ocr-verification/run"'), true);
+  assert.equal(pageModule.includes('`/api/ocr-verification/${endpoint}`'), true);
+  assert.equal(pageModule.includes('category=${encodeURIComponent(filterSelect.value)}'), true);
+  assert.equal(pageModule.includes("limit=25"), true);
+  assert.equal(pageModule.includes('/api/ocr-verification/findings/${finding.layout_id}'), true);
+  assert.equal(pageModule.includes('/api/ocr-verification/layouts/${finding.layout_id}/crop'), true);
+  assert.equal(pageModule.includes('image.loading = "lazy"'), true);
+  assert.doesNotMatch(pageModule, /setInterval\(\(\) => \{\s*refreshAll\(/);
+  assert.equal(pageModule.includes('/resolve`'), true);
+  assert.equal(pageModule.includes('/recheck`'), true);
+  assert.equal(pageModule.includes('pendingActions.has("start")'), true);
+  assert.equal(pageModule.includes('pendingActions.has("stop")'), true);
 });
 
 test("OCR review gets model names from backend configuration", () => {

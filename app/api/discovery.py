@@ -9,9 +9,20 @@ from sqlalchemy import and_, delete, func, or_, select
 
 from ..db import get_session
 from ..layouts import get_page, normalize_layout_order_mode, qa_statuses_from_page_row
-from ..models import DuplicateFile, Layout, OcrOutput, Page, PipelineEvent, PipelineJob
+from ..models import (
+    DuplicateFile,
+    Layout,
+    OcrOutput,
+    OcrVerificationFinding,
+    OcrVerificationRun,
+    OcrVerificationTask,
+    Page,
+    PipelineEvent,
+    PipelineJob,
+)
 from ..ocr_extract import default_ocr_model, supported_ocr_models
 from ..ocr_review import list_ocr_outputs
+from ..ocr_verification import request_verification_stop
 from ..pipeline_constants import (
     EVENT_PAGE_REMOVED,
     EVENT_WIPE_FINISHED,
@@ -138,6 +149,7 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
         event_type=EVENT_WIPE_STARTED,
         message="Pipeline state wipe started.",
     )
+    request_verification_stop(reason="Stopped because pipeline state was wiped.")
 
     with get_session() as session:
         counts = {
@@ -146,12 +158,14 @@ def wipe_state(payload: WipeStateRequest) -> dict[str, object]:
             "duplicates": int(session.query(DuplicateFile).count()),
             "pipeline_jobs": int(session.query(PipelineJob).count()),
             "pipeline_events": int(session.query(PipelineEvent).count()),
+            "ocr_verification_runs": int(session.query(OcrVerificationRun).count()),
         }
         session.execute(delete(PipelineEvent))
         session.execute(delete(PipelineJob))
         session.execute(delete(DuplicateFile))
         session.execute(delete(Layout))
         session.execute(delete(Page))
+        session.execute(delete(OcrVerificationRun))
 
     rescan_summary: dict[str, int | str] | None = None
     auto_layout_detection: dict[str, int] | None = None
@@ -328,6 +342,12 @@ def remove_page(page_id: int) -> dict[str, object]:
                 .count()
             ),
             "pipeline_jobs": int(session.query(PipelineJob).filter(PipelineJob.page_id == page_id).count()),
+            "ocr_verification_tasks": int(
+                session.query(OcrVerificationTask).filter(OcrVerificationTask.page_id == page_id).count()
+            ),
+            "ocr_verification_findings": int(
+                session.query(OcrVerificationFinding).filter(OcrVerificationFinding.page_id == page_id).count()
+            ),
         }
 
     file_existed = image_path.exists()

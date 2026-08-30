@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from ..db import get_session
 from ..models import Layout, OcrOutput, Page, PipelineJob
+from ..ocr_verification import request_verification_stop
 from ..pipeline_constants import (
     EVENT_JOB_ENQUEUED,
     EVENT_JOB_ENQUEUE_SKIPPED,
@@ -215,6 +216,7 @@ def batch_ocr_status() -> dict[str, object]:
 @router.post("/api/ocr-batch/run")
 def run_batch_ocr_job() -> dict[str, object]:
     register_default_handlers()
+    request_verification_stop(reason="Stopped because Batch OCR started.")
     pending_by_page = _pending_layout_ids_by_page()
     considered_pages = len(pending_by_page)
     considered_layouts = sum(len(layout_ids) for layout_ids in pending_by_page.values())

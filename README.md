@@ -12,10 +12,13 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
 4. Extract OCR content from reviewed layouts (Gemini).
 5. Review and fix extracted OCR content manually.
 
+Optionally run non-blocking OCR verification after review. It compares each reviewed Markdown region with outputs from other configured Gemini models, without changing page status or blocking export.
+
 ## Current Product Surface
 
 - Dashboard (`/`):
   - Pipeline actions with live counters: `Scan(total) -> Review layouts(done/total) -> Review OCR(done/total) -> QA checks -> Export`.
+  - `Verify OCR` in the upper-right utility actions opens the optional verification workspace; verification remains outside pipeline progression.
   - `Batch OCR` action to queue/stop global OCR extraction for all eligible pages (`layout_reviewed`/`ocr_failed`) that still have missing layout outputs.
   - `Benchmark` action opens dedicated benchmark page.
   - Live backend activity panel (SSE stream).
@@ -54,6 +57,17 @@ Prepare high-quality, reviewer-validated OCR data with this workflow:
   - Per-phase QA status is stored independently per page (`pending`/`reviewed`).
   - QA statuses are non-invasive: editing bbox/class/order/OCR does not auto-reset other QA phases.
   - Quick navigation: previous/next page and next pending page for active phase.
+- OCR verification (`/static/ocr_verification.html`):
+  - Start, stop, and manually resume a dedicated background verification run.
+  - Verifies OCR-reviewed Markdown regions only; tables, formulas, and pictures are skipped.
+  - Uses the reviewed text as baseline and selects other models while always excluding the region's original `model_name`.
+  - Groups identical variants by supporting model, shows inline differences and the original crop, and distinguishes full, reduced, and source-only evidence.
+  - Lets the reviewer explicitly keep current text or apply/edit a model variant; verification never changes pipeline or QA status.
+  - Reuses completed model outputs for recalculation; bbox, class, orientation, or prompt-version changes require fresh verification extraction.
+  - Uses server-filtered pages of 25 compact findings; comparison variants and editor controls load only when a finding is opened.
+  - Polls lightweight run status while verification is active and reloads stored findings when a run or background recalculation finishes.
+  - Serves bounded region thumbnails with fingerprinted disk/HTTP caching instead of loading full source pages into every finding.
+  - Prepares verification tasks in bulk on a background thread; manual finding recalculation is also non-blocking.
 
 ## Configuration
 
@@ -76,10 +90,22 @@ supported_ocr_models:
   - gemini-3.6-flash
   - gemini-3.5-flash
   - gemini-3-flash-preview
+ocr_verification:
+  models:
+    - gemini-3.6-flash
+    - gemini-3.5-flash
+    - gemini-3-flash-preview
+  total_models_per_region: 3
+  attempts_per_model: 2
+  prompt_version: 1
 gemini_keys: []
 ```
 
 The ordered `supported_ocr_models` list in `config.yaml` is the source of truth for OCR models. Its first entry is used as the default for batch and manual OCR; `SUPPORTED_OCR_MODELS` can override the complete list.
+
+The ordered `ocr_verification.models` pool is independent from the default OCR model order. Verification selects `total_models_per_region - 1` distinct models from this pool and excludes the model stored on the canonical OCR output. The default pool intentionally excludes `gemini-3.7-flash`. Increment `prompt_version` when verification prompt behavior changes; stored outputs with an older prompt version are not reused.
+
+Each verification model gets `attempts_per_model` counted attempts. Invalid/empty responses and ordinary failures consume an attempt. Quota responses rotate keys without consuming an attempt. HTTP `503`, overloaded service, retryable `5xx`, and transient transport failures are deferred with capped exponential backoff and do not consume an attempt; deferred work continues until it succeeds or the reviewer stops the run. Successful variants are persisted immediately, so partial evidence remains usable and resumable.
 
 Gemini key selection skips keys recorded as daily-quota exhausted for the selected model, shuffles the remaining available keys, then uses the first shuffled key. Daily exhaustion is merged and atomically persisted to `_artifacts/gemini_usage.json` immediately after each response, grouped by model and Pacific-time quota day. Per-minute rate limits are request-local and are not recorded as daily exhaustion.
 
@@ -94,6 +120,10 @@ Environment overrides:
 - `SUPPORTED_OCR_MODELS` (comma-separated)
 - `GEMINI_KEYS` (comma-separated)
 - `GEMINI_USAGE_PATH`
+- `OCR_VERIFICATION_MODELS` (comma-separated)
+- `OCR_VERIFICATION_TOTAL_MODELS`
+- `OCR_VERIFICATION_ATTEMPTS_PER_MODEL`
+- `OCR_VERIFICATION_PROMPT_VERSION`
 
 ## Run
 
@@ -147,6 +177,15 @@ node --test frontend_tests/*.test.mjs
 - `GET /api/ocr-batch/status`
 - `POST /api/ocr-batch/run`
 - `POST /api/ocr-batch/stop`
+- `GET /api/ocr-verification/status`
+- `POST /api/ocr-verification/run`
+- `POST /api/ocr-verification/stop`
+- `POST /api/ocr-verification/recalculate` (starts non-blocking recalculation)
+- `GET /api/ocr-verification/findings` (`category`, `limit`, `offset`; compact summaries)
+- `GET /api/ocr-verification/findings/{layout_id}`
+- `GET /api/ocr-verification/layouts/{layout_id}/crop`
+- `POST /api/ocr-verification/layouts/{layout_id}/resolve`
+- `POST /api/ocr-verification/layouts/{layout_id}/recheck`
 
 ## OCR Prompt Debug Artifacts
 

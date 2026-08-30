@@ -12,6 +12,7 @@ from .layout_benchmark import run_layout_benchmark
 from .layouts import detect_layouts_for_page
 from .models import Page, PipelineEvent, PipelineJob
 from .ocr_extract import extract_ocr_for_page
+from .ocr_verification import request_verification_stop
 from .pipeline_constants import (
     EVENT_JOB_COMPLETED,
     EVENT_JOB_FAILED,
@@ -436,6 +437,7 @@ def _layout_detect_handler(job: dict[str, Any]) -> dict[str, Any]:
 
 
 def _ocr_extract_handler(job: dict[str, Any]) -> dict[str, Any]:
+    request_verification_stop(reason="Stopped because normal OCR extraction started.")
     page_id = job["page_id"]
     if page_id is None:
         raise ValueError(f"{STAGE_OCR_EXTRACT} job requires page_id.")

@@ -102,6 +102,99 @@ class OcrOutput(Base):
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
+class OcrVerificationRun(Base):
+    __tablename__ = "ocr_verification_runs"
+    __table_args__ = (Index("idx_ocr_verification_runs_status", "status", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    stop_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    total_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    completed_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    finished_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class OcrVerificationTask(Base):
+    __tablename__ = "ocr_verification_tasks"
+    __table_args__ = (
+        UniqueConstraint(
+            "layout_id",
+            "model_name",
+            "evidence_fingerprint",
+            name="uq_ocr_verification_task_evidence",
+        ),
+        Index("idx_ocr_verification_tasks_status_retry", "status", "next_retry_at", "id"),
+        Index("idx_ocr_verification_tasks_page_layout", "page_id", "layout_id"),
+        Index("idx_ocr_verification_tasks_run_status", "run_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ocr_verification_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), nullable=False)
+    layout_id: Mapped[int] = mapped_column(ForeignKey("layouts.id", ondelete="CASCADE"), nullable=False)
+    model_name: Mapped[str] = mapped_column(String, nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_hash: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    transient_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_retry_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_alias: Mapped[str | None] = mapped_column(String, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    finished_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class OcrVerificationFinding(Base):
+    __tablename__ = "ocr_verification_findings"
+    __table_args__ = (
+        Index("idx_ocr_verification_findings_state", "state", "page_id", "layout_id"),
+    )
+
+    layout_id: Mapped[int] = mapped_column(
+        ForeignKey("layouts.id", ondelete="CASCADE"), primary_key=True
+    )
+    page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    comparison_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    comparison_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    baseline_content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_model: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    groups_json: Mapped[str] = mapped_column(Text, nullable=False)
+    responded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    required_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class OcrVerificationResolution(Base):
+    __tablename__ = "ocr_verification_resolutions"
+    __table_args__ = (Index("idx_ocr_verification_resolutions_layout", "layout_id", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    page_id: Mapped[int] = mapped_column(ForeignKey("pages.id", ondelete="CASCADE"), nullable=False)
+    layout_id: Mapped[int] = mapped_column(ForeignKey("layouts.id", ondelete="CASCADE"), nullable=False)
+    comparison_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    previous_content: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_content: Mapped[str] = mapped_column(Text, nullable=False)
+    source_task_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ocr_verification_tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class PipelineJob(Base):
     __tablename__ = "pipeline_jobs"
     __table_args__ = (

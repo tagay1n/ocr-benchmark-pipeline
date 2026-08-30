@@ -65,12 +65,14 @@
         display: inline-flex;
         align-items: center;
         gap: 8px;
+        flex-wrap: wrap;
       }
 
       .benchmark-controls {
         display: inline-flex;
         align-items: center;
         gap: 8px;
+        flex-wrap: wrap;
       }
 
       #layout-benchmark-btn.is-busy,
@@ -112,7 +114,9 @@
       .header-top-actions {
         display: inline-flex;
         align-items: center;
+        justify-content: flex-end;
         gap: 8px;
+        flex-wrap: wrap;
       }
 
       .pipeline-separator {
@@ -138,7 +142,9 @@
         stroke-linejoin: round;
       }
 
-      button {
+      button,
+      .button-link {
+        font: inherit;
         border: 1px solid var(--accent);
         background: var(--accent);
         color: #fff;
@@ -148,7 +154,29 @@
         cursor: pointer;
       }
 
-      button.secondary {
+      .utility-action {
+        min-width: 112px;
+        min-height: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 20px;
+        text-align: center;
+        white-space: nowrap;
+      }
+
+      .button-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
+      button.secondary,
+      .button-link.secondary {
         background: #fff;
         color: var(--accent);
       }
@@ -544,11 +572,12 @@
           </div>
         </div>
         <div class="header-top-actions">
-          <div class="benchmark-controls" role="group" aria-label="Layout benchmark controls">
-            <button id="batch-ocr-btn" class="secondary" type="button">Batch OCR</button>
-            <button id="layout-benchmark-btn" class="secondary" type="button">Benchmark</button>
+          <div class="benchmark-controls" role="group" aria-label="Utility actions">
+            <a id="verify-ocr-btn" class="button-link secondary utility-action" href="/static/ocr_verification.html">Verify OCR</a>
+            <button id="batch-ocr-btn" class="secondary utility-action" type="button">Batch OCR</button>
+            <button id="layout-benchmark-btn" class="secondary utility-action" type="button">Benchmark</button>
           </div>
-          <button id="wipe-btn" class="danger-btn" type="button">Wipe data</button>
+          <button id="wipe-btn" class="danger-btn utility-action" type="button">Wipe data</button>
         </div>
       </section>
       <section class="panel">

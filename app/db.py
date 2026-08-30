@@ -398,6 +398,19 @@ def _migrate_sqlite_ocr_outputs_status_columns(engine: Engine) -> None:
             connection.commit()
 
 
+def _migrate_sqlite_verification_indexes(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.connect() as connection:
+        if not _sqlite_table_exists(connection, "ocr_verification_tasks"):
+            return
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS idx_ocr_verification_tasks_run_status "
+            "ON ocr_verification_tasks (run_id, status);"
+        )
+        if connection.in_transaction():
+            connection.commit()
+
 def init_db() -> None:
     engine = get_engine()
     Base.metadata.create_all(bind=engine)
@@ -407,5 +420,6 @@ def init_db() -> None:
     _migrate_sqlite_pages_layout_order_mode_column(engine)
     _migrate_sqlite_pages_qa_status_columns(engine)
     _migrate_sqlite_ocr_outputs_status_columns(engine)
+    _migrate_sqlite_verification_indexes(engine)
     # Ensure metadata-defined indexes/constraints are present after migrations.
     Base.metadata.create_all(bind=engine)

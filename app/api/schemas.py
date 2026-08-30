@@ -65,6 +65,12 @@ class UpdateOcrOutputRequest(BaseModel):
     content: str = ""
 
 
+class ResolveOcrVerificationRequest(BaseModel):
+    action: str = Field(min_length=1, max_length=20)
+    content: str | None = None
+    source_task_id: int | None = Field(default=None, ge=1)
+
+
 class ReextractOcrRequest(BaseModel):
     layout_ids: list[int] | None = None
     model_name: str | None = Field(default=None, min_length=1, max_length=120)
