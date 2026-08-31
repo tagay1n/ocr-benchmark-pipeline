@@ -2,6 +2,9 @@
 __pycache__/
 *.pyc
 data/*.db
+data/*.db-*
 input/
+_artifacts/
 
 config.yaml
+todo
