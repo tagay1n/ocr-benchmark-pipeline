@@ -341,6 +341,86 @@ class OcrVerificationTests(unittest.TestCase):
             self.assertEqual(row.transient_count, 1)
             self.assertIsNotNone(row.next_retry_at)
 
+    def test_worker_keeps_processing_after_one_task_waits_for_quota(self) -> None:
+        started = ocr_verification.start_verification()
+        tasks = self._tasks()
+        processed: list[int] = []
+
+        def execute(task_id: int) -> str:
+            processed.append(task_id)
+            return "quota_wait" if task_id == int(tasks[0].id) else "succeeded"
+
+        with patch.object(
+            ocr_verification,
+            "_claim_ready_task",
+            side_effect=[int(tasks[0].id), int(tasks[1].id), None],
+        ), patch.object(
+            ocr_verification,
+            "_execute_task",
+            side_effect=execute,
+        ), patch.object(
+            ocr_verification,
+            "_has_active_tasks",
+            return_value=False,
+        ), patch.object(
+            ocr_verification,
+            "_finish_run",
+        ) as finish, patch.object(
+            ocr_verification,
+            "request_verification_stop",
+        ) as stop:
+            ocr_verification._worker_loop(int(started["run_id"]))
+
+        self.assertEqual(processed, [int(tasks[0].id), int(tasks[1].id)])
+        stop.assert_not_called()
+        finish.assert_called_once_with(int(started["run_id"]), stopped=False)
+
+    def test_temporary_rate_limits_defer_only_the_current_task(self) -> None:
+        ocr_verification.start_verification()
+        tasks = self._tasks()
+        with patch.object(
+            ocr_verification,
+            "gemini_generate_content",
+            side_effect=RuntimeError("HTTP 429 rate limit reached"),
+        ):
+            result = ocr_verification._execute_task(int(tasks[0].id))
+
+        self.assertEqual(result, "quota_wait")
+        self.assertEqual(ocr_extract._load_usage_state(model_name="validator-a"), [])
+        with db.get_session() as session:
+            limited = session.get(main.OcrVerificationTask, int(tasks[0].id))
+            unaffected = session.get(main.OcrVerificationTask, int(tasks[1].id))
+            self.assertEqual(limited.status, "waiting")
+            self.assertIn("rate limit reached", str(limited.error_message))
+            self.assertIsNotNone(limited.next_retry_at)
+            self.assertEqual(unaffected.status, "pending")
+            self.assertIsNone(unaffected.next_retry_at)
+
+    def test_daily_exhaustion_defers_only_the_affected_model(self) -> None:
+        ocr_verification.start_verification()
+        tasks = self._tasks()
+        ocr_extract._save_usage_state(
+            list(self.settings.gemini_keys),
+            model_name="validator-a",
+        )
+
+        with patch.object(ocr_verification, "gemini_generate_content") as generate:
+            result = ocr_verification._execute_task(int(tasks[0].id))
+
+        self.assertEqual(result, "quota_wait")
+        generate.assert_not_called()
+        with db.get_session() as session:
+            exhausted = session.get(main.OcrVerificationTask, int(tasks[0].id))
+            unaffected = session.get(main.OcrVerificationTask, int(tasks[1].id))
+            run = session.get(main.OcrVerificationRun, int(exhausted.run_id))
+            self.assertEqual(exhausted.status, "waiting")
+            self.assertIn("exhausted for today", str(exhausted.error_message))
+            self.assertIsNotNone(exhausted.next_retry_at)
+            self.assertEqual(unaffected.status, "pending")
+            self.assertIsNone(unaffected.next_retry_at)
+            self.assertEqual(run.status, "running")
+            self.assertFalse(run.stop_requested)
+
     def test_worker_persists_each_model_and_completes_full_agreement(self) -> None:
         started = ocr_verification.start_verification()
         with patch.object(

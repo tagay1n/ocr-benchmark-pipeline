@@ -44,7 +44,7 @@ from .ocr_gemini_client import (
     is_quota_error,
     key_alias,
 )
-from .ocr_key_store import GeminiQuotaExhaustedError
+from .ocr_key_store import GeminiDailyQuotaExhaustedError, GeminiQuotaExhaustedError
 from .ocr_prompts import DEFAULT_PROMPT_TEMPLATE, render_prompt_for_layout_class
 
 
@@ -784,11 +784,35 @@ def _persist_task_error(
     refresh_finding(layout_id)
 
 
+def _defer_model_for_daily_quota(task_id: int, *, error: str) -> None:
+    now_dt = datetime.now(UTC)
+    now = now_dt.isoformat()
+    next_retry_at = (now_dt + timedelta(seconds=300)).isoformat()
+    with get_session() as session:
+        task = session.get(OcrVerificationTask, int(task_id))
+        if task is None or task.run_id is None:
+            return
+        siblings = session.execute(
+            select(OcrVerificationTask).where(
+                OcrVerificationTask.run_id == int(task.run_id),
+                OcrVerificationTask.model_name == str(task.model_name),
+                OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
+            )
+        ).scalars().all()
+        for sibling in siblings:
+            sibling.status = "waiting"
+            sibling.next_retry_at = next_retry_at
+            sibling.updated_at = now
+            if int(sibling.id) == int(task_id):
+                sibling.error_message = str(error)
+
+
 def _execute_task(task_id: int) -> str:
     task, _page, _layout, prompt, image_bytes = _task_inputs(task_id)
     model_name = str(task.model_name)
     exhausted_keys = _load_usage_state(model_name=model_name)
     excluded_keys: set[str] = set()
+    last_quota_error: str | None = None
     while True:
         try:
             key = _next_available_key(
@@ -796,8 +820,18 @@ def _execute_task(task_id: int) -> str:
                 exclude_keys=excluded_keys,
                 model_name=model_name,
             )
+        except GeminiDailyQuotaExhaustedError as error:
+            error_text = last_quota_error or str(error)
+            _persist_task_error(task_id, error=error_text, transient=False, quota_wait=True)
+            _defer_model_for_daily_quota(task_id, error=error_text)
+            return "quota_wait"
         except GeminiQuotaExhaustedError as error:
-            _persist_task_error(task_id, error=str(error), transient=False, quota_wait=True)
+            _persist_task_error(
+                task_id,
+                error=last_quota_error or str(error),
+                transient=False,
+                quota_wait=True,
+            )
             return "quota_wait"
         try:
             raw_content = gemini_generate_content(
@@ -810,6 +844,7 @@ def _execute_task(task_id: int) -> str:
         except Exception as error:
             error_text = str(error)
             if is_quota_error(error_text):
+                last_quota_error = error_text
                 excluded_keys.add(key)
                 if is_daily_quota_exhausted_error(error_text):
                     _mark_key_exhausted(exhausted_keys, key, model_name=model_name)
@@ -942,12 +977,9 @@ def _worker_loop(run_id: int) -> None:
             task_id = _claim_ready_task(run_id)
             if task_id is not None:
                 try:
-                    result = _execute_task(task_id)
+                    _execute_task(task_id)
                 except Exception as error:
                     _persist_task_error(task_id, error=str(error), transient=False)
-                    result = "failed_attempt"
-                if result == "quota_wait":
-                    request_verification_stop(reason="Gemini quota unavailable; resume later.")
                 continue
             if not _has_active_tasks(run_id):
                 _finish_run(run_id, stopped=False)

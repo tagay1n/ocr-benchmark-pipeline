@@ -9,7 +9,18 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from app import config, db, discovery, final_export, layouts, main, ocr_extract, pipeline_runtime, runtime_options
+from app import (
+    config,
+    db,
+    discovery,
+    final_export,
+    layouts,
+    main,
+    ocr_extract,
+    ocr_key_store,
+    pipeline_runtime,
+    runtime_options,
+)
 from app.config import DEFAULT_EXTENSIONS, Settings
 
 
@@ -714,7 +725,7 @@ class PipelineStagesTests(unittest.TestCase):
         usage_payload = json.loads(self.test_settings.gemini_usage_path.read_text(encoding="utf-8"))
         self.assertEqual(
             usage_payload["models"][ocr_extract.default_ocr_model()],
-            ["k1"],
+            [ocr_key_store._key_fingerprint("k1")],
         )
 
     def test_ocr_review_flow_updates_output_and_marks_reviewed(self) -> None:

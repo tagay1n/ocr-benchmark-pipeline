@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,14 @@ from zoneinfo import ZoneInfo
 
 
 class GeminiQuotaExhaustedError(RuntimeError):
+    pass
+
+
+class GeminiDailyQuotaExhaustedError(GeminiQuotaExhaustedError):
+    pass
+
+
+class GeminiKeyRotationExhaustedError(GeminiQuotaExhaustedError):
     pass
 
 
@@ -36,6 +45,19 @@ def _normalize_values(values: object) -> list[str]:
         seen.add(item)
         normalized.append(item)
     return normalized
+
+
+def _key_fingerprint(key: str) -> str:
+    normalized = str(key or "").strip()
+    if normalized.startswith("sha256:") and len(normalized) == 71:
+        return normalized
+    return f"sha256:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
+
+
+def _normalize_key_ids(values: object) -> tuple[list[str], bool]:
+    normalized = _normalize_values(values)
+    fingerprints = [_key_fingerprint(value) for value in normalized]
+    return _normalize_values(fingerprints), fingerprints != normalized
 
 
 def _normalize_model_name(model_name: str) -> str:
@@ -67,7 +89,7 @@ def _read_state_unlocked(path: Path, *, legacy_model_name: str) -> tuple[dict[st
         return {}, False
 
     if isinstance(payload, list):
-        legacy_keys = _normalize_values(payload)
+        legacy_keys, _migrated = _normalize_key_ids(payload)
         return ({legacy_model_name: legacy_keys} if legacy_keys else {}), True
     if not isinstance(payload, dict):
         return {}, False
@@ -78,12 +100,14 @@ def _read_state_unlocked(path: Path, *, legacy_model_name: str) -> tuple[dict[st
     if not isinstance(raw_models, dict):
         return {}, False
     models: dict[str, list[str]] = {}
+    migrated = False
     for raw_model_name, raw_keys in raw_models.items():
         model_name = str(raw_model_name or "").strip()
-        keys = _normalize_values(raw_keys)
+        keys, keys_migrated = _normalize_key_ids(raw_keys)
+        migrated = migrated or keys_migrated
         if model_name and keys:
             models[model_name] = keys
-    return models, False
+    return models, migrated
 
 
 def _write_state_unlocked(path: Path, models: dict[str, list[str]]) -> None:
@@ -123,7 +147,7 @@ def save_usage_state(path: Path, exhausted_keys: list[str], *, model_name: str) 
     resolved_model_name = _normalize_model_name(model_name)
     with _locked_state(path):
         models, _rewrite = _read_state_unlocked(path, legacy_model_name=resolved_model_name)
-        normalized_keys = _normalize_values(exhausted_keys)
+        normalized_keys, _migrated = _normalize_key_ids(exhausted_keys)
         if normalized_keys:
             models[resolved_model_name] = normalized_keys
         else:
@@ -149,20 +173,20 @@ def next_available_key(
         if rewrite:
             _write_state_unlocked(path, models)
         persisted = models.get(resolved_model_name, [])
-        merged_exhausted = _normalize_values([*persisted, *exhausted_keys])
+        merged_exhausted, _migrated = _normalize_key_ids([*persisted, *exhausted_keys])
         exhausted_keys[:] = merged_exhausted
 
         exhausted_set = set(merged_exhausted)
-        daily_candidates = [key for key in configured if key not in exhausted_set]
+        daily_candidates = [key for key in configured if _key_fingerprint(key) not in exhausted_set]
         if not daily_candidates:
-            raise GeminiQuotaExhaustedError(
+            raise GeminiDailyQuotaExhaustedError(
                 f"All configured Gemini keys are exhausted for today for model {resolved_model_name}."
             )
 
         excluded = exclude_keys or set()
         candidates = [key for key in daily_candidates if key not in excluded]
         if not candidates:
-            raise GeminiQuotaExhaustedError(
+            raise GeminiKeyRotationExhaustedError(
                 "All non-exhausted Gemini keys have already been tried for this layout."
             )
         random.shuffle(candidates)
@@ -182,7 +206,7 @@ def mark_key_exhausted(
         return
     with _locked_state(path):
         models, _rewrite = _read_state_unlocked(path, legacy_model_name=resolved_model_name)
-        merged = _normalize_values(
+        merged, _migrated = _normalize_key_ids(
             [*models.get(resolved_model_name, []), *exhausted_keys, normalized_key]
         )
         models[resolved_model_name] = merged

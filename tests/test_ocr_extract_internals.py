@@ -27,6 +27,10 @@ from app.lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
 
 
 class OcrExtractInternalsTests(unittest.TestCase):
+    @staticmethod
+    def _key_ids(*keys: str) -> list[str]:
+        return [ocr_key_store._key_fingerprint(key) for key in keys]
+
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.project_root = Path(self.temp_dir.name)
@@ -246,14 +250,19 @@ class OcrExtractInternalsTests(unittest.TestCase):
         ocr_extract._save_usage_state(["k1", "k2"])
         saved_payload = json.loads(path.read_text(encoding="utf-8"))
         self.assertIsInstance(saved_payload, dict)
-        self.assertEqual(
-            saved_payload["models"][ocr_extract.default_ocr_model()],
-            ["k1", "k2"],
-        )
+        persisted_keys = saved_payload["models"][ocr_extract.default_ocr_model()]
+        self.assertEqual(len(persisted_keys), 2)
+        self.assertTrue(all(value.startswith("sha256:") for value in persisted_keys))
+        self.assertNotIn("k1", path.read_text(encoding="utf-8"))
+        self.assertNotIn("k2", path.read_text(encoding="utf-8"))
         self.assertRegex(str(saved_payload["quota_day"]), r"^\d{4}-\d{2}-\d{2}$")
 
         path.write_text(json.dumps(["k1", "k1", " ", "k2"]), encoding="utf-8")
-        self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2"])
+        migrated = ocr_extract._load_usage_state()
+        self.assertEqual(len(migrated), 2)
+        self.assertTrue(all(value.startswith("sha256:") for value in migrated))
+        self.assertNotIn("k1", path.read_text(encoding="utf-8"))
+        self.assertNotIn("k2", path.read_text(encoding="utf-8"))
 
     def test_mark_key_exhausted_merges_with_latest_persisted_state(self) -> None:
         first_snapshot: list[str] = []
@@ -262,15 +271,18 @@ class OcrExtractInternalsTests(unittest.TestCase):
         ocr_extract._mark_key_exhausted(first_snapshot, "k1")
         ocr_extract._mark_key_exhausted(stale_second_snapshot, "k2")
 
-        self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2"])
-        self.assertEqual(stale_second_snapshot, ["k1", "k2"])
+        self.assertEqual(ocr_extract._load_usage_state(), self._key_ids("k1", "k2"))
+        self.assertEqual(stale_second_snapshot, self._key_ids("k1", "k2"))
 
     def test_exhausted_keys_are_isolated_by_model(self) -> None:
         first_model, second_model = ocr_extract.supported_ocr_models()[:2]
 
         ocr_extract._mark_key_exhausted([], "k1", model_name=first_model)
 
-        self.assertEqual(ocr_extract._load_usage_state(model_name=first_model), ["k1"])
+        self.assertEqual(
+            ocr_extract._load_usage_state(model_name=first_model),
+            self._key_ids("k1"),
+        )
         self.assertEqual(ocr_extract._load_usage_state(model_name=second_model), [])
 
     def test_usage_state_resets_on_new_pacific_quota_day(self) -> None:
@@ -314,7 +326,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
             selected = ocr_extract._next_available_key(stale_snapshot)
 
         self.assertEqual(selected, "k2")
-        self.assertEqual(stale_snapshot, ["k1"])
+        self.assertEqual(stale_snapshot, self._key_ids("k1"))
 
     def test_extract_ocr_does_not_clear_fully_exhausted_model_state(self) -> None:
         self._write_image("ocr/all-daily-keys-exhausted.png")
@@ -340,7 +352,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
 
         gemini_mock.assert_not_called()
         self.assertEqual(result["failed_count"], 1)
-        self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2"])
+        self.assertEqual(ocr_extract._load_usage_state(), self._key_ids("k1", "k2"))
         output = main.page_ocr_outputs(page_id)["outputs"][0]
         self.assertIn("exhausted for today", str(output["error_message"]))
 
@@ -841,7 +853,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(outputs[0]["content"], "from-k2")
         self.assertEqual(outputs[0]["key_alias"], "k2")
-        self.assertEqual(ocr_extract._load_usage_state(), ["k1"])
+        self.assertEqual(ocr_extract._load_usage_state(), self._key_ids("k1"))
 
     def test_daily_exhaustion_is_persisted_before_keyboard_interrupt(self) -> None:
         self._write_image("ocr/interrupted-key-rotation.png")
@@ -881,7 +893,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
                     layout_ids=[int(layout["id"])],
                 )
 
-        self.assertEqual(ocr_extract._load_usage_state(), ["k1"])
+        self.assertEqual(ocr_extract._load_usage_state(), self._key_ids("k1"))
 
     def test_extract_ocr_rate_limit_rotates_without_persisting_exhausted_key(self) -> None:
         self._write_image("ocr/rate-limit.png")
@@ -984,7 +996,10 @@ class OcrExtractInternalsTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(outputs[0]["content"], "from-k4")
         self.assertEqual(outputs[0]["key_alias"], "k4")
-        self.assertEqual(ocr_extract._load_usage_state(), ["k1", "k2", "k3"])
+        self.assertEqual(
+            ocr_extract._load_usage_state(),
+            self._key_ids("k1", "k2", "k3"),
+        )
 
     def test_extract_ocr_non_quota_error_does_not_mark_key_exhausted(self) -> None:
         self._write_image("ocr/non-quota.png")
