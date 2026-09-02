@@ -34,6 +34,12 @@ export function normalizeZoomMode(value, { fallback = "automatic", allowCustom =
   return fallback;
 }
 
+export function shouldUpdateImageSource(currentSource, nextSource) {
+  const current = String(currentSource || "");
+  const next = String(nextSource || "");
+  return next.length > 0 && current !== next;
+}
+
 export function normalizeLayoutOrderMode(value, { fallback = "auto" } = {}) {
   const normalized = String(value || "").trim().toLowerCase().replace(/_/g, "-");
   if (normalized === "single-column" || normalized === "single") {
@@ -808,6 +814,31 @@ export function computeViewportScrollToCenterBBox({
   return {
     left: Math.round(targetLeft),
     top: Math.round(targetTop),
+  };
+}
+
+export function computeViewportScrollForAnchor({
+  anchorX,
+  anchorY,
+  contentWidth,
+  contentHeight,
+  viewportWidth,
+  viewportHeight,
+}) {
+  const values = [anchorX, anchorY, contentWidth, contentHeight, viewportWidth, viewportHeight];
+  if (!values.every(Number.isFinite)) {
+    return null;
+  }
+  if (contentWidth <= 0 || contentHeight <= 0 || viewportWidth <= 0 || viewportHeight <= 0) {
+    return null;
+  }
+  const normalizedX = Math.max(0, Math.min(1, anchorX));
+  const normalizedY = Math.max(0, Math.min(1, anchorY));
+  const maxLeft = Math.max(0, contentWidth - viewportWidth);
+  const maxTop = Math.max(0, contentHeight - viewportHeight);
+  return {
+    left: Math.round(Math.max(0, Math.min(maxLeft, normalizedX * contentWidth - viewportWidth / 2))),
+    top: Math.round(Math.max(0, Math.min(maxTop, normalizedY * contentHeight - viewportHeight / 2))),
   };
 }
 

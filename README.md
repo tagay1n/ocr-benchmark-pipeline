@@ -37,6 +37,7 @@ Optionally run non-blocking OCR verification after review. It compares each revi
   - Per-page reading-order mode selector: `Auto`, `Single`, `Multi-column`, `Two-page`.
   - `Reorder` action recomputes reading order from the selected mode.
   - Bbox editing from table and by canvas handles.
+  - The image viewport stays in place while regions are created or review data is refreshed.
   - Overlapping bbox borders are highlighted with striped warning segments.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with layout overlays.
   - Caption binding mode from caption bbox (`Bind`), with visible arrows to table/picture/formula targets and explicit unbind controls.

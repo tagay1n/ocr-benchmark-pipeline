@@ -208,6 +208,13 @@ test("layout review HTML keeps detection+zoom integration hooks", () => {
   assert.equal(pageModule.includes('"/static/js/review_shell_utils.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/review_history_controller.mjs"'), true);
   assert.equal(pageModule.includes('"/static/js/modal_controller.mjs"'), true);
+  assert.equal(pageModule.includes('shouldUpdateImageSource(pageImage.getAttribute("src"), payload.image_url)'), true);
+  assert.equal(pageModule.includes("async function loadPage({ refreshImage = true } = {})"), true);
+  assert.ok(
+    pageModule.match(/await loadPage\(\{ refreshImage: false \}\);/g)?.length >= 3,
+    "layout mutations should refresh metadata without reloading the source image",
+  );
+  assert.equal(pageModule.includes("selectLayout(createdLayoutId);"), true);
   assert.equal(pageModule.includes("fetchLayoutDetectionDefaults"), true);
   assert.equal(apiModule.includes("`/api/pages/${pageId}/layouts/detect`"), true);
   assert.equal(apiModule.includes('"/api/layout-detection/defaults"'), true);

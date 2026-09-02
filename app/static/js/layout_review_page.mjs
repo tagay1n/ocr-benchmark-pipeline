@@ -4,6 +4,7 @@
         detectOverlappingBorderSegments,
         computeDraggedBBox,
         computeViewportScrollTargetForLayoutId,
+        computeViewportScrollForAnchor,
         computeZoomScale,
         computeOverlayBadgeScale,
         filterReviewHistory,
@@ -22,6 +23,7 @@
         reorderReadingOrderIds,
         summarizeDraftChangesForReorder,
         shiftDraftReadingOrdersAfterInsertion,
+        shouldUpdateImageSource,
         ZOOM_PRESET_PERCENTS,
         updateReviewHistoryOnVisit,
       } from "/static/js/layout_review_utils.mjs";
@@ -184,6 +186,7 @@
         zoomMode: "automatic",
         zoomPercent: 100,
         zoomAppliedPercent: 100,
+        zoomAppliedOnce: false,
         reviewHistory: [],
         reviewHistoryIndex: -1,
         nextReviewPageId: null,
@@ -366,12 +369,25 @@
         return { width, height };
       }
 
-      function applyZoom() {
+      function captureImageViewportAnchor() {
+        const contentWidth = imageWrap.offsetWidth;
+        const contentHeight = imageWrap.offsetHeight;
+        if (!contentWidth || !contentHeight) {
+          return null;
+        }
+        return {
+          anchorX: (imageViewport.scrollLeft + imageViewport.clientWidth / 2) / contentWidth,
+          anchorY: (imageViewport.scrollTop + imageViewport.clientHeight / 2) / contentHeight,
+        };
+      }
+
+      function applyZoom({ preserveViewport = false } = {}) {
         const naturalWidth = pageImage.naturalWidth;
         const naturalHeight = pageImage.naturalHeight;
         if (!naturalWidth || !naturalHeight) {
           return;
         }
+        const viewportAnchor = preserveViewport ? captureImageViewportAnchor() : null;
 
         const fitViewport = fitMeasurementForViewport(imageViewport);
         const wrapStyle = window.getComputedStyle(imageWrap);
@@ -399,10 +415,25 @@
         imageWrap.style.setProperty("--overlay-badge-scale", String(computeOverlayBadgeScale(scale)));
 
         state.zoomAppliedPercent = Math.round(scale * 1000) / 10;
+        state.zoomAppliedOnce = true;
         setZoomInputFromApplied();
         updateZoomMenuSelection();
         requestAnimationFrame(() => {
           renderOverlay();
+          if (viewportAnchor) {
+            const target = computeViewportScrollForAnchor({
+              ...viewportAnchor,
+              contentWidth: imageWrap.offsetWidth,
+              contentHeight: imageWrap.offsetHeight,
+              viewportWidth: imageViewport.clientWidth,
+              viewportHeight: imageViewport.clientHeight,
+            });
+            if (target) {
+              imageViewport.scrollLeft = target.left;
+              imageViewport.scrollTop = target.top;
+              return;
+            }
+          }
           const alignTop = state.zoomMode === "fit-page" || state.zoomMode === "fit-height";
           centerImageInViewport({ alignTop });
         });
@@ -2485,12 +2516,14 @@
         applySelectedLayoutStyles();
       }
 
-      async function loadPage() {
+      async function loadPage({ refreshImage = true } = {}) {
         const payload = await fetchPageDetails(pageId);
         state.page = payload.page;
         pageMeta.textContent = `Page #${state.page.id} | ${state.page.rel_path}`;
         updateReviewUiState();
-        pageImage.src = payload.image_url;
+        if (refreshImage && shouldUpdateImageSource(pageImage.getAttribute("src"), payload.image_url)) {
+          pageImage.src = payload.image_url;
+        }
       }
 
       async function loadLayouts() {
@@ -2920,7 +2953,7 @@
           setStatus(
             `Detection finished. Created ${payload.created} layouts. model=${payload.detector || "default"}, conf=${params.confidence_threshold}, iou=${params.iou_threshold}, imgsz=${params.image_size}, max_det=${params.max_detections}, agnostic_nms=${params.agnostic_nms}.`,
           );
-          await loadPage();
+          await loadPage({ refreshImage: false });
           await loadLayouts();
           await refreshNextReviewButton();
         } catch (error) {
@@ -3039,12 +3072,12 @@
           persistLayoutDraftState();
           rememberLastAddedClass(className);
           setStatus(`Manual layout added at order ${inferredReadingOrder} (${orderingMode} mode).`);
-          await loadPage();
+          await loadPage({ refreshImage: false });
           await loadLayouts();
           await refreshNextReviewButton();
           const createdLayoutId = Number(payload?.layout?.id);
           if (Number.isInteger(createdLayoutId) && createdLayoutId > 0) {
-            selectLayout(createdLayoutId, { scrollRowIntoView: true, scrollImageToLayout: true });
+            selectLayout(createdLayoutId);
           }
         } catch (error) {
           setStatus(`Add failed: ${error.message}`, { isError: true });
@@ -3152,7 +3185,7 @@
           setStatus(
             `Page marked reviewed with ${payload.layout_count} layouts. No more pages are waiting for layout review.`,
           );
-          await loadPage();
+          await loadPage({ refreshImage: false });
           await loadLayouts();
           await refreshNextReviewButton();
         };
@@ -3564,14 +3597,14 @@
       if (typeof ResizeObserver !== "undefined") {
         const viewportResizeObserver = new ResizeObserver(() => {
           if (state.zoomMode !== "custom") {
-            applyZoom();
+            applyZoom({ preserveViewport: state.zoomAppliedOnce });
           }
         });
         viewportResizeObserver.observe(imageViewport);
       } else {
         window.addEventListener("resize", () => {
           if (state.zoomMode !== "custom") {
-            applyZoom();
+            applyZoom({ preserveViewport: state.zoomAppliedOnce });
           }
         });
       }

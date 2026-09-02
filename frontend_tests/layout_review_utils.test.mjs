@@ -15,6 +15,7 @@ import {
   filterReviewHistory,
   mergeLayoutsForReview,
   computeViewportCenterPadding,
+  computeViewportScrollForAnchor,
   computeViewportScrollTargetForLayoutId,
   computeViewportScrollToCenterBBox,
   computeZoomScale,
@@ -40,9 +41,16 @@ import {
   reorderReadingOrderIds,
   swapReadingOrderIds,
   shiftDraftReadingOrdersAfterInsertion,
+  shouldUpdateImageSource,
   updateReviewHistoryOnVisit,
   ZOOM_PRESET_PERCENTS,
 } from "../app/static/js/layout_review_utils.mjs";
+
+test("shouldUpdateImageSource avoids reloading an unchanged review image", () => {
+  assert.equal(shouldUpdateImageSource("/api/pages/7/image", "/api/pages/7/image"), false);
+  assert.equal(shouldUpdateImageSource("", "/api/pages/7/image"), true);
+  assert.equal(shouldUpdateImageSource("/api/pages/7/image", "/api/pages/8/image"), true);
+});
 
 test("clampZoomPercent clamps and falls back for invalid values", () => {
   assert.equal(clampZoomPercent("abc"), 100);
@@ -137,6 +145,31 @@ test("computeZoomScale returns null when dimensions are unavailable", () => {
     viewportHeight: 700,
   });
   assert.equal(scale, null);
+});
+
+test("computeViewportScrollForAnchor preserves the viewed document point after resize", () => {
+  assert.deepEqual(
+    computeViewportScrollForAnchor({
+      anchorX: 0.5,
+      anchorY: 0.8,
+      contentWidth: 1200,
+      contentHeight: 2400,
+      viewportWidth: 600,
+      viewportHeight: 500,
+    }),
+    { left: 300, top: 1670 },
+  );
+  assert.deepEqual(
+    computeViewportScrollForAnchor({
+      anchorX: 0.05,
+      anchorY: 0.05,
+      contentWidth: 1000,
+      contentHeight: 1000,
+      viewportWidth: 500,
+      viewportHeight: 500,
+    }),
+    { left: 0, top: 0 },
+  );
 });
 
 test("computeOverlayBadgeScale uses adaptive bounded scaling", () => {
