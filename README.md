@@ -111,6 +111,8 @@ Each verification model gets `attempts_per_model` counted attempts. Invalid/empt
 
 Gemini key selection skips keys recorded as daily-quota exhausted for the selected model, shuffles the remaining available keys, then uses the first shuffled key. Daily exhaustion is merged and atomically persisted to `_artifacts/gemini_usage.json` immediately after each response, grouped by model and Pacific-time quota day. The file stores SHA-256 key fingerprints rather than API-key values and automatically migrates legacy raw-key entries when read. Per-minute rate limits are request-local and are not recorded as daily exhaustion.
 
+Verification scheduling processes untouched model checks before any retries, including after a restart/resume. A check is untouched while both its counted failures and transient deferrals are zero; shared quota cooldowns do not make sibling checks retries. If all remaining untouched checks are quota-blocked, verification waits rather than retrying older failures. After the first pass, eligible retries run in order of fewest failures/deferrals, then oldest update time and task ID. Resume preserves cooldown deadlines and retry counters; terminal unavailable checks are not automatically retried.
+
 Environment overrides:
 
 - `SOURCE_DIR`

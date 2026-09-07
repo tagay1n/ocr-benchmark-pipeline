@@ -255,8 +255,7 @@ def _upsert_current_tasks(
                 task_count += 1
             elif str(task.status) in {"pending", "waiting"}:
                 task.run_id = run_id
-                task.next_retry_at = None
-                task.updated_at = now
+                # Preserve cooldowns and retry age across manual resumes.
                 task_count += 1
     return task_count, affected_layout_ids
 
@@ -908,18 +907,29 @@ def _claim_ready_task(run_id: int) -> int | None:
         run = session.get(OcrVerificationRun, int(run_id))
         if run is None or bool(run.stop_requested):
             return None
-        task = session.execute(
-            select(OcrVerificationTask)
-            .where(
-                OcrVerificationTask.run_id == int(run_id),
-                OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
+        active = select(OcrVerificationTask).where(
+            OcrVerificationTask.run_id == int(run_id),
+            OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
+        )
+        untouched = active.where(
+            OcrVerificationTask.attempts == 0,
+            OcrVerificationTask.transient_count == 0,
+        )
+        # Include quota-blocked checks when deciding whether the first pass
+        # is finished; retries must never overtake untouched work.
+        if session.scalar(select(untouched.exists())):
+            candidates = untouched.order_by(OcrVerificationTask.id.asc())
+        else:
+            candidates = active.order_by(
+                (OcrVerificationTask.attempts + OcrVerificationTask.transient_count).asc(),
+                OcrVerificationTask.updated_at.asc(),
+                OcrVerificationTask.id.asc(),
             )
-            .where(
+        task = session.execute(
+            candidates.where(
                 (OcrVerificationTask.next_retry_at.is_(None))
                 | (OcrVerificationTask.next_retry_at <= now)
-            )
-            .order_by(OcrVerificationTask.id.asc())
-            .limit(1)
+            ).limit(1)
         ).scalar_one_or_none()
         return None if task is None else int(task.id)
 

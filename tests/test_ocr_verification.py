@@ -324,6 +324,80 @@ class OcrVerificationTests(unittest.TestCase):
         finding = ocr_verification.refresh_finding(self.layout_id)
         self.assertEqual(finding["state"], "waiting")
 
+    def test_scheduler_finishes_untouched_pass_before_retries(self) -> None:
+        run_id = int(ocr_verification.start_verification()["run_id"])
+        older, fresh = self._tasks()
+        for counter in ("attempts", "transient_count"):
+            with self.subTest(counter=counter):
+                with db.get_session() as session:
+                    row = session.get(main.OcrVerificationTask, older.id)
+                    row.attempts = 0
+                    row.transient_count = 0
+                    setattr(row, counter, 1)
+                    row.status = "waiting"
+                self.assertEqual(ocr_verification._claim_ready_task(run_id), fresh.id)
+                with db.get_session() as session:
+                    row = session.get(main.OcrVerificationTask, fresh.id)
+                    row.status = "waiting"
+                    row.error_message = "Shared model cooldown"
+                    row.next_retry_at = "2999-01-01T00:00:00+00:00"
+                self.assertIsNone(ocr_verification._claim_ready_task(run_id))
+                with db.get_session() as session:
+                    row = session.get(main.OcrVerificationTask, fresh.id)
+                    row.next_retry_at = None
+        for terminal in ("succeeded", "unavailable"):
+            with db.get_session() as session:
+                session.get(main.OcrVerificationTask, fresh.id).status = terminal
+            self.assertEqual(ocr_verification._claim_ready_task(run_id), older.id)
+        with db.get_session() as session:
+            session.get(main.OcrVerificationTask, fresh.id).status = "pending"
+            session.get(main.OcrVerificationTask, fresh.id).attempts = 1
+        self.assertIsNotNone(ocr_verification._claim_ready_task(run_id))
+
+    def test_scheduler_orders_retries_by_failure_count_then_age_then_id(self) -> None:
+        run_id = int(ocr_verification.start_verification()["run_id"])
+        older, newer = self._tasks()
+        with db.get_session() as session:
+            session.get(main.OcrVerificationTask, older.id).transient_count = 618
+            session.get(main.OcrVerificationTask, newer.id).attempts = 1
+        self.assertEqual(ocr_verification._claim_ready_task(run_id), newer.id)
+        with db.get_session() as session:
+            row = session.get(main.OcrVerificationTask, older.id)
+            row.transient_count = 1
+            row.updated_at = "2026-01-02T00:00:00+00:00"
+            session.get(main.OcrVerificationTask, newer.id).updated_at = "2026-01-01T00:00:00+00:00"
+        self.assertEqual(ocr_verification._claim_ready_task(run_id), newer.id)
+        with db.get_session() as session:
+            session.get(main.OcrVerificationTask, older.id).updated_at = "2026-01-01T00:00:00+00:00"
+        self.assertEqual(ocr_verification._claim_ready_task(run_id), older.id)
+        with db.get_session() as session:
+            session.get(main.OcrVerificationTask, older.id).next_retry_at = "2999-01-01T00:00:00+00:00"
+        self.assertEqual(ocr_verification._claim_ready_task(run_id), newer.id)
+
+    def test_resume_preserves_cooldowns_and_retry_priority(self) -> None:
+        ocr_verification.start_verification()
+        retry, untouched = self._tasks()
+        deadline = "2999-01-01T00:00:00+00:00"
+        with db.get_session() as session:
+            for task in (retry, untouched):
+                row = session.get(main.OcrVerificationTask, task.id)
+                row.status = "waiting"
+                row.next_retry_at = deadline
+            session.get(main.OcrVerificationTask, retry.id).transient_count = 5
+        ocr_verification.request_verification_stop()
+        run_id = int(ocr_verification.start_verification()["run_id"])
+        for task in self._tasks():
+            self.assertEqual(task.next_retry_at, deadline)
+            self.assertEqual(task.run_id, run_id)
+            self.assertEqual(task.transient_count, 5 if task.id == retry.id else 0)
+        self.assertIsNone(ocr_verification._claim_ready_task(run_id))
+        with patch.object(ocr_verification.time, "sleep", side_effect=lambda _: ocr_verification.request_verification_stop()), patch.object(
+            ocr_verification, "_execute_task"
+        ) as execute:
+            ocr_verification._worker_loop(run_id)
+        execute.assert_not_called()
+        self.assertEqual(ocr_verification.verification_status()["run"]["status"], "stopped")
+
     def test_503_defers_without_consuming_attempt(self) -> None:
         ocr_verification.start_verification()
         task = self._tasks()[0]
