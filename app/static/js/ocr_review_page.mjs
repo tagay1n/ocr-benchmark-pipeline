@@ -3728,7 +3728,7 @@
           lineActionDisabled || (!currentBboxHasPending && !canAdvanceToNextOutput);
         lineReviewResetBboxBtn.disabled = lineActionDisabled;
         lineReviewApproveBtn.classList.toggle("approved", isApproved);
-        lineReviewApproveBtn.textContent = "Approve (C)";
+        lineReviewApproveBtn.textContent = "Approve (Space)";
         applyLineStatusHighlights();
       }
 
@@ -6051,7 +6051,7 @@
           return;
         }
         if (
-          (event.key === "c" || event.key === "C") &&
+          event.key === " " &&
           !event.repeat &&
           !event.ctrlKey &&
           !event.metaKey &&

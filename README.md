@@ -45,6 +45,7 @@ Optionally run non-blocking OCR verification after review. It compares each revi
 - OCR review (`/static/ocr_review.html?page_id=<id>`):
   - Source + reconstructed preview panels with synchronized scrolling.
   - Review modes: `Two panels` and `Line by line` (slot-style line approval rail).
+  - In line-by-line review, press `Space` to approve the current line and advance, or `Shift+Space` to unapprove; these shortcuts are inactive while typing in an editor.
   - Draft editing and per-layout restore.
   - Quick source magnifier (`M`, hold `Alt`, or toolbar button) with OCR bbox overlays.
   - `Detect` modal with layout selection, model picker, and generation params.
