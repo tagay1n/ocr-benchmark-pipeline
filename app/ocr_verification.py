@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from collections import OrderedDict
 import hashlib
 from io import BytesIO
+from pathlib import Path
 import json
 import logging
 import re
@@ -41,6 +43,7 @@ from .ocr_extract import (
 from .ocr_gemini_client import (
     DEFAULT_GEMINI_TEMPERATURE,
     gemini_generate_content,
+    gemini_retry_delay_seconds,
     is_daily_quota_exhausted_error,
     is_gemini_server_error,
     is_quota_error,
@@ -59,6 +62,36 @@ _WORKER_LOCK = Lock()
 _WORKER_THREAD: Thread | None = None
 _PREPARATION_THREAD: Thread | None = None
 _RECALCULATION_THREAD: Thread | None = None
+_EXTRACTION_CROP_CACHE: OrderedDict[tuple, bytes] = OrderedDict()
+_EXTRACTION_CROP_CACHE_BYTES = 64 * 1024 * 1024
+_EXTRACTION_CROP_CACHE_ENTRIES = 128
+_KEY_QUOTA_COOLDOWNS: dict[tuple[str, str, str], datetime] = {}
+
+
+def _key_cooldown_id(model_name: str, key: str) -> tuple[str, str, str]:
+    return (str(settings.db_path.resolve()), model_name, hashlib.sha256(key.encode()).hexdigest())
+
+
+def _cached_extraction_crop(
+    image_path: Path, bbox: dict[str, float], *, rotate_for_vertical: bool = False
+) -> bytes:
+    stat = image_path.stat()
+    cache_key = (
+        str(image_path.resolve()), stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size,
+        tuple(float(bbox[name]) for name in ("x1", "y1", "x2", "y2")), rotate_for_vertical,
+    )
+    if cache_key in _EXTRACTION_CROP_CACHE:
+        _EXTRACTION_CROP_CACHE.move_to_end(cache_key)
+        return _EXTRACTION_CROP_CACHE[cache_key]
+    crop = _crop_layout_png_bytes(image_path, bbox, rotate_for_vertical=rotate_for_vertical)
+    if len(crop) <= _EXTRACTION_CROP_CACHE_BYTES:
+        _EXTRACTION_CROP_CACHE[cache_key] = crop
+        while (
+            len(_EXTRACTION_CROP_CACHE) > _EXTRACTION_CROP_CACHE_ENTRIES
+            or sum(map(len, _EXTRACTION_CROP_CACHE.values())) > _EXTRACTION_CROP_CACHE_BYTES
+        ):
+            _EXTRACTION_CROP_CACHE.popitem(last=False)
+    return crop
 
 
 def _utc_now() -> str:
@@ -707,7 +740,7 @@ def _task_inputs(task_id: int) -> tuple[OcrVerificationTask, Page, Layout, str, 
         source_root = settings.source_dir.resolve()
         if source_root not in image_path.parents or not image_path.is_file():
             raise RuntimeError("Verification source image is unavailable.")
-        image_bytes = _crop_layout_png_bytes(
+        image_bytes = _cached_extraction_crop(
             image_path,
             context["layout"]["bbox"],
             rotate_for_vertical=str(context["layout"]["effective_orientation"]) == "vertical",
@@ -787,9 +820,25 @@ def _persist_task_error(
 
 
 def _defer_model_for_daily_quota(task_id: int, *, error: str) -> None:
-    now_dt = datetime.now(UTC)
-    now = now_dt.isoformat()
-    next_retry_at = (now_dt + timedelta(seconds=300)).isoformat()
+    # The scheduler checks the persisted key state, not a clock deadline.
+    with get_session() as session:
+        task = session.get(OcrVerificationTask, int(task_id))
+        if task is None or task.run_id is None:
+            return
+        siblings = session.execute(select(OcrVerificationTask).where(
+            OcrVerificationTask.run_id == task.run_id,
+            OcrVerificationTask.model_name == task.model_name,
+            OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
+        )).scalars().all()
+        for sibling in siblings:
+            sibling.status = "waiting"
+            sibling.next_retry_at = None
+            if sibling.id == task_id:
+                sibling.error_message = error
+
+
+def _defer_model_for_quota(task_id: int, *, error: str, deadline: datetime) -> None:
+    next_retry_at = deadline.isoformat()
     with get_session() as session:
         task = session.get(OcrVerificationTask, int(task_id))
         if task is None or task.run_id is None:
@@ -803,8 +852,8 @@ def _defer_model_for_daily_quota(task_id: int, *, error: str) -> None:
         ).scalars().all()
         for sibling in siblings:
             sibling.status = "waiting"
-            sibling.next_retry_at = next_retry_at
-            sibling.updated_at = now
+            sibling.next_retry_at = max(sibling.next_retry_at or next_retry_at, next_retry_at)
+            # A shared cooldown is not a failed attempt on sibling checks.
             if int(sibling.id) == int(task_id):
                 sibling.error_message = str(error)
 
@@ -872,6 +921,16 @@ def _execute_task(task_id: int) -> str:
     exhausted_keys = _load_usage_state(model_name=model_name)
     excluded_keys: set[str] = set()
     last_quota_error: str | None = None
+    quota_deadline: datetime | None = None
+    now = datetime.now(UTC)
+    for cooldown_id, deadline in list(_KEY_QUOTA_COOLDOWNS.items()):
+        if deadline <= now:
+            del _KEY_QUOTA_COOLDOWNS[cooldown_id]
+    for key in settings.gemini_keys:
+        deadline = _KEY_QUOTA_COOLDOWNS.get(_key_cooldown_id(model_name, key))
+        if deadline is not None:
+            excluded_keys.add(key)
+            quota_deadline = max(quota_deadline or deadline, deadline)
     while True:
         try:
             key = _next_available_key(
@@ -891,6 +950,10 @@ def _execute_task(task_id: int) -> str:
                 transient=False,
                 quota_wait=True,
             )
+            _defer_model_for_quota(
+                task_id, error=last_quota_error or str(error),
+                deadline=max(quota_deadline or datetime.now(UTC), datetime.now(UTC) + timedelta(seconds=60)),
+            )
             return "quota_wait"
         try:
             raw_content = _generate_verification_content(task, key, prompt, image_bytes)
@@ -901,6 +964,13 @@ def _execute_task(task_id: int) -> str:
                 excluded_keys.add(key)
                 if is_daily_quota_exhausted_error(error_text):
                     _mark_key_exhausted(exhausted_keys, key, model_name=model_name)
+                else:
+                    delay = getattr(error, "retry_delay_seconds", None)
+                    if delay is None:
+                        delay = gemini_retry_delay_seconds(error_text)
+                    deadline = datetime.now(UTC) + timedelta(seconds=max(60, delay or 0))
+                    _KEY_QUOTA_COOLDOWNS[_key_cooldown_id(model_name, key)] = deadline
+                    quota_deadline = max(quota_deadline or deadline, deadline)
                 continue
             if is_gemini_server_error(error_text):
                 _persist_task_error(task_id, error=error_text, transient=True)
@@ -961,6 +1031,15 @@ def _claim_ready_task(run_id: int) -> int | None:
         run = session.get(OcrVerificationRun, int(run_id))
         if run is None or bool(run.stop_requested):
             return None
+        model_names = session.scalars(select(OcrVerificationTask.model_name).where(
+            OcrVerificationTask.run_id == int(run_id),
+            OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
+        ).distinct()).all()
+        key_ids = {"sha256:" + hashlib.sha256(key.encode()).hexdigest() for key in settings.gemini_keys}
+        blocked_models = [
+            model for model in model_names
+            if key_ids and key_ids.issubset(set(_load_usage_state(model_name=model)))
+        ]
         active = select(OcrVerificationTask).where(
             OcrVerificationTask.run_id == int(run_id),
             OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
@@ -981,6 +1060,7 @@ def _claim_ready_task(run_id: int) -> int | None:
             )
         task = session.execute(
             candidates.where(
+                OcrVerificationTask.model_name.not_in(blocked_models),
                 (OcrVerificationTask.next_retry_at.is_(None))
                 | (OcrVerificationTask.next_retry_at <= now)
             ).limit(1)

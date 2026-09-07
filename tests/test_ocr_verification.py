@@ -206,6 +206,35 @@ class OcrVerificationTests(unittest.TestCase):
         self.assertEqual(len(detail["groups"]), 1)
         self.assertEqual(len(detail["tasks"]), 2)
 
+    def test_extraction_reuses_full_resolution_crop_and_invalidates_edits(self) -> None:
+        ocr_verification.start_verification()
+        tasks = self._tasks()
+        with patch.object(ocr_verification, "_crop_layout_png_bytes", wraps=ocr_verification._crop_layout_png_bytes) as crop:
+            first = ocr_verification._task_inputs(tasks[0].id)[-1]
+            self.assertEqual(ocr_verification._task_inputs(tasks[1].id)[-1], first)
+            self.assertEqual(crop.call_count, 1)
+            with db.get_session() as session:
+                session.get(main.Layout, self.layout_id).x1 = 0.2
+            ocr_verification._task_inputs(tasks[0].id)
+            self.assertEqual(crop.call_count, 2)
+            Image.new("RGB", (300, 200), "black").save(self.settings.source_dir / "page.png")
+            ocr_verification._task_inputs(tasks[0].id)
+            self.assertEqual(crop.call_count, 3)
+
+    def test_extraction_crop_cache_is_bounded_and_preserves_orientation(self) -> None:
+        ocr_verification._EXTRACTION_CROP_CACHE.clear()
+        path = self.settings.source_dir / "page.png"
+        bbox = {"x1": 0.1, "y1": 0.1, "x2": 0.9, "y2": 0.8}
+        with patch.object(ocr_verification, "_EXTRACTION_CROP_CACHE_BYTES", 5), patch.object(
+            ocr_verification, "_crop_layout_png_bytes", side_effect=[b"aaa", b"bbb", b"cccccc", b"ddd"]
+        ) as crop:
+            self.assertEqual(ocr_verification._cached_extraction_crop(path, bbox), b"aaa")
+            self.assertEqual(ocr_verification._cached_extraction_crop(path, bbox, rotate_for_vertical=True), b"bbb")
+            self.assertEqual(ocr_verification._cached_extraction_crop(path, bbox), b"cccccc")
+            self.assertEqual(ocr_verification._cached_extraction_crop(path, bbox), b"ddd")
+            self.assertEqual(crop.call_count, 4)
+            self.assertLessEqual(sum(map(len, ocr_verification._EXTRACTION_CROP_CACHE.values())), 5)
+
     def test_verification_crop_returns_png_with_stable_version(self) -> None:
         ocr_verification.start_verification()
 
@@ -501,6 +530,58 @@ class OcrVerificationTests(unittest.TestCase):
         stop.assert_not_called()
         finish.assert_called_once_with(int(started["run_id"]), stopped=False)
 
+    def test_quota_cooldown_shares_longest_retry_delay_without_touching_sibling_counters(self) -> None:
+        run_id = ocr_verification.start_verification()["run_id"]
+        tasks = self._tasks()
+        with db.get_session() as session:
+            session.get(main.OcrVerificationTask, tasks[1].id).model_name = tasks[0].model_name
+        with patch.object(ocr_verification, "gemini_generate_content", side_effect=[
+            RuntimeError('HTTP 429 {"error":{"details":[{"retryDelay":"120s"}]}}'),
+            RuntimeError('HTTP 429 {"error":{"details":[{"retryDelay":"30s"}]}}'),
+        ]):
+            self.assertEqual(ocr_verification._execute_task(tasks[0].id), "quota_wait")
+        from datetime import datetime, UTC
+        with db.get_session() as session:
+            first = session.get(main.OcrVerificationTask, tasks[0].id)
+            sibling = session.get(main.OcrVerificationTask, tasks[1].id)
+            self.assertGreater((datetime.fromisoformat(first.next_retry_at) - datetime.now(UTC)).total_seconds(), 110)
+            self.assertEqual(first.next_retry_at, sibling.next_retry_at)
+            self.assertEqual(sibling.transient_count, 0)
+            self.assertEqual(sibling.attempts, 0)
+        self.assertIsNone(ocr_verification._claim_ready_task(run_id))
+
+    def test_rate_limited_key_is_skipped_on_next_task_for_same_model(self) -> None:
+        ocr_verification.start_verification()
+        first, second = self._tasks()
+        with db.get_session() as session:
+            session.get(main.OcrVerificationTask, second.id).model_name = first.model_name
+        calls = []
+        def generate(key, *args, **kwargs):
+            calls.append(key)
+            if len(calls) == 1:
+                raise RuntimeError('HTTP 429 {"retryDelay":"120s"}')
+            return "Reviewed text"
+        with patch.object(ocr_verification, "gemini_generate_content", side_effect=generate):
+            self.assertEqual(ocr_verification._execute_task(first.id), "succeeded")
+            self.assertEqual(ocr_verification._execute_task(second.id), "succeeded")
+        self.assertEqual(len(calls), 3)
+        self.assertNotEqual(calls[0], calls[1])
+        self.assertEqual(calls[1], calls[2])
+
+    def test_removing_exhaustion_file_unblocks_model_without_daily_timer(self) -> None:
+        run_id = ocr_verification.start_verification()["run_id"]
+        first, second = self._tasks()
+        ocr_extract._save_usage_state(list(self.settings.gemini_keys), model_name=first.model_name)
+        self.assertEqual(ocr_verification._execute_task(first.id), "quota_wait")
+        self.assertEqual(ocr_verification._claim_ready_task(run_id), second.id)
+        with db.get_session() as session:
+            session.get(main.OcrVerificationTask, second.id).status = "succeeded"
+        self.assertIsNone(ocr_verification._claim_ready_task(run_id))
+        Path(self.settings.gemini_usage_path).unlink()
+        self.assertEqual(ocr_verification._claim_ready_task(run_id), first.id)
+        with patch.object(ocr_verification, "gemini_generate_content", return_value="Reviewed text"):
+            self.assertEqual(ocr_verification._execute_task(first.id), "succeeded")
+
     def test_temporary_rate_limits_defer_only_the_current_task(self) -> None:
         ocr_verification.start_verification()
         tasks = self._tasks()
@@ -541,7 +622,7 @@ class OcrVerificationTests(unittest.TestCase):
             run = session.get(main.OcrVerificationRun, int(exhausted.run_id))
             self.assertEqual(exhausted.status, "waiting")
             self.assertIn("exhausted for today", str(exhausted.error_message))
-            self.assertIsNotNone(exhausted.next_retry_at)
+            self.assertIsNone(exhausted.next_retry_at)
             self.assertEqual(unaffected.status, "pending")
             self.assertIsNone(unaffected.next_retry_at)
             self.assertEqual(run.status, "running")

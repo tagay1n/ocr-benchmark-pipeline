@@ -285,7 +285,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         )
         self.assertEqual(ocr_extract._load_usage_state(model_name=second_model), [])
 
-    def test_usage_state_resets_on_new_pacific_quota_day(self) -> None:
+    def test_usage_state_persists_until_file_is_removed(self) -> None:
         path = Path(self.test_settings.gemini_usage_path or "")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
@@ -298,10 +298,9 @@ class OcrExtractInternalsTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        self.assertEqual(ocr_extract._load_usage_state(), self._key_ids("k1"))
+        path.unlink()
         self.assertEqual(ocr_extract._load_usage_state(), [])
-        reset_payload = json.loads(path.read_text(encoding="utf-8"))
-        self.assertNotEqual(reset_payload["quota_day"], "2000-01-01")
-        self.assertEqual(reset_payload["models"], {})
 
     def test_next_available_key_skips_exhausted_and_raises_when_empty(self) -> None:
         with patch.object(ocr_key_store.random, "shuffle", side_effect=lambda keys: keys.reverse()) as shuffle_mock:

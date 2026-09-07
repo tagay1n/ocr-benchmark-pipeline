@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import base64
 import json
+import math
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 import re
 from typing import Any
 from urllib import error as urllib_error
@@ -9,6 +12,26 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 DEFAULT_GEMINI_TEMPERATURE = 0.0
+
+
+class GeminiRequestError(RuntimeError):
+    def __init__(self, message: str, retry_delay_seconds: float | None = None):
+        super().__init__(message)
+        self.retry_delay_seconds = retry_delay_seconds
+
+
+def gemini_retry_delay_seconds(message: str, retry_after: str | None = None, *, now=None) -> float | None:
+    delays = [float(value) for value in re.findall(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"', message)]
+    if retry_after:
+        try:
+            delays.append(float(retry_after))
+        except ValueError:
+            try:
+                delays.append((parsedate_to_datetime(retry_after) - (now or datetime.now(UTC))).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                pass
+    valid = [value for value in delays if math.isfinite(value) and value >= 0]
+    return max(valid) if valid else None
 
 
 def key_alias(api_key: str) -> str:
@@ -104,7 +127,10 @@ def gemini_generate_content(
             response_payload = json.loads(response.read().decode("utf-8"))
     except urllib_error.HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Gemini request failed with HTTP {error.code}: {body}") from error
+        raise GeminiRequestError(
+            f"Gemini request failed with HTTP {error.code}: {body}",
+            gemini_retry_delay_seconds(body, error.headers.get("Retry-After") if error.headers else None),
+        ) from error
     except urllib_error.URLError as error:
         raise RuntimeError(f"Gemini request failed: {error}") from error
     except json.JSONDecodeError as error:

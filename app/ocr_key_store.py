@@ -93,8 +93,8 @@ def _read_state_unlocked(path: Path, *, legacy_model_name: str) -> tuple[dict[st
         return ({legacy_model_name: legacy_keys} if legacy_keys else {}), True
     if not isinstance(payload, dict):
         return {}, False
-    if str(payload.get("quota_day") or "").strip() != _quota_day():
-        return {}, True
+    # Exhaustion is manually reset by removing this file. quota_day remains
+    # informational metadata for compatibility with existing state files.
 
     raw_models = payload.get("models")
     if not isinstance(raw_models, dict):
