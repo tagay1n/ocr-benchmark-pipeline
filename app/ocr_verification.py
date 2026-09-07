@@ -4,6 +4,8 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 from io import BytesIO
 import json
+import logging
+import re
 from threading import Lock, Thread
 import time
 from typing import Any
@@ -49,6 +51,7 @@ from .ocr_prompts import DEFAULT_PROMPT_TEMPLATE, render_prompt_for_layout_class
 
 
 COMPARISON_VERSION = 1
+logger = logging.getLogger(__name__)
 _ACTIVE_RUN_STATUSES = frozenset({"preparing", "running", "stop_requested"})
 _ACTIVE_TASK_STATUSES = frozenset({"pending", "waiting"})
 _TERMINAL_TASK_STATUSES = frozenset({"succeeded", "unavailable"})
@@ -806,6 +809,63 @@ def _defer_model_for_daily_quota(task_id: int, *, error: str) -> None:
                 sibling.error_message = str(error)
 
 
+def _generate_verification_content(
+    task: OcrVerificationTask, key: str, prompt: str, image_bytes: bytes
+) -> str:
+    """Record each actual model call, including calls made during key rotation."""
+    started_at = _utc_now()
+    started = time.monotonic()
+    outcome = "success"
+    http_status = None
+    try:
+        return gemini_generate_content(
+            key, prompt, image_bytes,
+            model_name=str(task.model_name),
+            temperature=DEFAULT_GEMINI_TEMPERATURE,
+        )
+    except Exception as error:
+        message = str(error).lower()
+        status_match = re.search(r"http\s+(\d{3})\b", message)
+        http_status = int(status_match.group(1)) if status_match else None
+        if is_daily_quota_exhausted_error(message):
+            outcome = "daily_quota"
+        elif is_quota_error(message):
+            outcome = "rate_limit"
+        elif "timed out" in message or "timeout" in message:
+            outcome = "timeout"
+        elif http_status is not None and 500 <= http_status < 600:
+            outcome = "server_error"
+        elif "json" in message or "empty response" in message or "response text is empty" in message:
+            outcome = "invalid_response"
+        elif http_status is not None and 400 <= http_status < 500:
+            outcome = "request_error"
+        else:
+            outcome = "other_error"
+        raise
+    finally:
+        record = {
+            "run_id": task.run_id,
+            "task_id": int(task.id),
+            "page_id": int(task.page_id),
+            "layout_id": int(task.layout_id),
+            "model_name": str(task.model_name),
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "duration_ms": round(max(0, time.monotonic() - started) * 1000, 3),
+            "outcome": outcome,
+            "http_status": http_status,
+        }
+        try:
+            directory = settings.project_root / "_artifacts" / "ocr_verification_attempts"
+            directory.mkdir(parents=True, exist_ok=True)
+            with (directory / f"run_{task.run_id}.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(_json_dumps(record) + "\n")
+        except OSError:
+            # Diagnostics must not change extraction/retry outcomes. Never log
+            # raw exception text, which may contain credentials or response data.
+            logger.warning("Could not write verification attempt timing for task %s", task.id)
+
+
 def _execute_task(task_id: int) -> str:
     task, _page, _layout, prompt, image_bytes = _task_inputs(task_id)
     model_name = str(task.model_name)
@@ -833,13 +893,7 @@ def _execute_task(task_id: int) -> str:
             )
             return "quota_wait"
         try:
-            raw_content = gemini_generate_content(
-                key,
-                prompt,
-                image_bytes,
-                model_name=model_name,
-                temperature=DEFAULT_GEMINI_TEMPERATURE,
-            )
+            raw_content = _generate_verification_content(task, key, prompt, image_bytes)
         except Exception as error:
             error_text = str(error)
             if is_quota_error(error_text):

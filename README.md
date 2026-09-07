@@ -214,6 +214,16 @@ Each OCR extraction run writes resolved text prompts (without image clip bytes) 
 
 Each JSONL row includes page/layout identifiers, class, output format, and the exact prompt sent to Gemini.
 
+## OCR Verification Request Diagnostics
+
+Verification writes one JSON record per completed Gemini call to `_artifacts/ocr_verification_attempts/run_<run_id>.jsonl`, including each call during API-key rotation. Processing remains sequential.
+
+Records contain run/task/page/layout IDs, model name, UTC start/end timestamps, monotonic elapsed `duration_ms`, an HTTP error status when available, and an `outcome`: `success`, `timeout`, `rate_limit`, `daily_quota`, `server_error`, `invalid_response`, `request_error`, or `other_error`. They omit API keys, prompts, images, response content, and raw error messages. Logging failures produce a warning without changing extraction or retry behavior.
+
+Timing covers the Gemini client call, including serialization, network time, and response parsing; it excludes crop preparation, scheduler cooldowns, and subsequent normalization/database work. `success` means the client returned parsed content, not that the region is fully verified. No record is written when quota prevents a call or a process exits before the call finishes. Existing runs have no retrospective timings.
+
+For diagnosis, group a run's records by model and outcome, then compare counts and total/median durations. This separates time spent in successful calls, timeouts, and quota responses; compare those totals with the run's wall-clock duration to identify time outside requests. Files append across process restarts and are not automatically deleted.
+
 ## OCR Formatting Decisions Log
 
 This section is a living log of OCR normalization decisions for dataset consistency. Add new items as rules are agreed.

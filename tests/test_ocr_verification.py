@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -397,6 +398,57 @@ class OcrVerificationTests(unittest.TestCase):
             ocr_verification._worker_loop(run_id)
         execute.assert_not_called()
         self.assertEqual(ocr_verification.verification_status()["run"]["status"], "stopped")
+
+    def test_attempt_log_records_each_request_including_key_rotation(self) -> None:
+        started = ocr_verification.start_verification()
+        task = self._tasks()[0]
+        with patch.object(ocr_verification, "gemini_generate_content", side_effect=[
+            RuntimeError("HTTP 429 rate limit key-a secret-response"), "Reviewed text"
+        ]), patch.object(ocr_verification.time, "monotonic", side_effect=[10, 12, 20, 23]):
+            self.assertEqual(ocr_verification._execute_task(task.id), "succeeded")
+        path = self.root / "_artifacts" / "ocr_verification_attempts" / f"run_{started['run_id']}.jsonl"
+        raw = path.read_text()
+        records = [json.loads(line) for line in raw.splitlines()]
+        self.assertEqual([row["outcome"] for row in records], ["rate_limit", "success"])
+        self.assertEqual([row["duration_ms"] for row in records], [2000, 3000])
+        self.assertEqual(records[0]["http_status"], 429)
+        for row in records:
+            self.assertEqual(row["task_id"], task.id)
+            self.assertEqual(row["model_name"], task.model_name)
+            self.assertIn("started_at", row)
+            self.assertIn("finished_at", row)
+        for secret in ("key-a", "key-b", "secret-response", "Reviewed text"):
+            self.assertNotIn(secret, raw)
+
+    def test_attempt_log_categorizes_failures_and_preserves_exceptions(self) -> None:
+        ocr_verification.start_verification()
+        task = self._tasks()[0]
+        for message, category in [
+            ("The read operation timed out", "timeout"),
+            ("HTTP 503 overloaded", "server_error"),
+            ("HTTP 429 requests per day quota", "daily_quota"),
+            ("Gemini response is not valid JSON: Extra data.", "invalid_response"),
+            ("Gemini request returned an empty response.", "invalid_response"),
+            ("HTTP 403 forbidden", "request_error"),
+            ("Remote end closed connection without response", "other_error"),
+        ]:
+            error = RuntimeError(message)
+            with patch.object(ocr_verification, "gemini_generate_content", side_effect=error):
+                with self.assertRaises(RuntimeError) as raised:
+                    ocr_verification._generate_verification_content(task, "key-a", "prompt", b"image")
+            self.assertIs(raised.exception, error)
+            path = self.root / "_artifacts" / "ocr_verification_attempts" / f"run_{task.run_id}.jsonl"
+            self.assertEqual(json.loads(path.read_text().splitlines()[-1])["outcome"], category)
+
+    def test_attempt_logging_failure_does_not_fail_extraction(self) -> None:
+        ocr_verification.start_verification()
+        task = self._tasks()[0]
+        with patch.object(ocr_verification, "gemini_generate_content", return_value="Reviewed text"), patch.object(
+            Path, "open", side_effect=OSError("Disk full secret-data")
+        ), self.assertLogs(ocr_verification.__name__, level="WARNING") as logs:
+            result = ocr_verification._generate_verification_content(task, "key-a", "prompt", b"image")
+        self.assertEqual(result, "Reviewed text")
+        self.assertNotIn("secret-data", " ".join(logs.output))
 
     def test_503_defers_without_consuming_attempt(self) -> None:
         ocr_verification.start_verification()
