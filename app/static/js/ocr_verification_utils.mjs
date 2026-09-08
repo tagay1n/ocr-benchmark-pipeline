@@ -62,11 +62,12 @@ export function verificationControlState({
       recalculateTitle,
     };
   }
+  const resumable = runStatus === "stopped" || runStatus === "quota_exhausted";
   return {
-    actionLabel: runStatus === "stopped" ? "Resume verification" : "Start verification",
+    actionLabel: resumable ? "Resume verification" : "Start verification",
     actionDanger: false,
     actionDisabled: anotherActionBusy,
-    actionTitle: runStatus === "stopped"
+    actionTitle: resumable
       ? "Resume verification using stored progress."
       : "Start OCR verification.",
     recalculateDisabled,

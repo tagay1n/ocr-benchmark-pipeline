@@ -1079,7 +1079,29 @@ def _has_active_tasks(run_id: int) -> bool:
         return int(count or 0) > 0
 
 
-def _finish_run(run_id: int, *, stopped: bool) -> None:
+def _all_active_models_out_of_keys(run_id: int) -> bool:
+    with get_session() as session:
+        model_names = session.scalars(
+            select(OcrVerificationTask.model_name).where(
+                OcrVerificationTask.run_id == int(run_id),
+                OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
+            ).distinct()
+        ).all()
+    if not model_names:
+        return False
+    key_ids = {
+        "sha256:" + hashlib.sha256(key.encode()).hexdigest()
+        for key in settings.gemini_keys
+    }
+    if not key_ids:
+        return True
+    return all(
+        key_ids.issubset(set(_load_usage_state(model_name=model_name)))
+        for model_name in model_names
+    )
+
+
+def _finish_run(run_id: int, *, stopped: bool, status: str | None = None) -> None:
     now = _utc_now()
     with get_session() as session:
         run = session.get(OcrVerificationRun, int(run_id))
@@ -1098,7 +1120,7 @@ def _finish_run(run_id: int, *, stopped: bool) -> None:
         ).scalar_one()
         run.total_tasks = int(task_total or 0)
         run.completed_tasks = int(completed or 0)
-        run.status = "stopped" if stopped else "completed"
+        run.status = status or ("stopped" if stopped else "completed")
         run.updated_at = now
         run.finished_at = now
     if bool(settings.enable_background_jobs):
@@ -1127,6 +1149,9 @@ def _worker_loop(run_id: int) -> None:
                 continue
             if not _has_active_tasks(run_id):
                 _finish_run(run_id, stopped=False)
+                return
+            if _all_active_models_out_of_keys(run_id):
+                _finish_run(run_id, stopped=False, status="quota_exhausted")
                 return
             time.sleep(1.0)
     finally:

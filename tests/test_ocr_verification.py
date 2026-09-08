@@ -628,6 +628,44 @@ class OcrVerificationTests(unittest.TestCase):
             self.assertEqual(run.status, "running")
             self.assertFalse(run.stop_requested)
 
+    def test_worker_stops_when_all_remaining_models_are_daily_quota_exhausted(self) -> None:
+        started = ocr_verification.start_verification()
+        tasks = self._tasks()
+        with db.get_session() as session:
+            first = session.get(main.OcrVerificationTask, int(tasks[0].id))
+            first.status = "waiting"
+            first.error_message = "Daily quota exhausted"
+            first.transient_count = 1
+        for model_name in ("validator-a", "validator-b"):
+            ocr_extract._save_usage_state(
+                list(self.settings.gemini_keys),
+                model_name=model_name,
+            )
+
+        with patch.object(
+            ocr_verification.time,
+            "sleep",
+            side_effect=AssertionError("daily exhaustion must not leave the worker polling"),
+        ), patch.object(ocr_verification, "_execute_task") as execute:
+            ocr_verification._worker_loop(int(started["run_id"]))
+
+        execute.assert_not_called()
+        status = ocr_verification.verification_status()
+        self.assertFalse(status["is_running"])
+        self.assertEqual(status["run"]["status"], "quota_exhausted")
+        preserved = self._tasks()
+        self.assertEqual([task.status for task in preserved], ["waiting", "pending"])
+        self.assertEqual([task.transient_count for task in preserved], [1, 0])
+        self.assertEqual(preserved[0].error_message, "Daily quota exhausted")
+
+        Path(self.settings.gemini_usage_path).unlink()
+        resumed = ocr_verification.start_verification()
+        self.assertTrue(resumed["started"])
+        self.assertEqual(
+            [task.run_id for task in self._tasks()],
+            [int(resumed["run_id"]), int(resumed["run_id"])],
+        )
+
     def test_worker_persists_each_model_and_completes_full_agreement(self) -> None:
         started = ocr_verification.start_verification()
         with patch.object(

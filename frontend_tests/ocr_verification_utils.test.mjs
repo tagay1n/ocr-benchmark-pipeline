@@ -98,6 +98,10 @@ test("verification controls distinguish start and resume and lock concurrent act
     verificationControlState({ runStatus: "stopped" }).actionLabel,
     "Resume verification",
   );
+  assert.equal(
+    verificationControlState({ runStatus: "quota_exhausted" }).actionLabel,
+    "Resume verification",
+  );
   const busy = verificationControlState({ actionInFlight: "start" });
   assert.equal(busy.actionDisabled, true);
   assert.equal(busy.recalculateDisabled, true);
