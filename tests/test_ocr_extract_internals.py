@@ -724,7 +724,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
         self.assertRegex(str(by_layout[int(nested_item["id"])]["content"]), r"^\s+-\s+Nested$")
         self.assertEqual(str(by_layout[int(ordered_item["id"])]["content"]), "3) Ordered")
 
-    def test_extract_ocr_for_page_normalizes_quote_glyphs_for_markdown_content(self) -> None:
+    def test_extract_ocr_for_page_preserves_quote_glyphs_for_markdown_content(self) -> None:
         self._write_image("ocr/quote-normalize.png")
         main.scan_images()
         page_id = self._single_page_id()
@@ -744,7 +744,7 @@ class OcrExtractInternalsTests(unittest.TestCase):
 
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         by_layout = {int(output["layout_id"]): output for output in outputs}
-        self.assertEqual(str(by_layout[int(layout["id"])]["content"]), '«Әни» һәм "әти", $f′(x)$')
+        self.assertEqual(str(by_layout[int(layout["id"])]["content"]), "«Әни» һәм “әти”, $f′(x)$")
 
     def test_extract_ocr_for_page_normalizes_formula_content(self) -> None:
         self._write_image("ocr/formula-normalize.png")

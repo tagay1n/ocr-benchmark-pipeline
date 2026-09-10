@@ -125,7 +125,7 @@ class OcrReviewLookalikesTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         self.assertEqual(outputs[0]["content"], "ё")
 
-    def test_update_ocr_output_normalizes_quote_glyphs_before_persist(self) -> None:
+    def test_update_ocr_output_preserves_quote_glyphs_when_persisting(self) -> None:
         self._write_image("review/quotes.png")
         main.scan_images()
         page_id = int(main.list_pages()["pages"][0]["id"])
@@ -162,10 +162,10 @@ class OcrReviewLookalikesTests(unittest.TestCase):
             int(layout["id"]),
             main.UpdateOcrOutputRequest(content="«Әни» һәм “әти”, $f′(x)$"),
         )
-        self.assertEqual(updated["output"]["content"], '«Әни» һәм "әти", $f′(x)$')
+        self.assertEqual(updated["output"]["content"], "«Әни» һәм “әти”, $f′(x)$")
 
         outputs = main.page_ocr_outputs(page_id)["outputs"]
-        self.assertEqual(outputs[0]["content"], '«Әни» һәм "әти", $f′(x)$')
+        self.assertEqual(outputs[0]["content"], "«Әни» һәм “әти”, $f′(x)$")
 
     def test_patch_ocr_output_flags_standalone_latin_confusable_on_save(self) -> None:
         self._write_image("review/confusable-latin-letter.png")

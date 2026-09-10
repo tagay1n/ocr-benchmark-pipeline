@@ -274,13 +274,11 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Punctuation or casing anomalies are retained when they are part of the source.
   - Corrections are limited to clear OCR character misreads, without changing wording/style.
 
-- Quote mark normalization policy:
-  - Normalize quotation-mark typography to reduce benchmark noise from visually similar quote glyphs.
-  - Single quote/apostrophe variants are stored as ASCII apostrophe (`'`, `U+0027`).
-  - Curly double quote variants are stored as ASCII quotation mark (`"`, `U+0022`).
-  - Guillemets (`«`, `U+00AB`; `»`, `U+00BB`) are preserved because they are distinct punctuation, not double-quote lookalikes.
-  - Examples: `‘text’`, `ʼtextʼ`, and `′text′` become `'text'`; `“text”` and `„text“` become `"text"`; `«text»` stays `«text»`.
-  - Preserve formula/LaTeX prime notation, for example `f′(x)` remains `f′(x)` inside formula output and Markdown math spans.
+- Quote mark fidelity policy:
+  - Preserve quotation marks, apostrophes, primes, modifier letters, accents, and guillemets exactly as printed.
+  - Examples: `‘text’`, `ʼtextʼ`, `′text′`, `“text”`, `„text“`, `‹text›`, and `«text»` remain unchanged.
+  - Store OCR and reviewer content in Unicode NFC form, but do not fold distinct punctuation into ASCII quotes.
+  - Any quote-tolerant comparison belongs in an explicitly documented benchmark scoring profile applied equally to references and predictions; it must not alter stored content.
 
 ## Documentation Policy
 
