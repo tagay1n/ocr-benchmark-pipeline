@@ -16,7 +16,6 @@ OCR_RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {"content": {"type": "string"}},
     "required": ["content"],
-    "additionalProperties": False,
 }
 
 

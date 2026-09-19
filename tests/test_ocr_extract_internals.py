@@ -112,7 +112,6 @@ class OcrExtractInternalsTests(unittest.TestCase):
             "type": "object",
             "properties": {"content": {"type": "string"}},
             "required": ["content"],
-            "additionalProperties": False,
         })
 
     def test_prompt_for_layout_maps_output_formats(self) -> None:

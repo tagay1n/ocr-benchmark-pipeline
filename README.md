@@ -214,7 +214,7 @@ Generate prompt reference markdown deterministically:
 Gemini OCR response contract:
 
 - Gemini must return JSON with exactly one key: `{"content":"..."}`
-- Every normal extraction and verification request sends `responseMimeType: application/json` and the schema `{"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":false}`.
+- Every normal extraction and verification request sends `responseMimeType: application/json` and Gemini's supported schema `{"type":"object","properties":{"content":{"type":"string"}},"required":["content"]}`. Gemini does not accept `additionalProperties` in this API schema; the backend exact-key check enforces that restriction after parsing.
 - Backend validates JSON shape and retries per existing retry policy on invalid responses.
 
 Each OCR extraction run writes resolved text prompts (without image clip bytes) to:
