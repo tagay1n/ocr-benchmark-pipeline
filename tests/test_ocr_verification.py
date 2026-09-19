@@ -177,6 +177,27 @@ class OcrVerificationTests(unittest.TestCase):
                 [("validator-a", "unavailable"), ("validator-b", "unavailable"), ("fallback-a", "pending"), ("fallback-b", "pending")],
             )
 
+    def test_resume_reactivates_schema_rejected_primary_without_duplicate_task(self) -> None:
+        ocr_verification.start_verification()
+        first = self._tasks()[0]
+        with db.get_session() as session:
+            row = session.get(main.OcrVerificationTask, first.id)
+            row.status = "unavailable"
+            row.attempts = 2
+            row.error_message = (
+                "HTTP 400: Unknown name \\\"additionalProperties\\\" at "
+                "generation_config.response_schema"
+            )
+        ocr_verification.request_verification_stop()
+        resumed = ocr_verification.start_verification()
+        with db.get_session() as session:
+            row = session.get(main.OcrVerificationTask, first.id)
+            self.assertEqual(row.status, "pending")
+            self.assertEqual(row.attempts, 0)
+            self.assertEqual(row.transient_count, 0)
+            self.assertEqual(row.run_id, resumed["run_id"])
+        self.assertEqual(len(self._tasks()), 2)
+
     def test_fallback_successes_are_full_evidence_and_detail_variants(self) -> None:
         configured = replace(self.settings, ocr_verification_models=("validator-a",), ocr_verification_fallback_models=("fallback-a", "fallback-b"))
         with patch.object(ocr_verification, "settings", configured):

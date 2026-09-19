@@ -222,6 +222,27 @@ def _task_fingerprint(base_fingerprint: str, model_name: str) -> str:
     return _sha256_payload({"base": base_fingerprint, "model": model_name})
 
 
+def _is_schema_rejected_task(task: OcrVerificationTask) -> bool:
+    """Recognize only the historical Gemini schema field rejection we fixed."""
+    message = str(task.error_message or "").lower()
+    return (
+        str(task.status) == "unavailable"
+        and "additionalproperties" in message
+        and "response_schema" in message
+    )
+
+
+def _reactivate_schema_rejected_task(task: OcrVerificationTask, run_id: int, now: str) -> None:
+    task.run_id = int(run_id)
+    task.status = "pending"
+    task.attempts = 0
+    task.transient_count = 0
+    task.next_retry_at = None
+    task.error_message = None
+    task.finished_at = None
+    task.updated_at = now
+
+
 def _eligible_rows() -> list[tuple[Page, Layout, OcrOutput]]:
     with get_session() as session:
         rows = session.execute(
@@ -311,6 +332,12 @@ def _upsert_current_tasks(
                 task.run_id = run_id
                 # Preserve cooldowns and retry age across manual resumes.
                 task_count += 1
+            elif (
+                _is_schema_rejected_task(task)
+                and model_name in context["validator_models"]
+            ):
+                _reactivate_schema_rejected_task(task, run_id, now)
+                task_count += 1
     return task_count, affected_layout_ids
 
 
@@ -345,6 +372,7 @@ def _schedule_replacements(
                 OcrVerificationTask.evidence_fingerprint.in_(fingerprints),
             )
         ).scalars().all() if fingerprints else []
+        tasks_by_model = {str(task.model_name): task for task in tasks}
         # Old persisted endless deferrals become terminal as soon as they are
         # observed during preparation/resume.
         for task in tasks:
@@ -368,6 +396,12 @@ def _schedule_replacements(
         for model_name in candidates:
             if needed <= 0:
                 break
+            existing = tasks_by_model.get(model_name)
+            if existing is not None and _is_schema_rejected_task(existing) and run_id is not None:
+                _reactivate_schema_rejected_task(existing, int(run_id), now)
+                needed -= 1
+                created += 1
+                continue
             if model_name in used_models:
                 continue
             task = OcrVerificationTask(
