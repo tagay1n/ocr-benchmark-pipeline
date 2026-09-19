@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from app import (
     config,
@@ -91,6 +91,29 @@ class OcrExtractInternalsTests(unittest.TestCase):
 
         self.assertEqual(model_parameter.kind, inspect.Parameter.KEYWORD_ONLY)
         self.assertEqual(model_parameter.default, inspect.Parameter.empty)
+
+    def test_gemini_requests_use_the_exact_structured_content_schema(self) -> None:
+        response = MagicMock()
+        response.read.return_value = json.dumps({
+            "candidates": [{"content": {"parts": [{"text": '{"content":"ok"}'}]}}]
+        }).encode("utf-8")
+        opener = MagicMock()
+        opener.return_value.__enter__.return_value = response
+        with patch.object(ocr_gemini_client.urllib_request, "urlopen", opener):
+            self.assertEqual(
+                ocr_gemini_client.gemini_generate_content(
+                    "test-key", "prompt", b"image", model_name="test-model"
+                ),
+                "ok",
+            )
+        payload = json.loads(opener.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["generationConfig"]["responseMimeType"], "application/json")
+        self.assertEqual(payload["generationConfig"]["responseSchema"], {
+            "type": "object",
+            "properties": {"content": {"type": "string"}},
+            "required": ["content"],
+            "additionalProperties": False,
+        })
 
     def test_prompt_for_layout_maps_output_formats(self) -> None:
         prompt_template = (

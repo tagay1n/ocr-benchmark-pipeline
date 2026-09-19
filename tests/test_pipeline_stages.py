@@ -1538,6 +1538,9 @@ class PipelineStagesTests(unittest.TestCase):
                     "  batch_a:",
                     "    - key-a",
                     "    - key-b",
+                    "ocr_verification:",
+                    "  models: [primary-a, primary-b, primary-a]",
+                    "  fallback_models: [fallback-a, primary-b, fallback-a, fallback-b]",
                 ]
             )
             + "\n",
@@ -1554,6 +1557,8 @@ class PipelineStagesTests(unittest.TestCase):
         self.assertEqual(loaded.allowed_extensions, (".png", ".jpg"))
         self.assertFalse(loaded.enable_background_jobs)
         self.assertEqual(loaded.gemini_keys, ("key-a", "key-b"))
+        self.assertEqual(loaded.ocr_verification_models, ("primary-a", "primary-b"))
+        self.assertEqual(loaded.ocr_verification_fallback_models, ("fallback-a", "primary-b", "fallback-b"))
 
         with patch.dict(
             os.environ,
@@ -1562,6 +1567,7 @@ class PipelineStagesTests(unittest.TestCase):
                 "APP_CONFIG_PATH": str(config_path),
                 "ALLOWED_IMAGE_EXTENSIONS": "webp, tif",
                 "GEMINI_KEYS": "env-a, env-a, env-b ",
+                "OCR_VERIFICATION_FALLBACK_MODELS": " env-fallback-a, env-fallback-a, env-fallback-b ",
             },
             clear=False,
         ):
@@ -1569,6 +1575,7 @@ class PipelineStagesTests(unittest.TestCase):
 
         self.assertEqual(loaded_env.allowed_extensions, (".webp", ".tif"))
         self.assertEqual(loaded_env.gemini_keys, ("env-a", "env-b"))
+        self.assertEqual(loaded_env.ocr_verification_fallback_models, ("env-fallback-a", "env-fallback-b"))
 
     def test_runtime_options_reset_uses_current_settings_defaults(self) -> None:
         custom_settings = Settings(

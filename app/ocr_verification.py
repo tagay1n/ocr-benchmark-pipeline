@@ -116,9 +116,13 @@ def _sha256_payload(value: object) -> str:
 
 
 def verification_models() -> tuple[str, ...]:
+    return _deduplicated_models(settings.ocr_verification_models)
+
+
+def _deduplicated_models(models: tuple[str, ...]) -> tuple[str, ...]:
     output: list[str] = []
     seen: set[str] = set()
-    for raw_model in settings.ocr_verification_models:
+    for raw_model in models:
         model = str(raw_model or "").strip()
         if not model or model in seen:
             continue
@@ -127,9 +131,22 @@ def verification_models() -> tuple[str, ...]:
     return tuple(output)
 
 
+def fallback_models() -> tuple[str, ...]:
+    return _deduplicated_models(settings.ocr_verification_fallback_models)
+
+
+def validator_candidates(source_model: str) -> tuple[str, ...]:
+    source = str(source_model or "").strip()
+    return tuple(model for model in _deduplicated_models(
+        verification_models() + fallback_models()
+    ) if model != source)
+
+
 def select_validator_models(source_model: str) -> tuple[str, ...]:
     count = max(1, int(settings.ocr_verification_total_models) - 1)
     source = str(source_model or "").strip()
+    # Initial work deliberately uses the primary pool only. Fallbacks occupy
+    # slots released by terminal primary tasks.
     return tuple(model for model in verification_models() if model != source)[:count]
 
 
@@ -197,6 +214,7 @@ def _verification_context(
         "source_model": str(output.model_name),
         "baseline_content": str(output.content),
         "validator_models": select_validator_models(str(output.model_name)),
+        "validator_candidates": validator_candidates(str(output.model_name)),
     }
 
 
@@ -296,6 +314,87 @@ def _upsert_current_tasks(
     return task_count, affected_layout_ids
 
 
+def _schedule_replacements(
+    layout_id: int,
+    run_id: int | None,
+    *,
+    page_layout_context: list[dict[str, Any]] | None = None,
+) -> int:
+    """Fill released validator slots with unused candidates for current evidence."""
+    now = _utc_now()
+    with get_session() as session:
+        row = session.execute(
+            select(Page, Layout, OcrOutput)
+            .join(Layout, Layout.page_id == Page.id)
+            .join(OcrOutput, OcrOutput.layout_id == Layout.id)
+            .where(Layout.id == int(layout_id))
+        ).one_or_none()
+        if row is None:
+            return 0
+        page, layout, output = row
+        context = _verification_context(
+            page, layout, output, page_layout_context=page_layout_context
+        )
+        candidates = tuple(context["validator_candidates"])
+        fingerprints = {
+            _task_fingerprint(str(context["base_fingerprint"]), model) for model in candidates
+        }
+        tasks = session.execute(
+            select(OcrVerificationTask).where(
+                OcrVerificationTask.layout_id == int(layout_id),
+                OcrVerificationTask.evidence_fingerprint.in_(fingerprints),
+            )
+        ).scalars().all() if fingerprints else []
+        # Old persisted endless deferrals become terminal as soon as they are
+        # observed during preparation/resume.
+        for task in tasks:
+            if str(task.status) in _ACTIVE_TASK_STATUSES and int(task.transient_count) >= 3:
+                task.status = "unavailable"
+                task.next_retry_at = None
+                task.finished_at = now
+                task.updated_at = now
+        succeeded_models = {str(task.model_name) for task in tasks if str(task.status) == "succeeded"}
+        active_count = sum(1 for task in tasks if str(task.status) in _ACTIVE_TASK_STATUSES)
+        released_slots = sum(1 for task in tasks if str(task.status) == "unavailable")
+        required = max(1, int(settings.ocr_verification_total_models) - 1)
+        needed = max(0, required - len(succeeded_models) - active_count)
+        # Do not start secondary work merely because a deliberately short
+        # primary pool was configured. A fallback is a replacement for a
+        # released validator slot, not initial work.
+        if released_slots == 0:
+            needed = 0
+        used_models = {str(task.model_name) for task in tasks}
+        created = 0
+        for model_name in candidates:
+            if needed <= 0:
+                break
+            if model_name in used_models:
+                continue
+            task = OcrVerificationTask(
+                run_id=run_id,
+                page_id=int(page.id),
+                layout_id=int(layout.id),
+                model_name=model_name,
+                evidence_fingerprint=_task_fingerprint(str(context["base_fingerprint"]), model_name),
+                prompt_hash=str(context["prompt_hash"]),
+                prompt_version=int(settings.ocr_verification_prompt_version),
+                status="pending", attempts=0, transient_count=0, next_retry_at=None,
+                content=None, key_alias=None, error_message=None,
+                created_at=now, updated_at=now, finished_at=None,
+            )
+            session.add(task)
+            used_models.add(model_name)
+            needed -= 1
+            created += 1
+        if created and run_id is not None:
+            run = session.get(OcrVerificationRun, int(run_id))
+            if run is not None:
+                run.total_tasks = int(run.total_tasks) + created
+                run.updated_at = now
+    refresh_finding(int(layout_id), page_layout_context=page_layout_context)
+    return created
+
+
 def _comparison_groups(
     baseline: str,
     source_model: str,
@@ -348,7 +447,7 @@ def refresh_finding(
         )
         fingerprints = {
             _task_fingerprint(str(context["base_fingerprint"]), model_name)
-            for model_name in context["validator_models"]
+            for model_name in context["validator_candidates"]
         }
         tasks = []
         if fingerprints:
@@ -396,7 +495,7 @@ def refresh_finding(
             {
                 "evidence": str(context["base_fingerprint"]),
                 "baseline": str(output.content),
-                "validator_models": list(context["validator_models"]),
+                "validator_models": list(context["validator_candidates"]),
                 "tasks": [
                     {
                         "id": int(task.id),
@@ -783,12 +882,21 @@ def _persist_task_error(
         if task is None:
             return
         was_terminal = str(task.status) in _TERMINAL_TASK_STATUSES
-        if transient or quota_wait:
+        if transient:
             task.transient_count = int(task.transient_count) + 1
+            if int(task.transient_count) >= 3:
+                task.status = "unavailable"
+                task.finished_at = now
+                task.next_retry_at = None
+            else:
+                task.status = "waiting"
+                task.next_retry_at = (
+                    now_dt + timedelta(seconds=_retry_delay_seconds(int(task.transient_count)))
+                ).isoformat()
+        elif quota_wait:
+            # Key quota/cooldown handling is not a model failure and must not
+            # consume the transient replacement threshold.
             task.status = "waiting"
-            task.next_retry_at = (
-                now_dt + timedelta(seconds=_retry_delay_seconds(int(task.transient_count)))
-            ).isoformat()
         elif fatal:
             task.attempts = max(
                 int(task.attempts),
@@ -808,6 +916,7 @@ def _persist_task_error(
         task.error_message = str(error)
         task.updated_at = now
         layout_id = int(task.layout_id)
+        run_id = None if task.run_id is None else int(task.run_id)
         if not was_terminal and str(task.status) in _TERMINAL_TASK_STATUSES and task.run_id is not None:
             run = session.get(OcrVerificationRun, int(task.run_id))
             if run is not None:
@@ -817,6 +926,8 @@ def _persist_task_error(
                 )
                 run.updated_at = now
     refresh_finding(layout_id)
+    if run_id is not None:
+        _schedule_replacements(layout_id, run_id)
 
 
 def _defer_model_for_daily_quota(task_id: int, *, error: str) -> None:
@@ -1187,6 +1298,14 @@ def _prepare_run(run_id: int) -> dict[str, Any]:
         rows=eligible_rows,
         page_contexts=page_contexts,
     )
+    # Resume also repairs persisted terminal/over-deferred work before the
+    # worker claims anything. This never adds work once two successes exist.
+    for layout_id in sorted(layout_ids):
+        total_tasks += _schedule_replacements(
+            layout_id,
+            run_id,
+            page_layout_context=page_contexts[page_id_by_layout_id[layout_id]],
+        )
     stopped = False
     with get_session() as session:
         run = session.get(OcrVerificationRun, run_id)

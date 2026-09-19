@@ -18,6 +18,10 @@ DEFAULT_OCR_VERIFICATION_MODELS = (
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
 )
+DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS = (
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,7 @@ class Settings:
     gemini_usage_path: Path | None = None
     supported_ocr_models: tuple[str, ...] = DEFAULT_SUPPORTED_OCR_MODELS
     ocr_verification_models: tuple[str, ...] = DEFAULT_OCR_VERIFICATION_MODELS
+    ocr_verification_fallback_models: tuple[str, ...] = DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS
     ocr_verification_total_models: int = 3
     ocr_verification_attempts_per_model: int = 2
     ocr_verification_prompt_version: int = 1
@@ -213,6 +218,16 @@ def load_settings() -> Settings:
         verification_models_raw,
         default=DEFAULT_OCR_VERIFICATION_MODELS,
     )
+    verification_fallback_models_env = os.getenv("OCR_VERIFICATION_FALLBACK_MODELS")
+    verification_fallback_models_raw = (
+        verification_fallback_models_env
+        if verification_fallback_models_env is not None
+        else verification_config.get("fallback_models", DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS)
+    )
+    verification_fallback_models_value = _coerce_supported_ocr_models(
+        verification_fallback_models_raw,
+        default=DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS,
+    )
     verification_total_models_value = _parse_positive_int(
         os.getenv("OCR_VERIFICATION_TOTAL_MODELS", verification_config.get("total_models_per_region", 3)),
         default=3,
@@ -251,6 +266,7 @@ def load_settings() -> Settings:
         gemini_usage_path=gemini_usage_path,
         supported_ocr_models=supported_ocr_models_value,
         ocr_verification_models=verification_models_value,
+        ocr_verification_fallback_models=verification_fallback_models_value,
         ocr_verification_total_models=verification_total_models_value,
         ocr_verification_attempts_per_model=verification_attempts_value,
         ocr_verification_prompt_version=verification_prompt_version_value,

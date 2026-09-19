@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
+from dataclasses import replace
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -123,6 +124,78 @@ class OcrVerificationTests(unittest.TestCase):
         self.assertTrue(result["started"])
         self.assertEqual(result["total_tasks"], 2)
         self.assertEqual([task.model_name for task in self._tasks()], ["validator-a", "validator-b"])
+
+    def test_primary_pool_is_first_and_fallback_is_ordered_deduplicated(self) -> None:
+        configured = replace(
+            self.settings,
+            ocr_verification_models=("source-model", "validator-a", "validator-a", "validator-b"),
+            ocr_verification_fallback_models=("validator-b", "fallback-a", "fallback-a", "fallback-b"),
+        )
+        with patch.object(ocr_verification, "settings", configured):
+            self.assertEqual(ocr_verification.verification_models(), ("source-model", "validator-a", "validator-b"))
+            self.assertEqual(ocr_verification.fallback_models(), ("validator-b", "fallback-a", "fallback-b"))
+            self.assertEqual(
+                ocr_verification.validator_candidates("source-model"),
+                ("validator-a", "validator-b", "fallback-a", "fallback-b"),
+            )
+            self.assertEqual(ocr_verification.select_validator_models("source-model"), ("validator-a", "validator-b"))
+
+    def test_third_transient_failure_unavailable_and_schedules_fallback(self) -> None:
+        configured = replace(self.settings, ocr_verification_fallback_models=("fallback-a",))
+        with patch.object(ocr_verification, "settings", configured):
+            ocr_verification.start_verification()
+            task = self._tasks()[0]
+            with patch.object(
+                ocr_verification,
+                "gemini_generate_content",
+                side_effect=RuntimeError("Gemini request failed with HTTP 503: overloaded"),
+            ):
+                self.assertEqual(ocr_verification._execute_task(task.id), "waiting")
+                self.assertEqual(ocr_verification._execute_task(task.id), "waiting")
+                self.assertEqual(ocr_verification._execute_task(task.id), "waiting")
+            rows = self._tasks()
+            self.assertEqual(rows[0].status, "unavailable")
+            self.assertEqual(rows[0].transient_count, 3)
+            self.assertEqual([(row.model_name, row.status) for row in rows], [
+                ("validator-a", "unavailable"), ("validator-b", "pending"), ("fallback-a", "pending"),
+            ])
+
+    def test_resume_replaces_persisted_unavailable_or_three_transient_task(self) -> None:
+        configured = replace(self.settings, ocr_verification_fallback_models=("fallback-a", "fallback-b"))
+        with patch.object(ocr_verification, "settings", configured):
+            ocr_verification.start_verification()
+            first, second = self._tasks()
+            with db.get_session() as session:
+                session.get(main.OcrVerificationTask, first.id).status = "waiting"
+                session.get(main.OcrVerificationTask, first.id).transient_count = 3
+                session.get(main.OcrVerificationTask, second.id).status = "unavailable"
+            ocr_verification.request_verification_stop()
+            resumed = ocr_verification.start_verification()
+            self.assertTrue(resumed["started"])
+            self.assertEqual(
+                [(row.model_name, row.status) for row in self._tasks()],
+                [("validator-a", "unavailable"), ("validator-b", "unavailable"), ("fallback-a", "pending"), ("fallback-b", "pending")],
+            )
+
+    def test_fallback_successes_are_full_evidence_and_detail_variants(self) -> None:
+        configured = replace(self.settings, ocr_verification_models=("validator-a",), ocr_verification_fallback_models=("fallback-a", "fallback-b"))
+        with patch.object(ocr_verification, "settings", configured):
+            ocr_verification.start_verification()
+            initial = self._tasks()[0]
+            with db.get_session() as session:
+                session.get(main.OcrVerificationTask, initial.id).status = "unavailable"
+            ocr_verification._schedule_replacements(self.layout_id, int(initial.run_id))
+            tasks = self._tasks()
+            with db.get_session() as session:
+                for task in tasks[1:]:
+                    row = session.get(main.OcrVerificationTask, task.id)
+                    row.status = "succeeded"
+                    row.content = "Fallback result" if task.model_name == "fallback-a" else "Other fallback result"
+            finding = ocr_verification.refresh_finding(self.layout_id)
+            self.assertEqual(finding["state"], "disagreement_full")
+            self.assertEqual(finding["responded_count"], 2)
+            self.assertEqual(finding["required_count"], 2)
+            self.assertEqual({task["model_name"] for task in finding["tasks"]}, {"validator-a", "fallback-a", "fallback-b"})
 
     def test_full_and_reduced_comparison_states(self) -> None:
         ocr_verification.start_verification()
@@ -413,13 +486,13 @@ class OcrVerificationTests(unittest.TestCase):
                 row = session.get(main.OcrVerificationTask, task.id)
                 row.status = "waiting"
                 row.next_retry_at = deadline
-            session.get(main.OcrVerificationTask, retry.id).transient_count = 5
+            session.get(main.OcrVerificationTask, retry.id).transient_count = 2
         ocr_verification.request_verification_stop()
         run_id = int(ocr_verification.start_verification()["run_id"])
         for task in self._tasks():
             self.assertEqual(task.next_retry_at, deadline)
             self.assertEqual(task.run_id, run_id)
-            self.assertEqual(task.transient_count, 5 if task.id == retry.id else 0)
+            self.assertEqual(task.transient_count, 2 if task.id == retry.id else 0)
         self.assertIsNone(ocr_verification._claim_ready_task(run_id))
         with patch.object(ocr_verification.time, "sleep", side_effect=lambda _: ocr_verification.request_verification_stop()), patch.object(
             ocr_verification, "_execute_task"

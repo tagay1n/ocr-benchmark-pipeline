@@ -12,6 +12,12 @@ from urllib import parse as urllib_parse
 from urllib import request as urllib_request
 
 DEFAULT_GEMINI_TEMPERATURE = 0.0
+OCR_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {"content": {"type": "string"}},
+    "required": ["content"],
+    "additionalProperties": False,
+}
 
 
 class GeminiRequestError(RuntimeError):
@@ -112,6 +118,7 @@ def gemini_generate_content(
         "generationConfig": {
             "temperature": float(temperature),
             "responseMimeType": "application/json",
+            "responseSchema": OCR_RESPONSE_SCHEMA,
         },
     }
     request_payload = json.dumps(payload, ensure_ascii=True).encode("utf-8")

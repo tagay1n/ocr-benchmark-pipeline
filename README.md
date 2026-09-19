@@ -97,6 +97,9 @@ ocr_verification:
     - gemini-3.6-flash
     - gemini-3.5-flash
     - gemini-3-flash-preview
+  fallback_models:
+    - gemini-3.8-flash
+    - gemini-3.7-flash
   total_models_per_region: 3
   attempts_per_model: 2
   prompt_version: 1
@@ -105,9 +108,9 @@ gemini_keys: []
 
 The ordered `supported_ocr_models` list in `config.yaml` is the source of truth for OCR models. Its first entry is used as the default for batch and manual OCR; `SUPPORTED_OCR_MODELS` can override the complete list.
 
-The ordered `ocr_verification.models` pool is independent from the default OCR model order. Verification selects `total_models_per_region - 1` distinct models from this pool and excludes the model stored on the canonical OCR output. The default pool intentionally excludes `gemini-3.7-flash`. Increment `prompt_version` when verification prompt behavior changes; stored outputs with an older prompt version are not reused.
+The ordered `ocr_verification.models` pool is independent from the default OCR model order. Verification initially selects up to `total_models_per_region - 1` distinct models from this primary pool and excludes the model stored on the canonical OCR output. `ocr_verification.fallback_models` is an ordered secondary pool (default: `gemini-3.8-flash`, then `gemini-3.7-flash`); duplicate entries across both pools and the source model are excluded. A replacement is added only when a validator slot becomes unavailable and fewer than two distinct validator results exist. Two successful eligible validators always satisfy the fixed requirement of two, regardless of replacements. Increment `prompt_version` when verification prompt behavior changes; stored outputs with an older prompt version are not reused.
 
-Each verification model gets `attempts_per_model` counted attempts. Invalid/empty responses and ordinary failures consume an attempt. Quota responses rotate keys without consuming an attempt. Temporarily rate-limited keys are skipped for that model until their cooldown expires. Cooldowns honor Gemini's `retryDelay` and HTTP `Retry-After` (seconds or date), with a minimum 60-second delay. If every usable key is temporarily blocked, that model's active tasks share a persisted cooldown honoring the longest observed delay, while other eligible models continue sequentially. When all keys are daily-exhausted for a model, its tasks wait for a manual reset of the exhaustion file, with no midnight-based release. If every model with unfinished work is daily-blocked (or no keys are configured), the worker gracefully ends the run with status `quota_exhausted` while leaving pending/waiting task states, errors, and counters unchanged. After resetting exhaustion, Resume creates a new run and continues those stored tasks. The scheduler rereads exhaustion state, so removing the JSON file makes daily-blocked checks eligible again subject to untouched-first scheduling and any separate temporary cooldowns. Shared temporary cooldowns never increment sibling checks' attempt counters or shorten an existing deadline. HTTP `503`, overloaded service, retryable `5xx`, and transient transport failures are likewise deferred with capped exponential backoff and do not consume an attempt. Deferred work continues until it succeeds, exhausts every model's daily key pool, or the reviewer stops the run. Successful variants are persisted immediately, so partial evidence remains usable and resumable.
+Each verification model gets `attempts_per_model` counted attempts. Invalid/empty responses and ordinary failures consume an attempt; the final counted attempt makes that model unavailable and releases its slot to the next fallback candidate. Fatal request errors do the same immediately. Quota responses rotate keys without consuming an attempt. Temporarily rate-limited keys are skipped for that model until their cooldown expires. Cooldowns honor Gemini's `retryDelay` and HTTP `Retry-After` (seconds or date), with a minimum 60-second delay. If every usable key is temporarily blocked, that model's active tasks share a persisted cooldown honoring the longest observed delay, while other eligible models continue sequentially. When all keys are daily-exhausted for a model, its tasks wait for a manual reset of the exhaustion file, with no midnight-based release. If every model with unfinished work is daily-blocked (or no keys are configured), the worker gracefully ends the run with status `quota_exhausted` while leaving pending/waiting task states, errors, and counters unchanged. After resetting exhaustion, Resume creates a new run and continues those stored tasks. The scheduler rereads exhaustion state, so removing the JSON file makes daily-blocked checks eligible again subject to untouched-first scheduling and any separate temporary cooldowns. Shared temporary cooldowns never increment sibling checks' attempt counters or shorten an existing deadline. HTTP `503`, overloaded service, retryable `5xx`, and transient transport failures retain their cooldown for the first two occurrences; the third makes that model unavailable and immediately schedules a replacement. Temporary and daily quota handling never contributes to this three-failure threshold. Resume also converts persisted tasks already at the transient threshold, and replaces existing unavailable tasks when a finding still lacks two successful validators. When all candidates are exhausted, the reduced/manual finding remains and the run completes. Successful variants are persisted immediately, so partial evidence remains usable and resumable.
 
 Individual temporary key cooldowns are held in memory and reset on process restart; shared task deadlines and daily exhaustion survive restarts. The app has no key-to-Google-project mapping, so it does not assume independent quotas or infer that two keys share a project. It reacts to quota responses rather than enforcing guessed RPM/token limits.
 
@@ -129,6 +132,7 @@ Environment overrides:
 - `GEMINI_KEYS` (comma-separated)
 - `GEMINI_USAGE_PATH`
 - `OCR_VERIFICATION_MODELS` (comma-separated)
+- `OCR_VERIFICATION_FALLBACK_MODELS` (comma-separated)
 - `OCR_VERIFICATION_TOTAL_MODELS`
 - `OCR_VERIFICATION_ATTEMPTS_PER_MODEL`
 - `OCR_VERIFICATION_PROMPT_VERSION`
@@ -210,6 +214,7 @@ Generate prompt reference markdown deterministically:
 Gemini OCR response contract:
 
 - Gemini must return JSON with exactly one key: `{"content":"..."}`
+- Every normal extraction and verification request sends `responseMimeType: application/json` and the schema `{"type":"object","properties":{"content":{"type":"string"}},"required":["content"],"additionalProperties":false}`.
 - Backend validates JSON shape and retries per existing retry policy on invalid responses.
 
 Each OCR extraction run writes resolved text prompts (without image clip bytes) to:
