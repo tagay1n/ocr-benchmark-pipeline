@@ -96,10 +96,9 @@ ocr_verification:
   models:
     - gemini-4-hydrogen
     - gemini-3.6-flash
-    - gemini-3.5-flash
+    - gemini-3.8-flash
     - gemini-3-flash-preview
   fallback_models:
-    - gemini-3.8-flash
     - gemini-3.7-flash
   total_models_per_region: 4
   attempts_per_model: 2
@@ -109,7 +108,7 @@ gemini_keys: []
 
 The ordered `supported_ocr_models` list in `config.yaml` is the source of truth for OCR models. Its first entry is used as the default for batch and manual OCR; `SUPPORTED_OCR_MODELS` can override the complete list.
 
-The ordered `ocr_verification.models` pool is independent from the default OCR model order. Verification initially selects up to `total_models_per_region - 1` distinct models from this primary pool and excludes the model stored on the canonical OCR output. The default total of four includes the original OCR model and three validators, with Gemini 4 Hydrogen first in the primary pool. `ocr_verification.fallback_models` is an ordered secondary pool (default: `gemini-3.8-flash`, then `gemini-3.7-flash`); duplicate entries across both pools and the source model are excluded. A replacement is added only when a validator slot becomes unavailable and the configured number of distinct successful validators has not been reached. Full evidence requires `total_models_per_region - 1` successful eligible validators, including replacements; fewer results are reduced evidence. Increment `prompt_version` when verification prompt behavior changes; stored outputs with an older prompt version are not reused.
+The ordered `ocr_verification.models` pool is independent from the default OCR model order. Verification initially selects up to `total_models_per_region - 1` distinct models from this primary pool and excludes the model stored on the canonical OCR output. The default total of four includes the original OCR model and three validators, with Gemini 4 Hydrogen first in the primary pool, followed by Gemini 3.6 Flash, Gemini 3.8 Flash, and Gemini 3 Flash Preview. Gemini 3.5 Flash is excluded from new verification requests; its stored outputs remain in the database but no longer count toward current evidence. `ocr_verification.fallback_models` is an ordered secondary pool (default: `gemini-3.7-flash`); duplicate entries across both pools and the source model are excluded. A replacement is added only when a validator slot becomes unavailable and the configured number of distinct successful validators has not been reached. Full evidence requires `total_models_per_region - 1` successful eligible validators, including replacements; fewer results are reduced evidence. Increment `prompt_version` when verification prompt behavior changes; stored outputs with an older prompt version are not reused.
 
 Starting or resuming verification checks all eligible unresolved crops, including crops that already have two validator results. Existing completed results are reused and only missing model checks are added. Crops explicitly resolved by keeping, applying, or editing text are excluded from new checks and replacements. Changing the model pool or validator count preserves these human decisions while the crop evidence and reviewed text are unchanged. Changing crop evidence or reviewed text invalidates the decision; an explicit per-crop recheck also clears it. Verification remains manually started.
 

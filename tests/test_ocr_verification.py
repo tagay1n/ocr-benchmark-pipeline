@@ -155,6 +155,10 @@ class OcrVerificationTests(unittest.TestCase):
         with patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}, clear=True):
             loaded = config.load_settings()
         self.assertEqual(loaded.ocr_verification_total_models, 4)
+        self.assertEqual(loaded.ocr_verification_models, (
+            "gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3-flash-preview",
+        ))
+        self.assertEqual(loaded.ocr_verification_fallback_models, ("gemini-3.7-flash",))
         self.assertEqual(Settings.__dataclass_fields__["ocr_verification_total_models"].default, 4)
         with patch.object(ocr_verification, "settings", loaded):
             for source in ("source-model", *loaded.ocr_verification_models):
@@ -162,6 +166,38 @@ class OcrVerificationTests(unittest.TestCase):
                 self.assertEqual(len(models), 3)
                 self.assertNotIn(source, models)
             self.assertEqual(ocr_verification.select_validator_models("source-model")[0], "gemini-4-hydrogen")
+
+    def test_promoting_completed_fallback_to_primary_reuses_its_result(self) -> None:
+        previous = replace(self.settings,
+                           ocr_verification_models=("gemini-3.6-flash", "gemini-3.5-flash"),
+                           ocr_verification_fallback_models=("gemini-3.8-flash", "gemini-3.7-flash"))
+        with patch.object(ocr_verification, "settings", previous):
+            run = ocr_verification.start_verification()
+            first, second = self._tasks()
+            with db.get_session() as session:
+                session.get(main.OcrVerificationTask, first.id).status = "succeeded"
+                session.get(main.OcrVerificationTask, first.id).content = "Reviewed text"
+                session.get(main.OcrVerificationTask, second.id).status = "unavailable"
+            ocr_verification._schedule_replacements(self.layout_id, run["run_id"])
+            fallback = self._tasks()[2]
+            self.assertEqual(fallback.model_name, "gemini-3.8-flash")
+            with db.get_session() as session:
+                task = session.get(main.OcrVerificationTask, fallback.id)
+                task.status = "succeeded"
+                task.content = "Reviewed text"
+            ocr_verification._finish_run(run["run_id"], stopped=False)
+        promoted = replace(self.settings, ocr_verification_models=config.DEFAULT_OCR_VERIFICATION_MODELS,
+                           ocr_verification_fallback_models=config.DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS,
+                           ocr_verification_total_models=4)
+        with patch.object(ocr_verification, "settings", promoted):
+            resumed = ocr_verification.start_verification()
+            self.assertEqual(resumed["total_tasks"], 1)
+            tasks = self._tasks()
+            self.assertEqual(tasks[-1].model_name, "gemini-4-hydrogen")
+            self.assertEqual(tasks[2].id, fallback.id)
+            self.assertEqual(tasks[2].status, "succeeded")
+            self.assertEqual(tasks[2].run_id, run["run_id"])
+            self.assertEqual(tasks[1].status, "unavailable")
 
     def test_third_validator_backfills_completed_unresolved_crop_without_repeating_outputs(self) -> None:
         self._complete_two_validators()

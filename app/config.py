@@ -16,11 +16,10 @@ DEFAULT_SUPPORTED_OCR_MODELS = (
 DEFAULT_OCR_VERIFICATION_MODELS = (
     "gemini-4-hydrogen",
     "gemini-3.6-flash",
-    "gemini-3.5-flash",
+    "gemini-3.8-flash",
     "gemini-3-flash-preview",
 )
 DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS = (
-    "gemini-3.8-flash",
     "gemini-3.7-flash",
 )
 
