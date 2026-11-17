@@ -115,11 +115,12 @@ def gemini_generate_content(
             }
         ],
         "generationConfig": {
-            "temperature": float(temperature),
             "responseMimeType": "application/json",
             "responseSchema": OCR_RESPONSE_SCHEMA,
         },
     }
+    if not resolved_model_name.startswith("gemini-4-"):
+        payload["generationConfig"]["temperature"] = float(temperature)
     request_payload = json.dumps(payload, ensure_ascii=True).encode("utf-8")
     request = urllib_request.Request(
         endpoint,

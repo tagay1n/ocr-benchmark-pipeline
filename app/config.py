@@ -14,6 +14,7 @@ DEFAULT_SUPPORTED_OCR_MODELS = (
     "gemini-3-flash-preview",
 )
 DEFAULT_OCR_VERIFICATION_MODELS = (
+    "gemini-4-hydrogen",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
     "gemini-3-flash-preview",
@@ -37,7 +38,7 @@ class Settings:
     supported_ocr_models: tuple[str, ...] = DEFAULT_SUPPORTED_OCR_MODELS
     ocr_verification_models: tuple[str, ...] = DEFAULT_OCR_VERIFICATION_MODELS
     ocr_verification_fallback_models: tuple[str, ...] = DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS
-    ocr_verification_total_models: int = 3
+    ocr_verification_total_models: int = 4
     ocr_verification_attempts_per_model: int = 2
     ocr_verification_prompt_version: int = 1
 
@@ -229,8 +230,8 @@ def load_settings() -> Settings:
         default=DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS,
     )
     verification_total_models_value = _parse_positive_int(
-        os.getenv("OCR_VERIFICATION_TOTAL_MODELS", verification_config.get("total_models_per_region", 3)),
-        default=3,
+        os.getenv("OCR_VERIFICATION_TOTAL_MODELS", verification_config.get("total_models_per_region", 4)),
+        default=4,
         minimum=2,
         maximum=10,
     )

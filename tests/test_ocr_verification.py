@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import ExitStack
 from dataclasses import replace
 import json
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -124,6 +125,112 @@ class OcrVerificationTests(unittest.TestCase):
         self.assertTrue(result["started"])
         self.assertEqual(result["total_tasks"], 2)
         self.assertEqual([task.model_name for task in self._tasks()], ["validator-a", "validator-b"])
+
+    def _complete_two_validators(self) -> None:
+        run = ocr_verification.start_verification()
+        with db.get_session() as session:
+            for task in session.scalars(select(main.OcrVerificationTask)):
+                task.status = "succeeded"
+                task.content = "Reviewed text"
+        ocr_verification._finish_run(run["run_id"], stopped=False)
+
+    def _three_validator_settings(self):
+        return replace(
+            self.settings,
+            ocr_verification_models=("gemini-4-hydrogen", "validator-a", "validator-b"),
+            ocr_verification_total_models=4,
+        )
+
+    def test_defaults_select_three_validators_even_when_source_is_in_pool(self) -> None:
+        with patch.dict(os.environ, {"PROJECT_ROOT": str(self.root)}, clear=True):
+            loaded = config.load_settings()
+        self.assertEqual(loaded.ocr_verification_total_models, 4)
+        self.assertEqual(Settings.__dataclass_fields__["ocr_verification_total_models"].default, 4)
+        with patch.object(ocr_verification, "settings", loaded):
+            for source in ("source-model", *loaded.ocr_verification_models):
+                models = ocr_verification.select_validator_models(source)
+                self.assertEqual(len(models), 3)
+                self.assertNotIn(source, models)
+            self.assertEqual(ocr_verification.select_validator_models("source-model")[0], "gemini-4-hydrogen")
+
+    def test_third_validator_backfills_completed_unresolved_crop_without_repeating_outputs(self) -> None:
+        self._complete_two_validators()
+        original = [(task.id, task.content, task.run_id) for task in self._tasks()]
+        with patch.object(ocr_verification, "settings", self._three_validator_settings()):
+            finding = ocr_verification.refresh_finding(self.layout_id)
+            self.assertEqual(finding["state"], "agreed_reduced")
+            self.assertEqual(finding["required_count"], 3)
+            resumed = ocr_verification.start_verification()
+            self.assertEqual(resumed["total_tasks"], 1)
+            tasks = self._tasks()
+            self.assertEqual([(task.id, task.content, task.run_id) for task in tasks[:2]], original)
+            self.assertEqual(tasks[2].model_name, "gemini-4-hydrogen")
+            with patch.object(ocr_verification, "gemini_generate_content", return_value="Reviewed text") as client:
+                self.assertEqual(ocr_verification._execute_task(tasks[2].id), "succeeded")
+            self.assertEqual(client.call_count, 1)
+            finding = ocr_verification.refresh_finding(self.layout_id)
+            self.assertEqual(finding["state"], "agreed_full")
+            self.assertEqual(finding["responded_count"], 3)
+
+    def test_manually_kept_crop_is_not_backfilled_after_model_pool_changes(self) -> None:
+        self._complete_two_validators()
+        ocr_verification.resolve_finding(self.layout_id, action="keep")
+        with patch.object(ocr_verification, "settings", self._three_validator_settings()):
+            ocr_verification.recalculate_findings()
+            self.assertTrue(ocr_verification.get_finding_detail(self.layout_id)["resolved"])
+            resumed = ocr_verification.start_verification()
+            self.assertEqual(resumed["total_tasks"], 0)
+            self.assertEqual(len(self._tasks()), 2)
+
+    def test_manually_edited_crop_is_not_backfilled_but_explicit_recheck_allows_it(self) -> None:
+        self._complete_two_validators()
+        ocr_verification.resolve_finding(self.layout_id, action="apply", content="My correction")
+        with patch.object(ocr_verification, "settings", self._three_validator_settings()):
+            resumed = ocr_verification.start_verification()
+            self.assertEqual(resumed["total_tasks"], 0)
+            self.assertEqual(len(self._tasks()), 2)
+            self.assertTrue(ocr_verification.refresh_finding(self.layout_id)["resolved"])
+            ocr_verification.recheck_layout(self.layout_id)
+            self.assertEqual(ocr_verification.start_verification()["total_tasks"], 3)
+
+    def test_third_validator_uses_fallback_when_unavailable(self) -> None:
+        self._complete_two_validators()
+        configured = replace(self._three_validator_settings(), ocr_verification_fallback_models=("fallback-a",))
+        with patch.object(ocr_verification, "settings", configured):
+            ocr_verification.start_verification()
+            third = self._tasks()[2]
+            with patch.object(ocr_verification, "gemini_generate_content", side_effect=RuntimeError("HTTP 404 model not found")):
+                ocr_verification._execute_task(third.id)
+            fallback = self._tasks()[3]
+            self.assertEqual(fallback.model_name, "fallback-a")
+            with patch.object(ocr_verification, "gemini_generate_content", return_value="Different text"):
+                ocr_verification._execute_task(fallback.id)
+            finding = ocr_verification.get_finding_detail(self.layout_id)
+            self.assertEqual(finding["state"], "disagreement_full")
+            self.assertEqual(finding["responded_count"], 3)
+            self.assertIn("fallback-a", {task["model_name"] for task in finding["tasks"]})
+
+    def test_resolved_crop_with_unavailable_validator_does_not_schedule_replacements(self) -> None:
+        self._complete_two_validators()
+        with db.get_session() as session:
+            task = session.get(main.OcrVerificationTask, self._tasks()[1].id)
+            task.status = "unavailable"
+            task.content = None
+        ocr_verification.resolve_finding(self.layout_id, action="keep")
+        configured = replace(self._three_validator_settings(), ocr_verification_fallback_models=("fallback-a",))
+        with patch.object(ocr_verification, "settings", configured):
+            self.assertEqual(ocr_verification.start_verification()["total_tasks"], 0)
+            self.assertEqual(len(self._tasks()), 2)
+            self.assertTrue(ocr_verification.refresh_finding(self.layout_id)["resolved"])
+
+    def test_changed_crop_evidence_invalidates_resolution_and_gets_three_checks(self) -> None:
+        self._complete_two_validators()
+        ocr_verification.resolve_finding(self.layout_id, action="keep")
+        with db.get_session() as session:
+            session.get(main.Layout, self.layout_id).x1 = 0.2
+        with patch.object(ocr_verification, "settings", self._three_validator_settings()):
+            self.assertEqual(ocr_verification.start_verification()["total_tasks"], 3)
+            self.assertFalse(ocr_verification.refresh_finding(self.layout_id)["resolved"])
 
     def test_primary_pool_is_first_and_fallback_is_ordered_deduplicated(self) -> None:
         configured = replace(

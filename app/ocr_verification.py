@@ -222,6 +222,15 @@ def _task_fingerprint(base_fingerprint: str, model_name: str) -> str:
     return _sha256_payload({"base": base_fingerprint, "model": model_name})
 
 
+def _has_current_resolution(finding: OcrVerificationFinding | None, context: dict[str, Any]) -> bool:
+    return (
+        finding is not None
+        and bool(finding.resolved)
+        and str(finding.evidence_fingerprint) == str(context["base_fingerprint"])
+        and str(finding.baseline_content) == str(context["baseline_content"])
+    )
+
+
 def _is_schema_rejected_task(task: OcrVerificationTask) -> bool:
     """Recognize only the historical Gemini schema field rejection we fixed."""
     message = str(task.error_message or "").lower()
@@ -304,7 +313,15 @@ def _upsert_current_tasks(
             (int(task.layout_id), str(task.model_name), str(task.evidence_fingerprint)): task
             for task in existing_tasks
         }
+        findings = {
+            int(finding.layout_id): finding
+            for finding in session.scalars(
+                select(OcrVerificationFinding).where(OcrVerificationFinding.layout_id.in_(layout_ids))
+            )
+        } if layout_ids else {}
         for page, layout, context, model_name, fingerprint in prepared:
+            if _has_current_resolution(findings.get(int(layout.id)), context):
+                continue
             task = existing_by_evidence.get((int(layout.id), model_name, fingerprint))
             if task is None:
                 task = OcrVerificationTask(
@@ -362,6 +379,8 @@ def _schedule_replacements(
         context = _verification_context(
             page, layout, output, page_layout_context=page_layout_context
         )
+        if _has_current_resolution(session.get(OcrVerificationFinding, int(layout_id)), context):
+            return 0
         candidates = tuple(context["validator_candidates"])
         fingerprints = {
             _task_fingerprint(str(context["base_fingerprint"]), model) for model in candidates
@@ -511,9 +530,9 @@ def refresh_finding(
         groups = _comparison_groups(str(output.content), str(output.model_name), tasks)
         if active:
             state = "waiting"
-        elif responded >= 2:
+        elif responded >= max(1, int(settings.ocr_verification_total_models) - 1):
             state = "agreed_full" if len(groups) == 1 else "disagreement_full"
-        elif responded == 1:
+        elif responded > 0:
             state = "agreed_reduced" if len(groups) == 1 else "disagreement_reduced"
         elif not tasks and context["validator_models"]:
             state = (
@@ -561,7 +580,9 @@ def refresh_finding(
             )
             session.add(finding)
         else:
-            keep_resolution = finding.comparison_fingerprint == comparison_fingerprint and bool(finding.resolved)
+            # A model-pool change must not reopen a human decision about the
+            # same crop and reviewed text. Explicit recheck clears resolution.
+            keep_resolution = _has_current_resolution(finding, context)
             finding.page_id = int(page.id)
             finding.evidence_fingerprint = str(context["base_fingerprint"])
             finding.comparison_fingerprint = comparison_fingerprint
@@ -783,7 +804,7 @@ def get_finding_detail(layout_id: int) -> dict[str, Any]:
         if row is None:
             raise ValueError("Verification finding not found.")
         finding, page, layout = row
-        current_models = set(select_validator_models(str(finding.source_model)))
+        current_models = set(validator_candidates(str(finding.source_model)))
         expected_fingerprints = {
             _task_fingerprint(str(finding.evidence_fingerprint), model_name)
             for model_name in current_models
@@ -1333,7 +1354,8 @@ def _prepare_run(run_id: int) -> dict[str, Any]:
         page_contexts=page_contexts,
     )
     # Resume also repairs persisted terminal/over-deferred work before the
-    # worker claims anything. This never adds work once two successes exist.
+    # worker claims anything. Resolved crops and those with enough successes
+    # do not receive replacement work.
     for layout_id in sorted(layout_ids):
         total_tasks += _schedule_replacements(
             layout_id,
