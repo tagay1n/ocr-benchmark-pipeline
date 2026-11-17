@@ -1192,7 +1192,37 @@ def _active_run_id() -> int | None:
         return None if row is None else int(row)
 
 
+def _retire_removed_model_tasks(run_id: int | None = None) -> int:
+    """Retire queued work for removed models without discarding completed evidence."""
+    allowed_models = _deduplicated_models(verification_models() + fallback_models())
+    now = _utc_now()
+    with get_session() as session:
+        query = select(OcrVerificationTask).where(
+            OcrVerificationTask.status.in_(tuple(_ACTIVE_TASK_STATUSES)),
+            OcrVerificationTask.model_name.not_in(allowed_models),
+        )
+        if run_id is not None:
+            query = query.where(OcrVerificationTask.run_id == int(run_id))
+        tasks = session.scalars(query).all()
+        counts_by_run: dict[int, int] = {}
+        for task in tasks:
+            task.status = "unavailable"
+            task.next_retry_at = None
+            task.error_message = "Model removed from verification configuration."
+            task.finished_at = now
+            task.updated_at = now
+            if task.run_id is not None:
+                counts_by_run[int(task.run_id)] = counts_by_run.get(int(task.run_id), 0) + 1
+        for task_run_id, count in counts_by_run.items():
+            run = session.get(OcrVerificationRun, task_run_id)
+            if run is not None:
+                run.completed_tasks = min(int(run.total_tasks), int(run.completed_tasks) + count)
+                run.updated_at = now
+        return len(tasks)
+
+
 def _claim_ready_task(run_id: int) -> int | None:
+    _retire_removed_model_tasks(run_id)
     now = _utc_now()
     with get_session() as session:
         run = session.get(OcrVerificationRun, int(run_id))
@@ -1343,6 +1373,7 @@ def _ensure_worker(run_id: int) -> None:
 
 
 def _prepare_run(run_id: int) -> dict[str, Any]:
+    _retire_removed_model_tasks()
     eligible_rows = _eligible_rows()
     page_contexts = _page_layout_contexts(eligible_rows)
     page_id_by_layout_id = {

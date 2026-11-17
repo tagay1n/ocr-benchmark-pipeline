@@ -19,9 +19,7 @@ DEFAULT_OCR_VERIFICATION_MODELS = (
     "gemini-3.8-flash",
     "gemini-3-flash-preview",
 )
-DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS = (
-    "gemini-3.7-flash",
-)
+DEFAULT_OCR_VERIFICATION_FALLBACK_MODELS: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

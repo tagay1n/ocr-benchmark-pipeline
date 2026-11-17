@@ -158,7 +158,7 @@ class OcrVerificationTests(unittest.TestCase):
         self.assertEqual(loaded.ocr_verification_models, (
             "gemini-4-hydrogen", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-3-flash-preview",
         ))
-        self.assertEqual(loaded.ocr_verification_fallback_models, ("gemini-3.7-flash",))
+        self.assertEqual(loaded.ocr_verification_fallback_models, ())
         self.assertEqual(Settings.__dataclass_fields__["ocr_verification_total_models"].default, 4)
         with patch.object(ocr_verification, "settings", loaded):
             for source in ("source-model", *loaded.ocr_verification_models):
@@ -630,6 +630,62 @@ class OcrVerificationTests(unittest.TestCase):
             session.get(main.OcrVerificationTask, fresh.id).status = "pending"
             session.get(main.OcrVerificationTask, fresh.id).attempts = 1
         self.assertIsNotNone(ocr_verification._claim_ready_task(run_id))
+
+    def test_scheduler_retires_removed_model_without_calling_it_or_delaying_available_work(self) -> None:
+        old = replace(self.settings, ocr_verification_models=("gemini-3.7-flash", "validator-a"),
+                      ocr_verification_fallback_models=())
+        with patch.object(ocr_verification, "settings", old):
+            run_id = ocr_verification.start_verification()["run_id"]
+        retired, available = self._tasks()
+        current = replace(self.settings, ocr_verification_models=("validator-a", "validator-b"),
+                          ocr_verification_fallback_models=())
+        with patch.object(ocr_verification, "settings", current):
+            self.assertEqual(ocr_verification._claim_ready_task(run_id), available.id)
+            with db.get_session() as session:
+                task = session.get(main.OcrVerificationTask, retired.id)
+                self.assertEqual(task.status, "unavailable")
+                self.assertEqual(task.attempts, 0)
+                self.assertIsNone(task.next_retry_at)
+                self.assertIn("configuration", task.error_message)
+                session.get(main.OcrVerificationTask, available.id).status = "succeeded"
+            self.assertIsNone(ocr_verification._claim_ready_task(run_id))
+            self.assertFalse(ocr_verification._has_active_tasks(run_id))
+
+    def test_resume_retires_removed_fallback_preserving_results_and_human_resolution(self) -> None:
+        old = replace(self.settings, ocr_verification_models=("validator-a",),
+                      ocr_verification_fallback_models=("gemini-3.7-flash",))
+        with patch.object(ocr_verification, "settings", old):
+            run_id = ocr_verification.start_verification()["run_id"]
+            primary = self._tasks()[0]
+            with db.get_session() as session:
+                session.get(main.OcrVerificationTask, primary.id).status = "unavailable"
+            ocr_verification._schedule_replacements(self.layout_id, run_id)
+            ocr_verification.request_verification_stop()
+            ocr_verification.resolve_finding(self.layout_id, action="keep")
+        retired = self._tasks()[1]
+        current = replace(self.settings, ocr_verification_fallback_models=())
+        with patch.object(ocr_verification, "settings", current):
+            result = ocr_verification.start_verification()
+            self.assertEqual(result["total_tasks"], 0)
+            self.assertTrue(ocr_verification.get_finding_detail(self.layout_id)["resolved"])
+            self.assertEqual(len(self._tasks()), 2)
+            with db.get_session() as session:
+                self.assertEqual(session.get(main.OcrVerificationTask, retired.id).status, "unavailable")
+
+    def test_retiring_model_keeps_its_completed_result_and_does_not_requeue_on_resume(self) -> None:
+        old = replace(self.settings, ocr_verification_models=("gemini-3.7-flash", "validator-a"),
+                      ocr_verification_fallback_models=())
+        with patch.object(ocr_verification, "settings", old):
+            self._complete_two_validators()
+        completed = self._tasks()[0]
+        current = replace(self.settings, ocr_verification_fallback_models=())
+        with patch.object(ocr_verification, "settings", current):
+            result = ocr_verification.start_verification()
+            self.assertEqual(result["total_tasks"], 1)
+            with db.get_session() as session:
+                task = session.get(main.OcrVerificationTask, completed.id)
+                self.assertEqual(task.status, "succeeded")
+                self.assertEqual(task.content, "Reviewed text")
 
     def test_scheduler_orders_retries_by_failure_count_then_age_then_id(self) -> None:
         run_id = int(ocr_verification.start_verification()["run_id"])
