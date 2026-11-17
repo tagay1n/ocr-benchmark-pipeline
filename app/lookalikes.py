@@ -7,6 +7,11 @@ import unicodedata
 FENCE_RE = re.compile(r"^(?P<fence>`{3,}|~{3,})")
 CYRILLIC_RE = re.compile(r"[\u0400-\u04FF]")
 WORD_RE = re.compile(r"\w+", flags=re.UNICODE)
+MARKDOWN_LITERAL_RE = re.compile(
+    r"<[^>]+>|https?://[^\s<>]+|!?\[[^\]\n]*\](?:\([^\)\n]*\)|\[[^\]\n]*\])?"
+    r"|\$\$.*?\$\$|(?<!\$)\$(?!\$)[^$\n]*\$|\\\(.*?\\\)|\\\[.*?\\\]",
+    re.DOTALL,
+)
 
 LOOKALIKE_TO_TATAR: dict[str, str] = {}
 for _chars, _target in (
@@ -39,6 +44,36 @@ for _chars, _target in (
 
 def normalize_text_nfc(text: str) -> str:
     return unicodedata.normalize("NFC", str(text or ""))
+
+
+def correct_ocr_latin_lookalikes(text: str) -> str:
+    """Correct ASCII lookalikes in model-produced Cyrillic words, never reviewer edits."""
+    normalized = normalize_text_nfc(text)
+    lines = normalized.splitlines(keepends=True)
+    literal_ranges = [match.span() for match in MARKDOWN_LITERAL_RE.finditer(normalized)]
+    line_offsets = []
+    offset = 0
+    for line in lines:
+        line_offsets.append(offset)
+        offset += len(line)
+    warnings = detect_suspicious_lookalikes(normalized, max_warnings=len(normalized) + 1)
+    by_line: dict[int, list[dict[str, Any]]] = {}
+    for warning in warnings:
+        if CYRILLIC_RE.search(warning["token"]):
+            by_line.setdefault(warning["line_index"], []).append(warning)
+    for index, line_warnings in by_line.items():
+        line = lines[index]
+        for warning in reversed(line_warnings):
+            start, end = warning["token_start"], warning["token_end"]
+            global_start, global_end = line_offsets[index] + start, line_offsets[index] + end
+            if any(global_start < right and global_end > left for left, right in literal_ranges):
+                continue
+            token = warning["token"]
+            corrected = ''.join(LOOKALIKE_TO_TATAR.get(char, char)
+                                if char.isascii() and char.isalpha() else char for char in token)
+            line = line[:start] + corrected + line[end:]
+        lines[index] = line
+    return ''.join(lines)
 
 
 def detect_suspicious_lookalikes(

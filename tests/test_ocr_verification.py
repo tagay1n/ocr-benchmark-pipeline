@@ -20,6 +20,16 @@ from app.config import DEFAULT_EXTENSIONS, Settings
 
 
 class OcrVerificationTests(unittest.TestCase):
+    def test_validator_response_correction_does_not_change_canonical_review(self) -> None:
+        with db.get_session() as session:
+            output = session.scalar(select(main.OcrOutput).where(main.OcrOutput.layout_id == self.layout_id))
+            output.content = "Бу сeр."
+        self.assertEqual(
+            ocr_verification._normalize_model_response(self.page_id, self.layout_id, "Бу сeр һәм шәhәр."),
+            "Бу сер һәм шәһәр.",
+        )
+        self.assertEqual(main.page_ocr_outputs(self.page_id)["outputs"][0]["content"], "Бу сeр.")
+
     def setUp(self) -> None:
         self.temp_dir = TemporaryDirectory()
         self.root = Path(self.temp_dir.name)

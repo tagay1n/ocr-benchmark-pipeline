@@ -13,7 +13,7 @@ from .config import settings
 from .db import get_session
 from .layout_classes import normalize_class_name
 from .layout_orientation import is_effective_vertical
-from .lookalikes import detect_suspicious_lookalikes, normalize_text_nfc
+from .lookalikes import correct_ocr_latin_lookalikes, detect_suspicious_lookalikes, normalize_text_nfc
 from .models import Layout, OcrOutput, Page
 from .ocr_content_postprocess import (
     SECTION_HEADER_LEVEL_H3,
@@ -473,6 +473,8 @@ def extract_ocr_for_page(
         elif class_name == "formula":
             response_text = _normalize_formula_latex_content(response_text)
         response_text = _normalize_ocr_content(response_text, output_format=output_format)
+        if output_format == "markdown":
+            response_text = correct_ocr_latin_lookalikes(response_text)
         lookalike_warnings = (
             detect_suspicious_lookalikes(response_text, markdown_code_aware=True)
             if output_format == "markdown"

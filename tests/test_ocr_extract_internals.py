@@ -20,6 +20,7 @@ from app import (
     ocr_extract,
     ocr_gemini_client,
     ocr_key_store,
+    ocr_review,
     runtime_options,
 )
 from app.config import DEFAULT_EXTENSIONS, Settings
@@ -767,6 +768,29 @@ class OcrExtractInternalsTests(unittest.TestCase):
         outputs = main.page_ocr_outputs(page_id)["outputs"]
         by_layout = {int(output["layout_id"]): output for output in outputs}
         self.assertEqual(str(by_layout[int(layout["id"])]["content"]), "«Әни» һәм “әти”, $f′(x)$")
+
+    def test_extraction_corrects_latin_but_review_can_restore_it(self) -> None:
+        self._write_image("ocr/latin-correction.png")
+        main.scan_images()
+        page_id = self._single_page_id()
+        layout = main.create_page_layout(page_id, main.CreateLayoutRequest(
+            class_name="text", reading_order=1,
+            bbox=main.BBoxPayload(x1=0.1, y1=0.1, x2=0.9, y2=0.3),
+        ))["layout"]
+        original = "Бу сeр һәм шәhәр, anda."
+        with patch.object(ocr_extract, "_crop_layout_png_bytes", return_value=b"png"), patch.object(
+            ocr_extract, "_gemini_generate_content", return_value=original
+        ):
+            ocr_extract.extract_ocr_for_page(page_id)
+        output = main.page_ocr_outputs(page_id)["outputs"][0]
+        self.assertEqual(output["content"], "Бу сер һәм шәһәр, anda.")
+        main.patch_ocr_output(int(layout["id"]), main.UpdateOcrOutputRequest(content=original))
+        restored = main.page_ocr_outputs(page_id)["outputs"][0]
+        self.assertEqual(restored["content"], original)
+        self.assertEqual(restored["extraction_status"], "manual")
+        self.assertEqual(restored["lookalike_warning_count"], 2)
+        ocr_review.mark_ocr_reviewed(page_id)
+        self.assertEqual(main.page_ocr_outputs(page_id)["outputs"][0]["content"], original)
 
     def test_extract_ocr_for_page_normalizes_formula_content(self) -> None:
         self._write_image("ocr/formula-normalize.png")

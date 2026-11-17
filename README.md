@@ -284,6 +284,11 @@ This section is a living log of OCR normalization decisions for dataset consiste
   - Punctuation or casing anomalies are retained when they are part of the source.
   - Corrections are limited to clear OCR character misreads, without changing wording/style.
 
+- Latin lookalikes in model OCR responses:
+  - Newly extracted Markdown text, including validator responses, replaces recognized ASCII Latin lookalikes inside words containing Cyrillic letters (`сeр` → `сер`, `шәhәр` → `шәһәр`).
+  - Whole Latin words, standalone Latin letters, accented Latin letters, code, links, HTML attributes, and math are left as written. Cyrillic spelling, punctuation, and printed hyphens are not corrected.
+  - This correction runs only on model responses. Reviewer drafts and confirmed edits preserve the chosen Latin spelling; lookalike warnings remain advisory. Existing stored outputs are not rewritten on load.
+
 - Quote mark fidelity policy:
   - Preserve quotation marks, apostrophes, primes, modifier letters, accents, and guillemets exactly as printed.
   - Examples: `‘text’`, `ʼtextʼ`, `′text′`, `“text”`, `„text“`, `‹text›`, and `«text»` remain unchanged.

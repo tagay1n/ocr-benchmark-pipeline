@@ -19,6 +19,7 @@ from .config import settings
 from .db import get_session
 from .layout_classes import MARKDOWN_LAYOUT_CLASSES, normalize_class_name
 from .layout_orientation import is_effective_vertical
+from .lookalikes import correct_ocr_latin_lookalikes
 from .models import (
     Layout,
     OcrOutput,
@@ -874,7 +875,7 @@ def _normalize_model_response(page_id: int, layout_id: int, raw_content: str) ->
             indent_level=levels.get(int(layout_id), 0),
             fallback_marker="-",
         )
-    return normalize_ocr_content(content, output_format="markdown")
+    return correct_ocr_latin_lookalikes(normalize_ocr_content(content, output_format="markdown"))
 
 
 def _task_inputs(task_id: int) -> tuple[OcrVerificationTask, Page, Layout, str, bytes]:
